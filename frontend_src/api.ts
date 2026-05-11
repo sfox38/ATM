@@ -1,4 +1,7 @@
 import type {
+  ApprovalListParams,
+  ApprovalListResponse,
+  ApprovalRecord,
   AuditEntry,
   AuditQueryParams,
   ArchivedTokenRecord,
@@ -122,6 +125,22 @@ export const api = {
     req<GlobalSettings>("PATCH", "/settings", body),
 
   wipe: () => req<void>("DELETE", "/wipe", { confirm: "WIPE" }),
+
+  listApprovals: (params?: ApprovalListParams) => {
+    const p = new URLSearchParams();
+    if (params?.status) p.set("status", params.status);
+    if (params?.token_id) p.set("token_id", params.token_id);
+    if (params?.limit !== undefined) p.set("limit", String(params.limit));
+    if (params?.offset !== undefined) p.set("offset", String(params.offset));
+    const q = p.toString();
+    return req<ApprovalListResponse>("GET", `/approvals${q ? `?${q}` : ""}`);
+  },
+  getApproval: (id: string) => req<ApprovalRecord>("GET", `/approvals/${encodeURIComponent(id)}`),
+  approveApproval: (id: string, body: { note?: string } = {}) =>
+    req<ApprovalRecord>("POST", `/approvals/${encodeURIComponent(id)}/approve`, body),
+  rejectApproval: (id: string, body: { reason?: string } = {}) =>
+    req<ApprovalRecord>("POST", `/approvals/${encodeURIComponent(id)}/reject`, body),
+  cancelApproval: (id: string) => req<void>("DELETE", `/approvals/${encodeURIComponent(id)}`),
 };
 
 export { ApiError };

@@ -5,7 +5,8 @@ import { api } from "../api";
 import { Loading, ErrorMsg } from "../index";
 import { formatDateTime, tokenStatus, copyToClipboard } from "../utils";
 import { Modal } from "../components/Modal";
-import { CapabilityFlags } from "../components/CapabilityFlags";
+import { CapabilityMatrix } from "../components/CapabilityMatrix";
+import { PersonaPicker } from "../components/PersonaPicker";
 import { RateLimitConfig } from "../components/RateLimitConfig";
 import { PassThroughNotice } from "../components/PassThroughNotice";
 import { EntityTree } from "../components/EntityTree";
@@ -342,8 +343,12 @@ export function TokenDetailView({ tokenId, onBack, onRefresh }: Props) {
         <div className="two-col">
           <div>
             <div className="card">
-              <div className="card-header">Capability Flags</div>
-              <CapabilityFlags token={token} onUpdate={setToken} />
+              <div className="card-header">Persona</div>
+              <PersonaPicker token={token} onUpdate={setToken} />
+            </div>
+            <div className="card">
+              <div className="card-header">Capabilities</div>
+              <CapabilityMatrix token={token} onUpdate={setToken} />
             </div>
             <div className="card">
               <div className="card-header">Rate Limiting</div>

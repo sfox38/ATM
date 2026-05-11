@@ -5,10 +5,11 @@ import { TokenListView } from "./views/TokenList";
 import { TokenDetailView } from "./views/TokenDetail";
 import { AuditView } from "./views/AuditView";
 import { SettingsView } from "./views/SettingsView";
+import { ApprovalsView } from "./views/ApprovalsView";
 import { api, setHass } from "./api";
 import PANEL_CSS from "./atm-panel.css?inline";
 
-type Tab = "tokens" | "audit" | "settings";
+type Tab = "tokens" | "approvals" | "audit" | "settings";
 type Theme = "light" | "dark" | "auto";
 
 export { HIGH_RISK_DOMAINS } from "./utils";
@@ -44,7 +45,7 @@ type View =
   | { name: "list" }
   | { name: "detail"; tokenId: string };
 
-const TAB_LABELS: Record<Tab, string> = { tokens: "Tokens", audit: "Audit Logs", settings: "Settings" };
+const TAB_LABELS: Record<Tab, string> = { tokens: "Tokens", approvals: "Approvals", audit: "Audit Logs", settings: "Settings" };
 
 function ATMApp({ hass, narrow, theme, onThemeChange }: { hass: unknown; narrow: boolean; theme: Theme; onThemeChange: (t: Theme) => void }) {
   const [tab, setTab] = useState<Tab>("tokens");
@@ -54,6 +55,7 @@ function ATMApp({ hass, narrow, theme, onThemeChange }: { hass: unknown; narrow:
   const [loadingTokens, setLoadingTokens] = useState(true);
   const [tokensError, setTokensError] = useState<string | null>(null);
   const [showCreate, setShowCreate] = useState(false);
+  const [pendingCount, setPendingCount] = useState<number>(0);
   const menuRef = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
@@ -81,6 +83,21 @@ function ATMApp({ hass, narrow, theme, onThemeChange }: { hass: unknown; narrow:
     api.getSettings().then(setSettings).catch(() => null);
   }, [refreshTokens]);
 
+  const refreshPendingCount = useCallback(async () => {
+    try {
+      const resp = await api.listApprovals({ status: "pending", limit: 1 });
+      setPendingCount(resp.total);
+    } catch {
+      // Silent failure: badge just won't update. Don't surface in UI.
+    }
+  }, []);
+
+  useEffect(() => {
+    refreshPendingCount();
+    const id = setInterval(refreshPendingCount, 30_000);
+    return () => clearInterval(id);
+  }, [refreshPendingCount]);
+
   const openDetail = useCallback((id: string) => {
     setView({ name: "detail", tokenId: id });
     setTab("tokens");
@@ -97,7 +114,7 @@ function ATMApp({ hass, narrow, theme, onThemeChange }: { hass: unknown; narrow:
     if (t === "tokens") refreshTokens();
   }, [refreshTokens]);
 
-  const TABS: Tab[] = ["tokens", "audit", "settings"];
+  const TABS: Tab[] = ["tokens", "approvals", "audit", "settings"];
 
   function handleTabKeyDown(e: React.KeyboardEvent) {
     const idx = TABS.indexOf(tab);
@@ -132,8 +149,14 @@ function ATMApp({ hass, narrow, theme, onThemeChange }: { hass: unknown; narrow:
               tabIndex={tab === t ? 0 : -1}
               className={`atm-tab${tab === t ? " active" : ""}`}
               onClick={() => onTabClick(t)}
+              aria-label={t === "approvals" && pendingCount > 0
+                ? `Approvals (${pendingCount} pending)`
+                : undefined}
             >
               {TAB_LABELS[t]}
+              {t === "approvals" && pendingCount > 0 && (
+                <span className="atm-tab-badge" aria-hidden="true">{pendingCount}</span>
+              )}
             </button>
           ))}
         </div>
@@ -172,6 +195,7 @@ function ATMApp({ hass, narrow, theme, onThemeChange }: { hass: unknown; narrow:
             onRefresh={refreshTokens}
           />
         )}
+        {tab === "approvals" && <ApprovalsView onCountChange={refreshPendingCount} />}
         {tab === "audit" && <AuditView tokens={tokens} />}
         {tab === "settings" && (
           <SettingsView

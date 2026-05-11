@@ -35,6 +35,9 @@ from .const import (
     ANNOUNCE_BIT,
     ATM_VERSION,
     BLOCKED_DOMAINS,
+    CAP_ALLOW,
+    CAP_CONFIRM,
+    CAP_DENY,
     DOMAIN,
     DUAL_GATE_SERVICES,
     HIGH_RISK_DOMAINS,
@@ -42,7 +45,6 @@ from .const import (
     MAX_HISTORY_RANGE_DAYS,
     MAX_LOG_ENTRIES,
     MAX_SSE_CONNECTIONS_PER_TOKEN,
-    PASS_THROUGH_EXEMPT_FLAGS,
     PHYSICAL_GATE_DOMAINS,
     PHYSICAL_GATE_SERVICES,
     PROXY_TIMEOUT_SECONDS,
@@ -58,6 +60,9 @@ from .helpers import (
     build_error_response as _error,
     build_permitted_states as _build_permitted_states,
     collect_log_entries as _collect_log_entries,
+    effective_cap,
+    effective_caps,
+    evaluate_capability,
     fire_rate_limit_events as _fire_rate_limit_events,
     get_authenticated_token as _get_authenticated_token,
     get_client_ip as _get_client_ip,
@@ -251,19 +256,34 @@ _ENTITY_TOOL_DEFS: list[dict] = [
             "required": ["domain", "service"],
         },
     },
+    {
+        "name": "get_approval_status",
+        "description": (
+            "Check the status of a pending approval that was created by an earlier tool call. "
+            "Returns status (pending, approved, rejected, expired, cancelled), and the result if approved. "
+            "Tokens can only fetch approvals they themselves created."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "approval_id": {"type": "string"},
+            },
+            "required": ["approval_id"],
+        },
+    },
 ]
 
 _SYSTEM_TOOL_DEFS: list[dict] = [
     {
         "name": "get_config",
         "description": "Get the Home Assistant configuration.",
-        "flag": "allow_config_read",
+        "cap": "cap_config_read",
         "inputSchema": {"type": "object", "properties": {}},
     },
     {
         "name": "render_template",
         "description": "Render a Jinja2 template in Home Assistant.",
-        "flag": "allow_template_render",
+        "cap": "cap_template_render",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -285,7 +305,7 @@ _SYSTEM_TOOL_DEFS: list[dict] = [
             "'condition' (list of condition objects, optional), "
             "'mode' ('single'|'restart'|'queued'|'parallel', default 'single', optional)."
         ),
-        "flag": "allow_automation_write",
+        "cap": "cap_automation_write",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -302,10 +322,10 @@ _SYSTEM_TOOL_DEFS: list[dict] = [
             "The automation_id is preserved - do not include it in 'config'. "
             "Returns the updated configuration. "
             "The config is validated by HA before saving - invalid configs are rejected with an error. "
-            "Use get_config (requires allow_config_read) to list all existing automations and their IDs. "
+            "Use get_config (requires cap_config_read) to list all existing automations and their IDs. "
             "ATM-created automations have IDs prefixed with 'atm_'."
         ),
-        "flag": "allow_automation_write",
+        "cap": "cap_automation_write",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -319,10 +339,10 @@ _SYSTEM_TOOL_DEFS: list[dict] = [
         "name": "delete_automation",
         "description": (
             "Permanently delete a Home Assistant automation from automations.yaml. "
-            "Use get_config (requires allow_config_read) to list all existing automations and their IDs. "
+            "Use get_config (requires cap_config_read) to list all existing automations and their IDs. "
             "ATM-created automations have IDs prefixed with 'atm_'."
         ),
-        "flag": "allow_automation_write",
+        "cap": "cap_automation_write",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -344,7 +364,7 @@ _SYSTEM_TOOL_DEFS: list[dict] = [
             "'variables' (dict of script-level variables, optional), "
             "'fields' (dict of input field definitions for callable scripts, optional)."
         ),
-        "flag": "allow_script_write",
+        "cap": "cap_script_write",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -361,9 +381,9 @@ _SYSTEM_TOOL_DEFS: list[dict] = [
             "The 'config' object entirely replaces the current script configuration. "
             "Returns the updated configuration. "
             "The config is validated by HA before saving - invalid configs are rejected with an error. "
-            "Use get_config (requires allow_config_read) to list all existing scripts and their IDs."
+            "Use get_config (requires cap_config_read) to list all existing scripts and their IDs."
         ),
-        "flag": "allow_script_write",
+        "cap": "cap_script_write",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -377,9 +397,9 @@ _SYSTEM_TOOL_DEFS: list[dict] = [
         "name": "delete_script",
         "description": (
             "Permanently delete a Home Assistant script from scripts.yaml. "
-            "Use get_config (requires allow_config_read) to list all existing scripts and their IDs."
+            "Use get_config (requires cap_config_read) to list all existing scripts and their IDs."
         ),
-        "flag": "allow_script_write",
+        "cap": "cap_script_write",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -396,7 +416,7 @@ _SYSTEM_TOOL_DEFS: list[dict] = [
             "Returns entries at or above the specified level, newest first. "
             "ATM's own log entries are excluded."
         ),
-        "flag": "allow_log_read",
+        "cap": "cap_log_read",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -423,13 +443,13 @@ _SYSTEM_TOOL_DEFS: list[dict] = [
     {
         "name": "restart_ha",
         "description": "Restart Home Assistant.",
-        "flag": "allow_restart",
+        "cap": "cap_restart",
         "inputSchema": {"type": "object", "properties": {}},
     },
     {
         "name": "HassBroadcast",
         "description": "Broadcast a message through the home",
-        "flag": "allow_broadcast",
+        "cap": "cap_broadcast",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -737,6 +757,56 @@ def _tool_error(message: str) -> dict:
     return {"content": [{"type": "text", "text": message}], "isError": True}
 
 
+def _tool_pending(approval: Any) -> dict:
+    """Return an MCP tool result indicating a pending admin approval.
+
+    isError is False because pending is a valid outcome, not a failure.
+    """
+    body = json.dumps({
+        "status": "pending_approval",
+        "approval_id": approval.id,
+        "expires_at": approval.expires_at.isoformat() if approval.expires_at else None,
+        "review_url": f"/atm#approvals/{approval.id}",
+        "message": "This action requires admin approval. The admin has been notified.",
+    })
+    return {"content": [{"type": "text", "text": body}]}
+
+
+def _approval_resource(approval: Any) -> str:
+    """Resource string used in audit logs for a pending-approval entry."""
+    return f"approval:{approval.tool_name}:{approval.id}"
+
+
+async def _gate(
+    cap_name: str,
+    token: TokenRecord,
+    hass: Any,
+    data: ATMData,
+    *,
+    tool_name: str,
+    args: dict,
+    request_id: str,
+    client_ip: str | None,
+    diff: dict,
+) -> tuple[dict, str, str] | None:
+    """Run capability gating. Returns a response tuple for deny/pending, or None for allow.
+
+    For deny, returns (error_dict, "denied", tool_name).
+    For pending, returns (pending_dict, "pending_approval", approval_resource).
+    For allow, returns None and the caller proceeds with the side effect.
+    """
+    result = await evaluate_capability(
+        cap_name, token, hass, data,
+        tool_name=tool_name, args=args, request_id=request_id,
+        client_ip=client_ip, diff=diff,
+    )
+    if result.is_deny:
+        return _tool_error("Forbidden."), "denied", tool_name
+    if result.is_pending:
+        return _tool_pending(result.approval), "pending_approval", _approval_resource(result.approval)
+    return None
+
+
 async def _tool_get_state(
     args: dict, token: TokenRecord, hass: Any
 ) -> tuple[dict, str, str]:
@@ -904,7 +974,12 @@ async def _tool_get_statistics(
 
 
 async def _tool_call_service(
-    args: dict, token: TokenRecord, hass: Any, data: ATMData
+    args: dict,
+    token: TokenRecord,
+    hass: Any,
+    data: ATMData,
+    request_id: str = "",
+    client_ip: str | None = None,
 ) -> tuple[dict, str, str]:
     """MCP tool: call a HA service with entity targets filtered to WRITE-permitted entities."""
     domain = args.get("domain", "")
@@ -912,14 +987,37 @@ async def _tool_call_service(
     if not domain or not service:
         return _tool_error("Missing required arguments: domain and service"), "denied", "call_service"
 
-    resource = f"service:{domain}/{service}"
     service_key = f"{domain}/{service}"
 
-    if service_key in DUAL_GATE_SERVICES and not token.allow_restart:
-        return _tool_error("Forbidden."), "denied", resource
+    if service_key in DUAL_GATE_SERVICES:
+        blocked = await _gate(
+            "cap_restart", token, hass, data,
+            tool_name="call_service", args=args, request_id=request_id,
+            client_ip=client_ip, diff=_build_diff_call_service(args, token, hass),
+        )
+        if blocked is not None:
+            return blocked
+    elif service_key in PHYSICAL_GATE_SERVICES:
+        blocked = await _gate(
+            "cap_physical_control", token, hass, data,
+            tool_name="call_service", args=args, request_id=request_id,
+            client_ip=client_ip, diff=_build_diff_call_service(args, token, hass),
+        )
+        if blocked is not None:
+            return blocked
+    return await _execute_call_service(args, token, hass, data)
 
-    if service_key in PHYSICAL_GATE_SERVICES and not token.allow_physical_control:
-        return _tool_error("Forbidden."), "denied", resource
+
+async def _execute_call_service(
+    args: dict, token: TokenRecord, hass: Any, data: ATMData
+) -> tuple[dict, str, str]:
+    domain = args.get("domain", "")
+    service = args.get("service", "")
+    if not domain or not service:
+        return _tool_error("Missing required arguments: domain and service"), "denied", "call_service"
+
+    resource = f"service:{domain}/{service}"
+    service_key = f"{domain}/{service}"
 
     entity_id = args.get("entity_id")
     device_id = args.get("device_id")
@@ -930,7 +1028,7 @@ async def _tool_call_service(
 
     # DUAL_GATE_SERVICES have no entities in hass.states; routing them through
     # resolve_service_targets always produces an empty list and a spurious 403.
-    # The allow_restart gate above is the only permission check required.
+    # The cap_restart gate above is the only permission check required.
     if service_key in DUAL_GATE_SERVICES:
         if domain in HIGH_RISK_DOMAINS:
             _LOGGER.info(
@@ -984,7 +1082,7 @@ async def _tool_call_service(
     call_data["entity_id"] = permitted_entities
 
     use_return_response = False
-    if token.allow_service_response or token.pass_through:
+    if effective_cap(token, "cap_service_response") != CAP_DENY:
         try:
             from homeassistant.core import SupportsResponse as _SR
             handler = hass.services.async_services().get(domain, {}).get(service)
@@ -1032,8 +1130,8 @@ async def _tool_call_service(
 async def _tool_get_config(
     args: dict, token: TokenRecord, hass: Any
 ) -> tuple[dict, str, str]:
-    """MCP tool: return HA config (requires allow_config_read or pass_through)."""
-    if not token.allow_config_read and not token.pass_through:
+    """MCP tool: return HA config (requires cap_config_read)."""
+    if effective_cap(token, "cap_config_read") == CAP_DENY:
         return _tool_error("Forbidden."), "denied", "get_config"
     config_dict = hass.config.as_dict()
     config_dict["components"] = [
@@ -1048,9 +1146,9 @@ async def _tool_get_config(
 async def _tool_get_logs(
     args: dict, token: TokenRecord, hass: Any
 ) -> tuple[dict, str, str]:
-    """MCP tool: read system_log entries (requires allow_log_read)."""
-    if not token.allow_log_read:
-        return _tool_error("Forbidden. The allow_log_read flag must be enabled on this token."), "denied", "get_logs"
+    """MCP tool: read system_log entries (requires cap_log_read)."""
+    if effective_cap(token, "cap_log_read") == CAP_DENY:
+        return _tool_error("Forbidden."), "denied", "get_logs"
 
     raw_level = str(args.get("level") or "WARNING").strip().upper()
     if raw_level not in ("INFO", "WARNING", "ERROR"):
@@ -1079,7 +1177,7 @@ async def _tool_render_template(
     args: dict, token: TokenRecord, hass: Any
 ) -> tuple[dict, str, str]:
     """MCP tool: render a Jinja2 template against permitted entity state."""
-    if not token.allow_template_render and not token.pass_through:
+    if effective_cap(token, "cap_template_render") == CAP_DENY:
         return _tool_error("Forbidden."), "denied", "render_template"
 
     template_str = args.get("template", "")
@@ -1126,12 +1224,27 @@ async def _tool_render_template(
 
 
 async def _tool_create_automation(
-    args: dict, token: TokenRecord, hass: Any
+    args: dict,
+    token: TokenRecord,
+    hass: Any,
+    data: ATMData,
+    request_id: str = "",
+    client_ip: str | None = None,
 ) -> tuple[dict, str, str]:
     """MCP tool: create a new UI automation by appending to automations.yaml."""
-    if not token.allow_automation_write:
-        return _tool_error("Forbidden. The allow_automation_write flag must be enabled on this token."), "denied", "create_automation"
+    blocked = await _gate(
+        "cap_automation_write", token, hass, data,
+        tool_name="create_automation", args=args, request_id=request_id,
+        client_ip=client_ip, diff=_build_diff_create_automation(args, token, hass),
+    )
+    if blocked is not None:
+        return blocked
+    return await _execute_create_automation(args, token, hass, data)
 
+
+async def _execute_create_automation(
+    args: dict, token: TokenRecord, hass: Any, data: ATMData
+) -> tuple[dict, str, str]:
     config = args.get("config")
     if not isinstance(config, dict):
         return _tool_error("config must be an object."), "invalid_request", "create_automation"
@@ -1170,12 +1283,27 @@ async def _tool_create_automation(
 
 
 async def _tool_edit_automation(
-    args: dict, token: TokenRecord, hass: Any
+    args: dict,
+    token: TokenRecord,
+    hass: Any,
+    data: ATMData,
+    request_id: str = "",
+    client_ip: str | None = None,
 ) -> tuple[dict, str, str]:
     """MCP tool: replace the config of an existing UI automation."""
-    if not token.allow_automation_write:
-        return _tool_error("Forbidden. The allow_automation_write flag must be enabled on this token."), "denied", "edit_automation"
+    blocked = await _gate(
+        "cap_automation_write", token, hass, data,
+        tool_name="edit_automation", args=args, request_id=request_id,
+        client_ip=client_ip, diff=_build_diff_edit_automation(args, token, hass),
+    )
+    if blocked is not None:
+        return blocked
+    return await _execute_edit_automation(args, token, hass, data)
 
+
+async def _execute_edit_automation(
+    args: dict, token: TokenRecord, hass: Any, data: ATMData
+) -> tuple[dict, str, str]:
     # automation_id is not format-validated (unlike script_id which uses _SCRIPT_ID_RE).
     # HA's async_validate_config_item rejects unknown IDs, so the impact is limited to
     # accepting cosmetically wrong IDs that HA then rejects. Not a security concern.
@@ -1219,12 +1347,27 @@ async def _tool_edit_automation(
 
 
 async def _tool_delete_automation(
-    args: dict, token: TokenRecord, hass: Any
+    args: dict,
+    token: TokenRecord,
+    hass: Any,
+    data: ATMData,
+    request_id: str = "",
+    client_ip: str | None = None,
 ) -> tuple[dict, str, str]:
     """MCP tool: permanently delete a UI automation."""
-    if not token.allow_automation_write:
-        return _tool_error("Forbidden. The allow_automation_write flag must be enabled on this token."), "denied", "delete_automation"
+    blocked = await _gate(
+        "cap_automation_write", token, hass, data,
+        tool_name="delete_automation", args=args, request_id=request_id,
+        client_ip=client_ip, diff=_build_diff_delete_automation(args, token, hass),
+    )
+    if blocked is not None:
+        return blocked
+    return await _execute_delete_automation(args, token, hass, data)
 
+
+async def _execute_delete_automation(
+    args: dict, token: TokenRecord, hass: Any, data: ATMData
+) -> tuple[dict, str, str]:
     automation_id = args.get("automation_id", "").strip()
     if not automation_id:
         return _tool_error("automation_id is required."), "invalid_request", "delete_automation"
@@ -1249,12 +1392,27 @@ async def _tool_delete_automation(
 
 
 async def _tool_create_script(
-    args: dict, token: TokenRecord, hass: Any
+    args: dict,
+    token: TokenRecord,
+    hass: Any,
+    data: ATMData,
+    request_id: str = "",
+    client_ip: str | None = None,
 ) -> tuple[dict, str, str]:
     """MCP tool: create a new script in scripts.yaml."""
-    if not token.allow_script_write:
-        return _tool_error("Forbidden. The allow_script_write flag must be enabled on this token."), "denied", "create_script"
+    blocked = await _gate(
+        "cap_script_write", token, hass, data,
+        tool_name="create_script", args=args, request_id=request_id,
+        client_ip=client_ip, diff=_build_diff_create_script(args, token, hass),
+    )
+    if blocked is not None:
+        return blocked
+    return await _execute_create_script(args, token, hass, data)
 
+
+async def _execute_create_script(
+    args: dict, token: TokenRecord, hass: Any, data: ATMData
+) -> tuple[dict, str, str]:
     script_id = args.get("script_id", "").strip()
     if not script_id:
         return _tool_error("script_id is required."), "invalid_request", "create_script"
@@ -1293,12 +1451,27 @@ async def _tool_create_script(
 
 
 async def _tool_edit_script(
-    args: dict, token: TokenRecord, hass: Any
+    args: dict,
+    token: TokenRecord,
+    hass: Any,
+    data: ATMData,
+    request_id: str = "",
+    client_ip: str | None = None,
 ) -> tuple[dict, str, str]:
     """MCP tool: replace the config of an existing script in scripts.yaml."""
-    if not token.allow_script_write:
-        return _tool_error("Forbidden. The allow_script_write flag must be enabled on this token."), "denied", "edit_script"
+    blocked = await _gate(
+        "cap_script_write", token, hass, data,
+        tool_name="edit_script", args=args, request_id=request_id,
+        client_ip=client_ip, diff=_build_diff_edit_script(args, token, hass),
+    )
+    if blocked is not None:
+        return blocked
+    return await _execute_edit_script(args, token, hass, data)
 
+
+async def _execute_edit_script(
+    args: dict, token: TokenRecord, hass: Any, data: ATMData
+) -> tuple[dict, str, str]:
     script_id = args.get("script_id", "").strip()
     if not script_id:
         return _tool_error("script_id is required."), "invalid_request", "edit_script"
@@ -1337,12 +1510,27 @@ async def _tool_edit_script(
 
 
 async def _tool_delete_script(
-    args: dict, token: TokenRecord, hass: Any
+    args: dict,
+    token: TokenRecord,
+    hass: Any,
+    data: ATMData,
+    request_id: str = "",
+    client_ip: str | None = None,
 ) -> tuple[dict, str, str]:
     """MCP tool: permanently delete a script from scripts.yaml."""
-    if not token.allow_script_write:
-        return _tool_error("Forbidden. The allow_script_write flag must be enabled on this token."), "denied", "delete_script"
+    blocked = await _gate(
+        "cap_script_write", token, hass, data,
+        tool_name="delete_script", args=args, request_id=request_id,
+        client_ip=client_ip, diff=_build_diff_delete_script(args, token, hass),
+    )
+    if blocked is not None:
+        return blocked
+    return await _execute_delete_script(args, token, hass, data)
 
+
+async def _execute_delete_script(
+    args: dict, token: TokenRecord, hass: Any, data: ATMData
+) -> tuple[dict, str, str]:
     script_id = args.get("script_id", "").strip()
     if not script_id:
         return _tool_error("script_id is required."), "invalid_request", "delete_script"
@@ -1369,12 +1557,28 @@ async def _tool_delete_script(
 
 
 async def _tool_restart_ha(
-    args: dict, token: TokenRecord, hass: Any
+    args: dict,
+    token: TokenRecord,
+    hass: Any,
+    data: ATMData,
+    request_id: str = "",
+    client_ip: str | None = None,
 ) -> tuple[dict, str, str]:
-    """MCP tool: restart HA (requires allow_restart flag on the token)."""
-    if not token.allow_restart:
-        return _tool_error("Forbidden. The allow_restart flag must be enabled on this token."), "denied", "restart_ha"
+    """MCP tool: restart HA (gated by cap_restart, supports Confirm)."""
+    blocked = await _gate(
+        "cap_restart", token, hass, data,
+        tool_name="restart_ha", args=args, request_id=request_id,
+        client_ip=client_ip, diff=_build_diff_restart_ha(args, token, hass),
+    )
+    if blocked is not None:
+        return blocked
+    return await _execute_restart_ha(args, token, hass, data)
 
+
+async def _execute_restart_ha(
+    args: dict, token: TokenRecord, hass: Any, data: ATMData
+) -> tuple[dict, str, str]:
+    """Side-effect path for restart_ha. Assumes capability is already satisfied."""
     try:
         async with asyncio.timeout(PROXY_TIMEOUT_SECONDS):
             await hass.services.async_call(
@@ -1393,6 +1597,88 @@ async def _tool_restart_ha(
         return _tool_error("Restart failed."), "denied", "restart_ha"
     except HomeAssistantError:
         return _tool_error("Restart failed."), "denied", "restart_ha"
+    return _tool_success(json.dumps({"success": True})), "allowed", "restart_ha"
+
+
+async def _tool_get_approval_status(
+    args: dict, token: TokenRecord, hass: Any, data: ATMData
+) -> tuple[dict, str, str]:
+    """MCP tool: poll an approval the token previously created.
+
+    Cross-token reads return 404 (matching the missing-record response) to avoid
+    a token-existence oracle.
+    """
+    from .approvals import get_approval  # noqa: PLC0415
+
+    approval_id = args.get("approval_id")
+    if not approval_id or not isinstance(approval_id, str):
+        return _tool_error("Missing approval_id."), "invalid_request", "get_approval_status"
+    record = get_approval(data.store, approval_id)
+    if record is None or record.token_id != token.id:
+        return _tool_error("Approval not found."), "not_found", "get_approval_status"
+    payload = {
+        "approval_id": record.id,
+        "status": record.status,
+        "tool_name": record.tool_name,
+        "created_at": record.created_at.isoformat() if record.created_at else None,
+        "expires_at": record.expires_at.isoformat() if record.expires_at else None,
+        "resolved_at": record.resolved_at.isoformat() if record.resolved_at else None,
+        "result": record.result,
+        "rejected_reason": record.rejected_reason,
+    }
+    return _tool_success(json.dumps(payload, default=str)), "allowed", _approval_resource(record)
+
+
+# Executor registry for the admin-approval gate. When an admin approves a pending
+# request, the approve handler looks up the saved tool_name here and invokes the
+# corresponding _execute_X function with the saved args.
+_EXECUTOR_REGISTRY: dict[str, Any] = {}
+
+
+def _register_executor(tool_name: str, fn: Any) -> None:
+    """Record an executor function for a tool. Called once at module import."""
+    _EXECUTOR_REGISTRY[tool_name] = fn
+
+
+async def execute_approved_tool(
+    tool_name: str,
+    args: dict,
+    token: TokenRecord,
+    hass: Any,
+    data: ATMData,
+) -> tuple[dict, str, str]:
+    """Run the side-effect path for a previously-gated tool. Returns the tool result tuple.
+
+    Raises KeyError if no executor is registered for the tool_name.
+    """
+    fn = _EXECUTOR_REGISTRY.get(tool_name)
+    if fn is None:
+        raise KeyError(f"No executor registered for tool {tool_name!r}")
+    return await fn(args, token, hass, data)
+
+
+def _build_diff_restart_ha(args: dict, token: TokenRecord, hass: Any) -> dict:
+    """Diff payload for restart_ha approvals.
+
+    Includes the count of currently-active SSE clients that will disconnect on restart
+    so admin sees real-time impact.
+    """
+    sse_count = 0
+    try:
+        domain_data = hass.data.get(DOMAIN)
+        if domain_data is not None and hasattr(domain_data, "sse_connections"):
+            sse_count = sum(len(q) for q in domain_data.sse_connections.values())
+    except Exception:  # noqa: BLE001 — diagnostic only
+        pass
+    return {
+        "kind": "system_action",
+        "summary": "Restart Home Assistant",
+        "target": {"type": "system", "id": "homeassistant", "label": "Home Assistant"},
+        "preview": {
+            "active_atm_sse_clients": sse_count,
+            "warning": "All current ATM SSE connections will disconnect on restart.",
+        },
+    }
 
     return _tool_success(json.dumps({"success": True})), "allowed", "restart_ha"
 
@@ -1631,8 +1917,8 @@ async def _tool_hass_turn_on(
     )
     # homeassistant.turn_on routes lock/alarm/cover entities to their physical
     # services (lock.lock, alarm_control_panel.alarm_arm_*, cover.open_cover).
-    # Strip those entities when allow_physical_control is not set.
-    if not token.allow_physical_control:
+    # Strip those entities when cap_physical_control is not allowed.
+    if effective_cap(token, "cap_physical_control") != CAP_ALLOW:
         entities = [e for e in entities if e.split(".")[0] not in PHYSICAL_GATE_DOMAINS]
     return await _tool_intent_action("HassTurnOn", "homeassistant", "turn_on", {}, entities, hass, args=args)
 
@@ -1649,8 +1935,8 @@ async def _tool_hass_turn_off(
         floor=args.get("floor"),
     )
     # homeassistant.turn_off routes lock/alarm/cover to physical services.
-    # Strip those entities when allow_physical_control is not set.
-    if not token.allow_physical_control:
+    # Strip those entities when cap_physical_control is not allowed.
+    if effective_cap(token, "cap_physical_control") != CAP_ALLOW:
         entities = [e for e in entities if e.split(".")[0] not in PHYSICAL_GATE_DOMAINS]
     return await _tool_intent_action("HassTurnOff", "homeassistant", "turn_off", {}, entities, hass, args=args)
 
@@ -1728,11 +2014,26 @@ async def _tool_hass_climate_set_temperature(
 
 
 async def _tool_hass_set_position(
-    args: dict, token: TokenRecord, hass: Any
+    args: dict,
+    token: TokenRecord,
+    hass: Any,
+    data: ATMData,
+    request_id: str = "",
+    client_ip: str | None = None,
 ) -> tuple[dict, str, str]:
-    if not token.allow_physical_control:
-        return _tool_error("Forbidden. The allow_physical_control flag must be enabled on this token."), "denied", "HassSetPosition"
+    blocked = await _gate(
+        "cap_physical_control", token, hass, data,
+        tool_name="HassSetPosition", args=args, request_id=request_id,
+        client_ip=client_ip, diff=_build_diff_hass_set_position(args, token, hass),
+    )
+    if blocked is not None:
+        return blocked
+    return await _execute_hass_set_position(args, token, hass, data)
 
+
+async def _execute_hass_set_position(
+    args: dict, token: TokenRecord, hass: Any, data: ATMData
+) -> tuple[dict, str, str]:
     if "position" in args and args["position"] is not None:
         error = _validate_integer_range("position", args["position"], 0, 100)
         if error:
@@ -1946,11 +2247,26 @@ async def _tool_hass_cancel_all_timers(
 
 
 async def _tool_hass_stop_moving(
-    args: dict, token: TokenRecord, hass: Any
+    args: dict,
+    token: TokenRecord,
+    hass: Any,
+    data: ATMData,
+    request_id: str = "",
+    client_ip: str | None = None,
 ) -> tuple[dict, str, str]:
-    if not token.allow_physical_control:
-        return _tool_error("Forbidden. The allow_physical_control flag must be enabled on this token."), "denied", "HassStopMoving"
+    blocked = await _gate(
+        "cap_physical_control", token, hass, data,
+        tool_name="HassStopMoving", args=args, request_id=request_id,
+        client_ip=client_ip, diff=_build_diff_hass_stop_moving(args, token, hass),
+    )
+    if blocked is not None:
+        return blocked
+    return await _execute_hass_stop_moving(args, token, hass, data)
 
+
+async def _execute_hass_stop_moving(
+    args: dict, token: TokenRecord, hass: Any, data: ATMData
+) -> tuple[dict, str, str]:
     entities = resolve_intent_entities(
         hass, token,
         domains=args.get("domain") or ["cover"],
@@ -1966,8 +2282,8 @@ async def _tool_hass_broadcast(
     args: dict, token: TokenRecord, hass: Any
 ) -> tuple[dict, str, str]:
     """MCP tool: HassBroadcast - announce a message via assist satellite devices."""
-    if not token.allow_broadcast and not token.pass_through:
-        return _tool_error("Forbidden. The allow_broadcast flag must be enabled on this token."), "denied", "HassBroadcast"
+    if effective_cap(token, "cap_broadcast") == CAP_DENY:
+        return _tool_error("Forbidden."), "denied", "HassBroadcast"
 
     message = args.get("message", "")
     if not message:
@@ -2014,6 +2330,8 @@ async def _call_tool(
     token: TokenRecord,
     hass: Any,
     data: ATMData,
+    request_id: str = "",
+    client_ip: str | None = None,
 ) -> tuple[dict, str, str]:
     """Route a tools/call request to the appropriate tool handler."""
     if tool_name == "get_state":
@@ -2025,19 +2343,21 @@ async def _call_tool(
     if tool_name == "get_statistics":
         return await _tool_get_statistics(arguments, token, hass)
     if tool_name == "call_service":
-        return await _tool_call_service(arguments, token, hass, data)
+        return await _tool_call_service(arguments, token, hass, data, request_id, client_ip)
     if tool_name == "get_config":
         return await _tool_get_config(arguments, token, hass)
     if tool_name == "render_template":
         return await _tool_render_template(arguments, token, hass)
     if tool_name == "create_automation":
-        return await _tool_create_automation(arguments, token, hass)
+        return await _tool_create_automation(arguments, token, hass, data, request_id, client_ip)
     if tool_name == "edit_automation":
-        return await _tool_edit_automation(arguments, token, hass)
+        return await _tool_edit_automation(arguments, token, hass, data, request_id, client_ip)
     if tool_name == "delete_automation":
-        return await _tool_delete_automation(arguments, token, hass)
+        return await _tool_delete_automation(arguments, token, hass, data, request_id, client_ip)
     if tool_name == "restart_ha":
-        return await _tool_restart_ha(arguments, token, hass)
+        return await _tool_restart_ha(arguments, token, hass, data, request_id, client_ip)
+    if tool_name == "get_approval_status":
+        return await _tool_get_approval_status(arguments, token, hass, data)
     if tool_name == "GetLiveContext":
         return await _tool_get_live_context(arguments, token, hass)
     if tool_name == "GetDateTime":
@@ -2053,7 +2373,7 @@ async def _call_tool(
     if tool_name == "HassClimateSetTemperature":
         return await _tool_hass_climate_set_temperature(arguments, token, hass)
     if tool_name == "HassSetPosition":
-        return await _tool_hass_set_position(arguments, token, hass)
+        return await _tool_hass_set_position(arguments, token, hass, data, request_id, client_ip)
     if tool_name == "HassSetVolume":
         return await _tool_hass_set_volume(arguments, token, hass)
     if tool_name == "HassSetVolumeRelative":
@@ -2075,17 +2395,17 @@ async def _call_tool(
     if tool_name == "HassCancelAllTimers":
         return await _tool_hass_cancel_all_timers(arguments, token, hass)
     if tool_name == "HassStopMoving":
-        return await _tool_hass_stop_moving(arguments, token, hass)
+        return await _tool_hass_stop_moving(arguments, token, hass, data, request_id, client_ip)
     if tool_name == "HassBroadcast":
         return await _tool_hass_broadcast(arguments, token, hass)
     if tool_name == "get_logs":
         return await _tool_get_logs(arguments, token, hass)
     if tool_name == "create_script":
-        return await _tool_create_script(arguments, token, hass)
+        return await _tool_create_script(arguments, token, hass, data, request_id, client_ip)
     if tool_name == "edit_script":
-        return await _tool_edit_script(arguments, token, hass)
+        return await _tool_edit_script(arguments, token, hass, data, request_id, client_ip)
     if tool_name == "delete_script":
-        return await _tool_delete_script(arguments, token, hass)
+        return await _tool_delete_script(arguments, token, hass, data, request_id, client_ip)
     return _tool_error(f"Unknown tool: {tool_name}"), "denied", tool_name
 
 
@@ -2132,17 +2452,8 @@ def _build_server_info(token: TokenRecord, hass: Any, base_url: str) -> dict:
         "version": ATM_VERSION,
         "token_name": token.name,
         "permitted_entity_count": count,
-        "capability_flags": {
-            "allow_config_read": token.allow_config_read or token.pass_through,
-            "allow_automation_write": token.allow_automation_write,
-            "allow_script_write": token.allow_script_write,
-            "allow_template_render": token.allow_template_render or token.pass_through,
-            "allow_restart": token.allow_restart,
-            "allow_physical_control": token.allow_physical_control,
-            "allow_service_response": token.allow_service_response or token.pass_through,
-            "allow_broadcast": token.allow_broadcast or token.pass_through,
-            "allow_log_read": token.allow_log_read,
-        },
+        "capability_flags": effective_caps(token),
+        "persona": token.persona,
         "native_ha_mcp_endpoint": f"{base_url}/api/mcp",
         "atm_context_endpoint": f"{base_url}/api/atm/mcp/context",
     }
@@ -2187,15 +2498,21 @@ def _build_context_plain(token: TokenRecord, hass: Any) -> str:
         )
 
     lines.append("")
-    lines.append("Capability flags enabled for this token:")
-    lines.append(f"- Config read: {'yes' if (token.allow_config_read or token.pass_through) else 'no'}")
-    lines.append(f"- Automation write: {'yes' if token.allow_automation_write else 'no'}")
-    lines.append(f"- Script write: {'yes' if token.allow_script_write else 'no'}")
-    lines.append(f"- Template render: {'yes' if (token.allow_template_render or token.pass_through) else 'no'}")
-    lines.append(f"- Restart: {'yes' if token.allow_restart else 'no'}")
-    lines.append(f"- Physical control (locks/alarms/covers): {'yes' if token.allow_physical_control else 'no'}")
-    lines.append(f"- Broadcast: {'yes' if (token.allow_broadcast or token.pass_through) else 'no'}")
-    lines.append(f"- Log read: {'yes' if token.allow_log_read else 'no'}")
+    caps = effective_caps(token)
+    lines.append("Capabilities (deny / allow / confirm; confirm requires admin approval per request):")
+    label_map = (
+        ("cap_config_read", "Config read"),
+        ("cap_automation_write", "Automation write"),
+        ("cap_script_write", "Script write"),
+        ("cap_template_render", "Template render"),
+        ("cap_restart", "Restart"),
+        ("cap_physical_control", "Physical control (locks/alarms/covers)"),
+        ("cap_broadcast", "Broadcast"),
+        ("cap_log_read", "Log read"),
+        ("cap_service_response", "Service response"),
+    )
+    for cap_key, label in label_map:
+        lines.append(f"- {label}: {caps.get(cap_key, 'deny')}")
     lines.append("")
     if token.rate_limit_requests > 0:
         lines.append(
@@ -2258,18 +2575,9 @@ def _build_context_json(token: TokenRecord, hass: Any) -> dict:
     return {
         "token_name": token.name,
         "pass_through": token.pass_through,
+        "persona": token.persona,
         "entities": entities,
-        "capability_flags": {
-            "allow_config_read": token.allow_config_read or token.pass_through,
-            "allow_automation_write": token.allow_automation_write,
-            "allow_script_write": token.allow_script_write,
-            "allow_template_render": token.allow_template_render or token.pass_through,
-            "allow_restart": token.allow_restart,
-            "allow_physical_control": token.allow_physical_control,
-            "allow_service_response": token.allow_service_response or token.pass_through,
-            "allow_broadcast": token.allow_broadcast or token.pass_through,
-            "allow_log_read": token.allow_log_read,
-        },
+        "capability_flags": effective_caps(token),
         "rate_limit": {
             "requests_per_minute": token.rate_limit_requests,
             "burst_per_second": token.rate_limit_burst,
@@ -2324,13 +2632,9 @@ async def _dispatch_mcp(
     if method == "tools/list":
         tools = list(_ENTITY_TOOL_DEFS) + list(_NATIVE_TOOL_DEFS)
         for tool_def in _SYSTEM_TOOL_DEFS:
-            flag = tool_def["flag"]
-            if flag in PASS_THROUGH_EXEMPT_FLAGS:
-                flag_enabled = getattr(token, flag, False)
-            else:
-                flag_enabled = token.pass_through or getattr(token, flag, False)
-            if flag_enabled:
-                tools.append({k: v for k, v in tool_def.items() if k != "flag"})
+            cap = tool_def["cap"]
+            if effective_cap(token, cap) != CAP_DENY:
+                tools.append({k: v for k, v in tool_def.items() if k != "cap"})
         resp = _jsonrpc_result(msg_id, {"tools": tools})
         _log(data, token, request_id=request_id, method="tools/list",
              resource="/api/atm/mcp", outcome="allowed", client_ip=client_ip)
@@ -2339,7 +2643,10 @@ async def _dispatch_mcp(
     if method == "tools/call":
         tool_name = params.get("name", "")
         arguments = params.get("arguments") or {}
-        tool_result, outcome, resource = await _call_tool(tool_name, arguments, token, hass, data)
+        tool_result, outcome, resource = await _call_tool(
+            tool_name, arguments, token, hass, data,
+            request_id=request_id, client_ip=client_ip,
+        )
         _log(data, token, request_id=request_id, method=tool_name or "tools/call",
              resource=resource, outcome=outcome, client_ip=client_ip,
              payload={"name": tool_name, "arguments": arguments})
@@ -2881,3 +3188,202 @@ ALL_MCP_VIEWS: list[type[HomeAssistantView]] = [
     ATMMcpMessagesView,
     ATMMcpContextView,
 ]
+
+
+# --- Diff builders for Confirm-eligible tools ---------------------------------
+# Each builder produces the structured payload shown in the admin Approvals UI.
+# Diffs are best-effort: anything missing or non-fatal renders an empty preview
+# rather than blocking creation of the pending approval.
+
+
+def _truncate(text: str, max_chars: int = 4000) -> str:
+    if len(text) <= max_chars:
+        return text
+    return text[:max_chars] + f"\n... ({len(text) - max_chars} more characters)"
+
+
+def _build_diff_call_service(args: dict, token: TokenRecord, hass: Any) -> dict:
+    """Diff for call_service. Resolves entity targets read-only and lists service params."""
+    domain = args.get("domain", "")
+    service = args.get("service", "")
+    service_data = args.get("service_data") or {}
+    entity_arg = args.get("entity_id")
+    if isinstance(entity_arg, str):
+        entity_ids: list[str] = [entity_arg]
+    elif isinstance(entity_arg, list):
+        entity_ids = [e for e in entity_arg if isinstance(e, str)]
+    else:
+        entity_ids = []
+    return {
+        "kind": "service_preview",
+        "summary": f"Call {domain}/{service}",
+        "target": {"type": "service", "id": f"{domain}/{service}", "label": f"{domain}/{service}"},
+        "preview": {
+            "domain": domain,
+            "service": service,
+            "service_data": service_data if isinstance(service_data, dict) else {},
+            "requested_entity_ids": entity_ids,
+            "device_id": args.get("device_id"),
+            "area_id": args.get("area_id"),
+        },
+    }
+
+
+def _build_diff_create_automation(args: dict, token: TokenRecord, hass: Any) -> dict:
+    config = args.get("config") if isinstance(args.get("config"), dict) else {}
+    return {
+        "kind": "config_diff",
+        "summary": f"Create automation '{config.get('alias', '<no alias>')}'",
+        "target": {"type": "automation", "id": None, "label": config.get("alias")},
+        "before": None,
+        "after": _truncate(json.dumps(config, indent=2, default=str)),
+        "preview": {"alias": config.get("alias"), "mode": config.get("mode")},
+    }
+
+
+def _build_diff_edit_automation(args: dict, token: TokenRecord, hass: Any) -> dict:
+    automation_id = (args.get("automation_id") or "").strip()
+    config = args.get("config") if isinstance(args.get("config"), dict) else {}
+    before = None
+    try:
+        path = os.path.join(hass.config.config_dir, _AUTOMATION_YAML)
+        if os.path.exists(path):
+            items = _read_automations_yaml(path)
+            current = next((a for a in items if a.get("id") == automation_id), None)
+            if current is not None:
+                before = _truncate(json.dumps(current, indent=2, default=str))
+    except Exception:  # noqa: BLE001 — diagnostic only
+        pass
+    return {
+        "kind": "yaml_diff",
+        "summary": f"Edit automation '{automation_id}'",
+        "target": {"type": "automation", "id": automation_id, "label": config.get("alias")},
+        "before": before,
+        "after": _truncate(json.dumps(config, indent=2, default=str)),
+        "preview": {"alias": config.get("alias"), "mode": config.get("mode")},
+    }
+
+
+def _build_diff_delete_automation(args: dict, token: TokenRecord, hass: Any) -> dict:
+    automation_id = (args.get("automation_id") or "").strip()
+    before = None
+    try:
+        path = os.path.join(hass.config.config_dir, _AUTOMATION_YAML)
+        if os.path.exists(path):
+            items = _read_automations_yaml(path)
+            current = next((a for a in items if a.get("id") == automation_id), None)
+            if current is not None:
+                before = _truncate(json.dumps(current, indent=2, default=str))
+    except Exception:  # noqa: BLE001 — diagnostic only
+        pass
+    return {
+        "kind": "system_action",
+        "summary": f"Delete automation '{automation_id}'",
+        "target": {"type": "automation", "id": automation_id, "label": automation_id},
+        "before": before,
+        "preview": {"warning": "This automation will be removed permanently."},
+    }
+
+
+def _build_diff_create_script(args: dict, token: TokenRecord, hass: Any) -> dict:
+    script_id = (args.get("script_id") or "").strip()
+    config = args.get("config") if isinstance(args.get("config"), dict) else {}
+    return {
+        "kind": "config_diff",
+        "summary": f"Create script '{script_id}'",
+        "target": {"type": "script", "id": script_id, "label": config.get("alias")},
+        "before": None,
+        "after": _truncate(json.dumps({script_id: config}, indent=2, default=str)),
+        "preview": {"alias": config.get("alias"), "mode": config.get("mode")},
+    }
+
+
+def _build_diff_edit_script(args: dict, token: TokenRecord, hass: Any) -> dict:
+    script_id = (args.get("script_id") or "").strip()
+    config = args.get("config") if isinstance(args.get("config"), dict) else {}
+    before = None
+    try:
+        path = hass.config.path(_SCRIPT_CONFIG_PATH)
+        if os.path.exists(path):
+            scripts = _read_scripts_yaml(path)
+            current = scripts.get(script_id)
+            if current is not None:
+                before = _truncate(json.dumps({script_id: current}, indent=2, default=str))
+    except Exception:  # noqa: BLE001 — diagnostic only
+        pass
+    return {
+        "kind": "yaml_diff",
+        "summary": f"Edit script '{script_id}'",
+        "target": {"type": "script", "id": script_id, "label": config.get("alias")},
+        "before": before,
+        "after": _truncate(json.dumps({script_id: config}, indent=2, default=str)),
+        "preview": {"alias": config.get("alias"), "mode": config.get("mode")},
+    }
+
+
+def _build_diff_delete_script(args: dict, token: TokenRecord, hass: Any) -> dict:
+    script_id = (args.get("script_id") or "").strip()
+    before = None
+    try:
+        path = hass.config.path(_SCRIPT_CONFIG_PATH)
+        if os.path.exists(path):
+            scripts = _read_scripts_yaml(path)
+            current = scripts.get(script_id)
+            if current is not None:
+                before = _truncate(json.dumps({script_id: current}, indent=2, default=str))
+    except Exception:  # noqa: BLE001 — diagnostic only
+        pass
+    return {
+        "kind": "system_action",
+        "summary": f"Delete script '{script_id}'",
+        "target": {"type": "script", "id": script_id, "label": script_id},
+        "before": before,
+        "preview": {"warning": "This script will be removed permanently."},
+    }
+
+
+def _build_diff_hass_set_position(args: dict, token: TokenRecord, hass: Any) -> dict:
+    return {
+        "kind": "service_preview",
+        "summary": "Set cover position",
+        "target": {"type": "service", "id": "cover/set_cover_position", "label": "cover/set_cover_position"},
+        "preview": {
+            "position": args.get("position"),
+            "name": args.get("name"),
+            "area": args.get("area"),
+            "floor": args.get("floor"),
+            "domain": args.get("domain"),
+            "device_class": args.get("device_class"),
+        },
+    }
+
+
+def _build_diff_hass_stop_moving(args: dict, token: TokenRecord, hass: Any) -> dict:
+    return {
+        "kind": "service_preview",
+        "summary": "Stop moving cover",
+        "target": {"type": "service", "id": "cover/stop_cover", "label": "cover/stop_cover"},
+        "preview": {
+            "name": args.get("name"),
+            "area": args.get("area"),
+            "floor": args.get("floor"),
+            "domain": args.get("domain"),
+            "device_class": args.get("device_class"),
+        },
+    }
+
+
+# Register executors for tools that support the admin-approval gate.
+# Each entry maps an MCP tool name to its side-effect-only _execute_X function.
+# When an admin approves a pending request, execute_approved_tool() invokes the
+# matching executor with the saved args.
+_register_executor("restart_ha", _execute_restart_ha)
+_register_executor("call_service", _execute_call_service)
+_register_executor("create_automation", _execute_create_automation)
+_register_executor("edit_automation", _execute_edit_automation)
+_register_executor("delete_automation", _execute_delete_automation)
+_register_executor("create_script", _execute_create_script)
+_register_executor("edit_script", _execute_edit_script)
+_register_executor("delete_script", _execute_delete_script)
+_register_executor("HassSetPosition", _execute_hass_set_position)
+_register_executor("HassStopMoving", _execute_hass_stop_moving)

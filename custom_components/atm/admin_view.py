@@ -16,7 +16,21 @@ from homeassistant.components.http.const import KEY_AUTHENTICATED, KEY_HASS_USER
 from homeassistant.helpers import entity_registry as er_mod
 from homeassistant.util.dt import parse_datetime, utcnow
 
-from .const import ATM_VERSION, BLOCKED_DOMAINS, DOMAIN, GITHUB_URL, MAX_REQUEST_BODY_BYTES, MIN_HA_VERSION, TOKEN_NAME_REGEX
+from .const import (
+    ATM_VERSION,
+    BLOCKED_DOMAINS,
+    CAP_CONFIRM,
+    CAP_MODES,
+    CAPABILITY_NAMES,
+    CONFIRM_AVAILABLE_CAPS,
+    DOMAIN,
+    GITHUB_URL,
+    MAX_REQUEST_BODY_BYTES,
+    MIN_HA_VERSION,
+    PERSONA_NAMES,
+    TOKEN_NAME_REGEX,
+)
+from .helpers import effective_caps
 from .data import ATMData
 from .helpers import cancel_expiry_timer, notify_tools_list_changed, terminate_token_connections
 from .policy_engine import Permission, get_effective_hint, resolve
@@ -466,13 +480,29 @@ class ATMAdminTokenView(HomeAssistantView):
                 if enabling and not token.pass_through and not body.get("confirm_pass_through"):
                     return _err("invalid_request", "confirm_pass_through: true is required when enabling pass_through.", 400, rid)
 
-            patchable = {
-                k: v for k, v in body.items()
-                if k in ("pass_through", "use_assist_exposure", "rate_limit_requests", "rate_limit_burst",
-                         "allow_automation_write", "allow_script_write", "allow_config_read",
-                         "allow_template_render", "allow_restart", "allow_physical_control",
-                         "allow_service_response", "allow_broadcast", "allow_log_read")
-            }
+            allowed_keys = {
+                "pass_through", "use_assist_exposure", "rate_limit_requests", "rate_limit_burst",
+                "persona",
+            } | set(CAPABILITY_NAMES)
+            patchable = {k: v for k, v in body.items() if k in allowed_keys}
+            for cap_name in set(CAPABILITY_NAMES) & patchable.keys():
+                value = patchable[cap_name]
+                if value not in CAP_MODES:
+                    return _err(
+                        "invalid_request",
+                        f"{cap_name} must be one of: deny, allow, confirm.",
+                        400,
+                        rid,
+                    )
+                if value == CAP_CONFIRM and cap_name not in CONFIRM_AVAILABLE_CAPS:
+                    return _err(
+                        "invalid_request",
+                        f"{cap_name} does not support 'confirm' mode.",
+                        400,
+                        rid,
+                    )
+            if "persona" in patchable and patchable["persona"] not in PERSONA_NAMES:
+                return _err("invalid_request", "Unknown persona.", 400, rid)
             if "use_assist_exposure" in patchable:
                 resulting_pass_through = bool(patchable.get("pass_through", token.pass_through))
                 if not resulting_pass_through:
@@ -490,10 +520,8 @@ class ATMAdminTokenView(HomeAssistantView):
             updated = await data.store.async_patch_token(token_id, **patchable)
 
         _TOOLS_LIST_FLAGS = {
-            "pass_through", "use_assist_exposure", "allow_automation_write", "allow_script_write",
-            "allow_config_read", "allow_template_render", "allow_restart",
-            "allow_physical_control", "allow_service_response", "allow_broadcast", "allow_log_read",
-        }
+            "pass_through", "use_assist_exposure", "persona",
+        } | set(CAPABILITY_NAMES)
         if patchable.keys() & _TOOLS_LIST_FLAGS:
             notify_tools_list_changed(token_id, data.sse_connections)
 
@@ -799,17 +827,8 @@ class ATMAdminScopeView(HomeAssistantView):
             "token_name": token.name,
             "readable": sorted(readable),
             "writable": sorted(writable),
-            "capability_flags": {
-                "allow_config_read": token.allow_config_read,
-                "allow_template_render": token.allow_template_render,
-                "allow_automation_write": token.allow_automation_write,
-                "allow_script_write": token.allow_script_write,
-                "allow_service_response": token.allow_service_response,
-                "allow_restart": token.allow_restart,
-                "allow_physical_control": token.allow_physical_control,
-                "allow_broadcast": token.allow_broadcast,
-                "allow_log_read": token.allow_log_read,
-            },
+            "persona": token.persona,
+            "capability_flags": {name: getattr(token, name) for name in CAPABILITY_NAMES},
         }, request_id=rid)
 
 
@@ -1166,6 +1185,265 @@ class ATMAdminTokenRotateView(HomeAssistantView):
         return _ok(response_body, request_id=rid)
 
 
+class ATMAdminApprovalsView(HomeAssistantView):
+    """GET /api/atm/admin/approvals - list approvals, optionally filtered by status/token."""
+
+    url = "/api/atm/admin/approvals"
+    name = "api:atm:admin:approvals"
+    requires_auth = True
+
+    @require_admin
+    async def get(self, request: web.Request) -> web.Response:
+        from .approvals import list_approvals  # noqa: PLC0415
+
+        rid = request["atm_rid"]
+        hass = self.hass
+        data: ATMData = hass.data[DOMAIN]
+        status = request.query.get("status")
+        token_id = request.query.get("token_id")
+        try:
+            limit = int(request.query.get("limit", "50"))
+        except (TypeError, ValueError):
+            limit = 50
+        try:
+            offset = int(request.query.get("offset", "0"))
+        except (TypeError, ValueError):
+            offset = 0
+        records = list_approvals(data.store, status=status, token_id=token_id)
+        total = len(records)
+        records = records[offset:offset + limit]
+        return _ok({
+            "approvals": [r.to_dict() for r in records],
+            "total": total,
+            "limit": limit,
+            "offset": offset,
+        }, request_id=rid)
+
+
+class ATMAdminApprovalView(HomeAssistantView):
+    """GET / DELETE /api/atm/admin/approvals/{approval_id}.
+
+    DELETE is an alias for reject with reason 'admin_cancelled'.
+    """
+
+    url = "/api/atm/admin/approvals/{approval_id}"
+    name = "api:atm:admin:approval"
+    requires_auth = True
+
+    @require_admin
+    async def get(self, request: web.Request, approval_id: str) -> web.Response:
+        from .approvals import get_approval  # noqa: PLC0415
+
+        rid = request["atm_rid"]
+        hass = self.hass
+        data: ATMData = hass.data[DOMAIN]
+        record = get_approval(data.store, approval_id)
+        if record is None:
+            return _err("not_found", "Approval not found.", 404, rid)
+        return _ok(record.to_dict(), request_id=rid)
+
+    @require_admin
+    async def delete(self, request: web.Request, approval_id: str) -> web.Response:
+        return await _resolve_approval(
+            self.hass, request, approval_id,
+            terminal_status="cancelled",
+            auto_reason="admin_cancelled",
+        )
+
+
+class ATMAdminApprovalApproveView(HomeAssistantView):
+    """POST /api/atm/admin/approvals/{approval_id}/approve."""
+
+    url = "/api/atm/admin/approvals/{approval_id}/approve"
+    name = "api:atm:admin:approval_approve"
+    requires_auth = True
+
+    @require_admin
+    async def post(self, request: web.Request, approval_id: str) -> web.Response:
+        return await _approve_approval(self.hass, request, approval_id)
+
+
+class ATMAdminApprovalRejectView(HomeAssistantView):
+    """POST /api/atm/admin/approvals/{approval_id}/reject."""
+
+    url = "/api/atm/admin/approvals/{approval_id}/reject"
+    name = "api:atm:admin:approval_reject"
+    requires_auth = True
+
+    @require_admin
+    async def post(self, request: web.Request, approval_id: str) -> web.Response:
+        rid = request["atm_rid"]
+        body = await _read_body(request, rid)
+        if isinstance(body, web.Response):
+            return body
+        reason = body.get("reason") if isinstance(body, dict) else None
+        if reason is not None and not isinstance(reason, str):
+            return _err("invalid_request", "reason must be a string.", 400, rid)
+        return await _resolve_approval(
+            self.hass, request, approval_id,
+            terminal_status="rejected",
+            auto_reason=reason,
+        )
+
+
+async def _resolve_approval(
+    hass,
+    request: web.Request,
+    approval_id: str,
+    *,
+    terminal_status: str,
+    auto_reason: str | None,
+) -> web.Response:
+    """Reject or cancel a pending approval. Idempotent on already-resolved records."""
+    from .approvals import (  # noqa: PLC0415
+        dismiss_approval_notification,
+        fire_approval_resolved_event,
+        get_approval,
+        update_approval_status,
+    )
+
+    rid = request["atm_rid"]
+    data: ATMData = hass.data[DOMAIN]
+    user = request[KEY_HASS_USER]
+    async with data.store.async_lock:
+        record = get_approval(data.store, approval_id)
+        if record is None:
+            return _err("not_found", "Approval not found.", 404, rid)
+        if record.is_terminal():
+            return _ok(record.to_dict(), request_id=rid)
+        updated = await update_approval_status(
+            data.store,
+            approval_id,
+            status=terminal_status,
+            approved_by_user_id=user.id,
+            rejected_reason=auto_reason,
+        )
+    if updated is None:
+        return _err("not_found", "Approval not found.", 404, rid)
+    dismiss_approval_notification(hass, approval_id)
+    fire_approval_resolved_event(hass, updated)
+    data.audit.record(
+        request_id=rid,
+        token_id="admin",
+        token_name=f"admin:{user.id}",
+        method=f"approval/{terminal_status}",
+        resource=f"approval:{updated.tool_name}:{approval_id}",
+        outcome=f"approval_{terminal_status}",
+        client_ip=None,
+    )
+    return _ok(updated.to_dict(), request_id=rid)
+
+
+async def _approve_approval(hass, request: web.Request, approval_id: str) -> web.Response:
+    """Validate, execute, and finalize a previously-pending approval."""
+    from .approvals import (  # noqa: PLC0415
+        REASON_CAPABILITY_DENIED,
+        REASON_KILL_SWITCH,
+        REASON_RATE_LIMITED,
+        REASON_TOKEN_INACTIVE,
+        STATUS_APPROVED,
+        STATUS_CANCELLED,
+        STATUS_REJECTED,
+        dismiss_approval_notification,
+        fire_approval_resolved_event,
+        get_approval,
+        update_approval_status,
+    )
+    from .helpers import effective_cap  # noqa: PLC0415
+    from .mcp_view import execute_approved_tool  # noqa: PLC0415
+
+    rid = request["atm_rid"]
+    data: ATMData = hass.data[DOMAIN]
+    user = request[KEY_HASS_USER]
+
+    async with data.store.async_lock:
+        record = get_approval(data.store, approval_id)
+        if record is None:
+            return _err("not_found", "Approval not found.", 404, rid)
+        if record.is_terminal():
+            return _ok(record.to_dict(), request_id=rid)
+
+        token = data.store.get_token_by_id(record.token_id)
+        if token is None or not token.is_valid():
+            await update_approval_status(
+                data.store, approval_id,
+                status=STATUS_CANCELLED,
+                approved_by_user_id=user.id,
+                rejected_reason=REASON_TOKEN_INACTIVE,
+            )
+            updated = get_approval(data.store, approval_id)
+            if updated:
+                dismiss_approval_notification(hass, approval_id)
+                fire_approval_resolved_event(hass, updated)
+            return _err("not_found", "Token no longer active.", 409, rid)
+
+        if effective_cap(token, record.cap_name) == "deny":
+            await update_approval_status(
+                data.store, approval_id,
+                status=STATUS_REJECTED,
+                approved_by_user_id=user.id,
+                rejected_reason=REASON_CAPABILITY_DENIED,
+            )
+            updated = get_approval(data.store, approval_id)
+            if updated:
+                dismiss_approval_notification(hass, approval_id)
+                fire_approval_resolved_event(hass, updated)
+            return _err("forbidden", "Capability is now denied for this token.", 409, rid)
+
+        settings = data.store.get_settings()
+        if settings.kill_switch:
+            await update_approval_status(
+                data.store, approval_id,
+                status=STATUS_CANCELLED,
+                approved_by_user_id=user.id,
+                rejected_reason=REASON_KILL_SWITCH,
+            )
+            updated = get_approval(data.store, approval_id)
+            if updated:
+                dismiss_approval_notification(hass, approval_id)
+                fire_approval_resolved_event(hass, updated)
+            return _err("service_unavailable", "Kill switch engaged.", 503, rid)
+
+    # Execute outside the lock so the tool can use it freely.
+    try:
+        tool_result, outcome, _resource = await execute_approved_tool(
+            record.tool_name, record.args, token, hass, data,
+        )
+    except KeyError:
+        return _err("invalid_request", "No executor registered for this tool.", 400, rid)
+    except Exception:
+        _LOGGER.exception("Approval execution failed for %s", approval_id)
+        return _err("internal_error", "Execution failed.", 500, rid)
+
+    is_error = bool(tool_result.get("isError"))
+    saved_result = {"tool_result": tool_result, "outcome": outcome}
+    final_status = STATUS_REJECTED if is_error else STATUS_APPROVED
+    auto_reason = "execution_failed" if is_error else None
+
+    async with data.store.async_lock:
+        updated = await update_approval_status(
+            data.store, approval_id,
+            status=final_status,
+            approved_by_user_id=user.id,
+            rejected_reason=auto_reason,
+            result=saved_result,
+        )
+    if updated is None:
+        return _err("not_found", "Approval not found.", 404, rid)
+    dismiss_approval_notification(hass, approval_id)
+    fire_approval_resolved_event(hass, updated)
+    data.audit.record(
+        request_id=rid,
+        token_id=record.token_id,
+        token_name=record.token_name,
+        method=f"approval/{final_status}",
+        resource=f"approval:{record.tool_name}:{approval_id}",
+        outcome="approval_executed" if final_status == STATUS_APPROVED else f"approval_{final_status}",
+        client_ip=None,
+    )
+    return _ok(updated.to_dict(), request_id=rid)
+
+
 ALL_ADMIN_VIEWS: list[type[HomeAssistantView]] = [
     ATMAdminInfoView,
     ATMAdminArchivedTokensView,
@@ -1185,4 +1463,8 @@ ALL_ADMIN_VIEWS: list[type[HomeAssistantView]] = [
     ATMAdminAuditView,
     ATMAdminSettingsView,
     ATMAdminWipeView,
+    ATMAdminApprovalsView,
+    ATMAdminApprovalView,
+    ATMAdminApprovalApproveView,
+    ATMAdminApprovalRejectView,
 ]

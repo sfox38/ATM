@@ -1,0 +1,940 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Capability UX Redesign + Admin-Confirmation Gate</title>
+<style>
+  :root {
+    --fg: #1f2328;
+    --muted: #57606a;
+    --border: #d0d7de;
+    --border-soft: #eaeef2;
+    --bg: #ffffff;
+    --bg-soft: #f6f8fa;
+    --bg-code: #f6f8fa;
+    --link: #0969da;
+    --accent: #0a3069;
+    --warn-bg: #fff8c5;
+    --warn-border: #d4a72c;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --fg: #e6edf3;
+      --muted: #8b949e;
+      --border: #30363d;
+      --border-soft: #21262d;
+      --bg: #0d1117;
+      --bg-soft: #161b22;
+      --bg-code: #161b22;
+      --link: #58a6ff;
+      --accent: #79c0ff;
+      --warn-bg: #2d2a14;
+      --warn-border: #d4a72c;
+    }
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, "Helvetica Neue", Arial, sans-serif;
+    color: var(--fg);
+    background: var(--bg);
+    line-height: 1.6;
+    font-size: 16px;
+  }
+  .wrap {
+    max-width: 920px;
+    margin: 0 auto;
+    padding: 48px 28px 96px;
+  }
+  h1, h2, h3, h4 {
+    color: var(--accent);
+    line-height: 1.25;
+    margin-top: 1.6em;
+    margin-bottom: 0.5em;
+  }
+  h1 { font-size: 2.1em; margin-top: 0; border-bottom: 2px solid var(--border); padding-bottom: 0.3em; }
+  h2 { font-size: 1.55em; border-bottom: 1px solid var(--border-soft); padding-bottom: 0.25em; margin-top: 2.2em; }
+  h3 { font-size: 1.2em; }
+  h4 { font-size: 1.05em; color: var(--fg); }
+  p { margin: 0.6em 0; }
+  a { color: var(--link); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  ul, ol { padding-left: 1.6em; }
+  li { margin: 0.3em 0; }
+  code {
+    font-family: "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+    font-size: 0.9em;
+    background: var(--bg-soft);
+    padding: 0.12em 0.36em;
+    border-radius: 4px;
+  }
+  pre {
+    background: var(--bg-code);
+    border: 1px solid var(--border-soft);
+    border-radius: 6px;
+    padding: 14px 16px;
+    overflow-x: auto;
+    line-height: 1.45;
+    font-size: 0.88em;
+  }
+  pre code {
+    background: transparent;
+    padding: 0;
+    border-radius: 0;
+    font-size: inherit;
+  }
+  table {
+    border-collapse: collapse;
+    margin: 1em 0;
+    width: 100%;
+    font-size: 0.92em;
+  }
+  th, td {
+    border: 1px solid var(--border);
+    padding: 8px 12px;
+    text-align: left;
+    vertical-align: top;
+  }
+  th { background: var(--bg-soft); font-weight: 600; }
+  tr:nth-child(even) td { background: var(--bg-soft); }
+  hr {
+    border: 0;
+    border-top: 1px solid var(--border);
+    margin: 2.4em 0;
+  }
+  blockquote {
+    border-left: 3px solid var(--border);
+    margin: 0.8em 0;
+    padding: 0.4em 1em;
+    color: var(--muted);
+    background: var(--bg-soft);
+    border-radius: 0 4px 4px 0;
+  }
+  .meta { color: var(--muted); font-size: 0.92em; margin-top: -1.2em; }
+  .toc {
+    background: var(--bg-soft);
+    border: 1px solid var(--border-soft);
+    border-radius: 6px;
+    padding: 16px 20px;
+    margin: 24px 0 32px;
+  }
+  .toc h2 { margin: 0 0 0.5em 0; border: none; font-size: 1.05em; }
+  .toc ol { margin: 0; padding-left: 1.4em; }
+  .toc ol ol { font-size: 0.92em; padding-left: 1.2em; }
+  .toc li { margin: 0.15em 0; }
+  .callout {
+    background: var(--warn-bg);
+    border-left: 4px solid var(--warn-border);
+    padding: 10px 16px;
+    border-radius: 0 4px 4px 0;
+    margin: 1em 0;
+  }
+  .num { color: var(--muted); font-variant-numeric: tabular-nums; }
+  strong { color: var(--fg); }
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<h1>Plan: Capability UX Redesign + Admin-Confirmation Gate</h1>
+<p class="meta">ATM custom integration &middot; prerequisite to MCP tool expansion</p>
+
+<div class="toc">
+<h2>Contents</h2>
+<ol>
+  <li><a href="#context">Context</a></li>
+  <li><a href="#goals">Goals</a></li>
+  <li><a href="#cap-model">Design: Capability Model</a>
+    <ol>
+      <li><a href="#tristate">Tri-state per capability</a></li>
+      <li><a href="#personas">Personas (hardcoded presets)</a></li>
+      <li><a href="#passthrough-matrix">Pass-through &times; tri-state matrix</a></li>
+    </ol>
+  </li>
+  <li><a href="#gate">Design: Admin-Confirmation Gate</a>
+    <ol>
+      <li><a href="#lifecycle">Pending approval lifecycle</a></li>
+      <li><a href="#statemachine">State machine</a></li>
+      <li><a href="#revalidate">Pre-execution re-validation</a></li>
+      <li><a href="#races">Race conditions and ordering</a></li>
+      <li><a href="#idempotency">Idempotency and replay protection</a></li>
+      <li><a href="#tool-response">Tool response shape</a></li>
+      <li><a href="#approval-status">get_approval_status MCP tool</a></li>
+      <li><a href="#admin-endpoints">Admin endpoints</a></li>
+      <li><a href="#notify">Notification dedup and UX</a></li>
+      <li><a href="#record-shape">PendingApproval record shape</a></li>
+      <li><a href="#diffs">Per-tool diff builders</a></li>
+      <li><a href="#diff-size">Diff size policy</a></li>
+      <li><a href="#storage-location">Storage location</a></li>
+      <li><a href="#cap-helper">Generic capability check helper</a></li>
+      <li><a href="#exec-path">Approval execution path</a></li>
+      <li><a href="#events">Notifications and events</a></li>
+      <li><a href="#pull-model">Why pull model</a></li>
+    </ol>
+  </li>
+  <li><a href="#frontend">Design: Frontend UX</a></li>
+  <li><a href="#audit">Audit Log Additions</a></li>
+  <li><a href="#refactor">Capability Check Sites &mdash; Refactor Enumeration</a></li>
+  <li><a href="#migration">Storage Migration</a></li>
+  <li><a href="#files">Critical Files</a></li>
+  <li><a href="#helpers">Existing Helpers to Reuse</a></li>
+  <li><a href="#verify">Verification</a></li>
+  <li><a href="#memory">Memory Updates</a></li>
+  <li><a href="#oos">Out of Scope (deferred)</a></li>
+</ol>
+</div>
+
+<h2 id="context">Context</h2>
+
+<p>The user wants to expand ATM's MCP tool surface (informed by <a href="https://github.com/homeassistant-ai/ha-mcp">homeassistant-ai/ha-mcp</a>) but the existing capability flags panel is already near-unwieldy at 9 flags. Adding ~11 more flags to support new tool categories (discovery, registry CRUD, scenes/helpers, traces, backup, integration management, dashboards, file system, YAML editing) would push the panel past usable.</p>
+
+<p>Two pieces of UX redesign are the right move <em>before</em> expansion:</p>
+
+<ol>
+  <li><strong>Personas + per-flag tri-state picker.</strong> Replace the wall-of-toggles with role-based presets (Voice Assistant, Automation Builder, etc.) plus a customize view where each capability has three states: <strong>Deny / Allow / Confirm</strong>.</li>
+  <li><strong>Generic admin-confirmation gate.</strong> When a capability is set to "Confirm," the token's request creates a pending approval record and returns a structured "pending" response. The admin reviews the full diff/args in a new panel page and approves or rejects. Approved actions execute on approval; rejected actions are dropped; unanswered actions expire.</li>
+</ol>
+
+<p>This subsumes the "should we add raw <code>configuration.yaml</code> editing?" question. The confirmation gate makes risky capabilities safer in general &mdash; the admin reviews each invocation at the moment it matters, instead of granting blanket permission upfront. (Note on YAML editing specifically: ha-mcp routes through a custom component for technical reasons, not security ones &mdash; the HA REST API can't write <code>configuration.yaml</code>. ATM is already a custom integration, so the same <code>_write_utf8_file_atomic</code> path used for <code>automations.yaml</code> would work directly.)</p>
+
+<p>This plan covers only the redesign. <strong>Tool expansion is deferred</strong> to a follow-up plan that builds on the new capability model.</p>
+
+<hr>
+
+<h2 id="goals">Goals</h2>
+
+<ul>
+  <li>Replace boolean capability flags with a tri-state model (Deny / Allow / Confirm).</li>
+  <li>Introduce hardcoded personas as presets; allow free-form override.</li>
+  <li>Build a generic pending-approval queue + admin review UI that any "Confirm" capability can route through.</li>
+  <li>Migrate existing storage cleanly. No regressions in existing tools.</li>
+  <li>Keep the model uniform across MCP tools, REST proxy, and admin operations &mdash; capability evaluation lives in one place.</li>
+</ul>
+
+<hr>
+
+<h2 id="cap-model">Design: Capability Model</h2>
+
+<h3 id="tristate">Tri-state per capability</h3>
+
+<p>Each existing <code>allow_*</code> boolean becomes a <code>cap_*</code> enum with values <code>"deny" | "allow" | "confirm"</code>. Capabilities with no realistic confirm semantics (e.g. <code>allow_template_render</code>, <code>allow_log_read</code>) keep deny/allow only &mdash; the UI hides the confirm option for them, but storage still uses the enum for uniformity.</p>
+
+<p>Capability tiers (drives UI grouping and which caps offer Confirm):</p>
+
+<table>
+<thead><tr><th>Tier</th><th>Caps</th><th>Confirm available?</th></tr></thead>
+<tbody>
+<tr><td>Read</td><td><code>cap_search</code>, <code>cap_registry_read</code>, <code>cap_config_read</code>, <code>cap_template_render</code>, <code>cap_log_read</code>, <code>cap_traces</code>, <code>cap_diagnostics</code></td><td>No</td></tr>
+<tr><td>Everyday write</td><td><code>cap_broadcast</code>, <code>cap_service_response</code></td><td>No</td></tr>
+<tr><td>Config write</td><td><code>cap_automation_write</code>, <code>cap_script_write</code>, <code>cap_scene_write</code>, <code>cap_helper_write</code></td><td>Yes</td></tr>
+<tr><td>System</td><td><code>cap_restart</code>, <code>cap_physical_control</code>, <code>cap_integration_write</code>, <code>cap_lovelace_write</code></td><td>Yes</td></tr>
+<tr><td>Irreversible</td><td><code>cap_backup</code>, <code>cap_filesystem</code>, <code>cap_yaml_edit</code></td><td>Yes (Confirm strongly recommended)</td></tr>
+</tbody>
+</table>
+
+<p>Caps in tiers 3-5 default to Deny when undefined. Caps in tiers 1-2 inherit from persona.</p>
+
+<h3 id="personas">Personas (hardcoded presets) &mdash; fully populated for v2</h3>
+
+<p>Defined in a new <code>personas.py</code>. Personas reference <strong>only the 9 caps that exist post-migration</strong> (the v1 flags renamed to <code>cap_*</code>). When tool expansion lands later, the persona table extends to cover new caps &mdash; that's part of the follow-up plan.</p>
+
+<table>
+<thead>
+<tr><th>Cap</th><th>Tier</th><th>Confirm allowed?</th><th><code>read_only</code></th><th><code>voice_assistant</code></th><th><code>automation_builder</code></th><th><code>power_user</code></th><th><code>custom</code></th></tr>
+</thead>
+<tbody>
+<tr><td><code>cap_config_read</code></td><td>Read</td><td>No</td><td>allow</td><td>allow</td><td>allow</td><td>allow</td><td>(admin sets)</td></tr>
+<tr><td><code>cap_template_render</code></td><td>Read</td><td>No</td><td>allow</td><td>allow</td><td>allow</td><td>allow</td><td>(admin sets)</td></tr>
+<tr><td><code>cap_log_read</code></td><td>Read</td><td>No</td><td>allow</td><td>allow</td><td>allow</td><td>allow</td><td>(admin sets)</td></tr>
+<tr><td><code>cap_broadcast</code></td><td>Everyday</td><td>No</td><td>deny</td><td>allow</td><td>allow</td><td>allow</td><td>(admin sets)</td></tr>
+<tr><td><code>cap_service_response</code></td><td>Everyday</td><td>No</td><td>allow</td><td>allow</td><td>allow</td><td>allow</td><td>(admin sets)</td></tr>
+<tr><td><code>cap_automation_write</code></td><td>Config write</td><td>Yes</td><td>deny</td><td>deny</td><td>allow</td><td>allow</td><td>(admin sets)</td></tr>
+<tr><td><code>cap_script_write</code></td><td>Config write</td><td>Yes</td><td>deny</td><td>deny</td><td>allow</td><td>allow</td><td>(admin sets)</td></tr>
+<tr><td><code>cap_physical_control</code></td><td>System</td><td>Yes</td><td>deny</td><td>confirm</td><td>confirm</td><td>confirm</td><td>(admin sets)</td></tr>
+<tr><td><code>cap_restart</code></td><td>System</td><td>Yes</td><td>deny</td><td>deny</td><td>confirm</td><td>allow</td><td>(admin sets)</td></tr>
+</tbody>
+</table>
+
+<p>Notes:</p>
+<ul>
+  <li><code>read_only</code> is a true observer: read-tier capabilities allowed, no writes anywhere. <code>cap_service_response</code> allowed because it gates whether successful service-call output is returned, not whether services run.</li>
+  <li><code>voice_assistant</code> adds broadcast (announce-to-the-house) and Confirm-gates physical_control &mdash; the LLM can request a lock/cover action, admin reviews. No automation/script writes.</li>
+  <li><code>automation_builder</code> adds config writes plus a Confirm gate on restart. Physical control still Confirm.</li>
+  <li><code>power_user</code> is the closest persona to legacy "all flags on" &mdash; reads + writes + restart allowed; physical_control retained as Confirm because that's the one capability where surprise costs (door unlocks unexpectedly) are uniquely high.</li>
+  <li><code>custom</code> is the explicit opt-out from presets; the matrix shows admin-set values only.</li>
+  <li>The existing <code>pass_through</code> boolean is <strong>not</strong> a persona; it's an orthogonal flag that toggles the entity permission tree bypass. Any persona can be combined with pass_through.</li>
+</ul>
+
+<p>Personas are NOT enforced after selection &mdash; they only seed the matrix. After applying, the admin can override individual caps. The token records which persona it was seeded from (<code>persona: str | None</code>) for display only; if values diverge, UI shows "Custom (was: voice_assistant)".</p>
+
+<h3 id="passthrough-matrix">Pass-through &times; tri-state matrix</h3>
+
+<p>Pass-through bypasses the <strong>entity permission tree</strong>, but capability checks remain. The interaction with the tri-state cap mode and <code>PASS_THROUGH_EXEMPT_FLAGS</code>:</p>
+
+<table>
+<thead><tr><th>Cap is exempt?</th><th>Cap mode</th><th>Pass-through token</th><th>Scoped token</th></tr></thead>
+<tbody>
+<tr><td>Yes</td><td><code>deny</code></td><td>Blocked (403)</td><td>Blocked (403)</td></tr>
+<tr><td>Yes</td><td><code>allow</code></td><td>Allowed</td><td>Allowed</td></tr>
+<tr><td>Yes</td><td><code>confirm</code></td><td>Routes through gate</td><td>Routes through gate</td></tr>
+<tr><td>No</td><td><code>deny</code></td><td><strong>Bypassed</strong> &rarr; allowed</td><td>Blocked (403)</td></tr>
+<tr><td>No</td><td><code>allow</code></td><td>Allowed</td><td>Allowed</td></tr>
+<tr><td>No</td><td><code>confirm</code></td><td><strong>Routes through gate</strong> (intent preserved)</td><td>Routes through gate</td></tr>
+</tbody>
+</table>
+
+<div class="callout">
+<p><strong>Two design decisions encoded here, both call-outs in CLAUDE.md after this lands:</strong></p>
+<ol>
+  <li><strong><code>deny</code> is overridden by pass-through for non-exempt caps</strong> (existing v1 behavior, preserved). Admin who wants to lock down a non-exempt capability for a pass-through token must mark the cap exempt or revoke pass-through.</li>
+  <li><strong><code>confirm</code> is honored even for non-exempt caps under pass-through</strong> (new). If admin set Confirm, they wanted the gate. Pass-through is a permission-tree convenience, not a license to skip explicit confirmation gates. This means admins can grant pass-through tokens "everything" while still requiring confirm on, e.g., physical_control.</li>
+</ol>
+</div>
+
+<p><code>PASS_THROUGH_EXEMPT_FLAGS</code> (in const.py) gets renamed to <code>PASS_THROUGH_EXEMPT_CAPS</code> and updated to use the new <code>cap_*</code> names. Existing exempt set: <code>cap_restart</code>, <code>cap_physical_control</code>, <code>cap_automation_write</code>, <code>cap_script_write</code>, <code>cap_log_read</code>. New caps added later (backup, integration_write, etc.) join the exempt set as appropriate.</p>
+
+<hr>
+
+<h2 id="gate">Design: Admin-Confirmation Gate</h2>
+
+<h3 id="lifecycle">Pending approval lifecycle</h3>
+
+<pre><code>LLM calls tool with cap_X = "confirm"
+  -&gt; handler creates PendingApproval record
+  -&gt; persistent notification fires
+  -&gt; response to LLM: { status: "pending_approval", approval_id, expires_at }
+  -&gt; LLM moves on or polls
+
+Admin opens /atm panel -&gt; Approvals view
+  -&gt; sees pending list with diff/args
+  -&gt; approves: original tool runs server-side with saved args
+                result stored on approval record
+                approval status -&gt; "approved", result available
+  -&gt; rejects:  approval status -&gt; "rejected", optional reason
+  -&gt; ignores:  TTL expires (default 1 hour), status -&gt; "expired"
+
+LLM polls via new tool get_approval_status(approval_id)
+  -&gt; returns current status + result if approved
+</code></pre>
+
+<h3 id="statemachine">State machine</h3>
+
+<pre><code>                            +---------+
+                            | pending |
+                            +----+----+
+                                 |
+        +-------------+----------+-----------+----------------+
+        |             |          |           |                |
+   admin           admin       TTL        token             admin
+   approves        rejects     expires    revoked /         cancels
+        |             |          |        kill switch          |
+        v             v          v           |                  v
+   +--------+    +--------+  +-------+        v             +---------+
+   |approved|    |rejected|  |expired|   +---------+        |cancelled|
+   +--------+    +--------+  +-------+   |cancelled|        +---------+
+                                         +---------+
+</code></pre>
+
+<p>Terminal states: <code>approved</code>, <code>rejected</code>, <code>expired</code>, <code>cancelled</code>. No further transitions. All transitions out of <code>pending</code> happen under <code>store.async_lock</code>; first writer wins.</p>
+
+<h3 id="revalidate">Pre-execution re-validation (at admin approve)</h3>
+
+<p>Before the approval handler executes the saved action, re-validate all of the following under the lock. Any failure transitions to <code>rejected</code> automatically (not requiring admin reject) with <code>rejected_reason</code> set:</p>
+
+<ol>
+  <li><strong>Token still active.</strong> If revoked or archived: <code>cancelled</code> with reason <code>token_inactive</code>.</li>
+  <li><strong>Cap mode still permits execution.</strong> If admin changed the cap to <code>deny</code> since the request: <code>rejected</code> with reason <code>capability_denied</code>. If still <code>allow</code> or <code>confirm</code>, proceed.</li>
+  <li><strong>Entity scope still valid</strong> (for tools with entity targets). Re-resolve targets through <code>resolve_intent_entities()</code> and verify each is still WRITE-accessible. If any target moved out of scope: <code>rejected</code> with reason <code>target_out_of_scope</code>. List dropped entities in audit (not in user-facing reason).</li>
+  <li><strong>Underlying object still exists</strong> (for edits and deletes). Confirm the target automation_id, script_id, scene_id, etc. still exists. If deleted by another path: <code>rejected</code> with reason <code>target_missing</code>.</li>
+  <li><strong>Token rate limit not exhausted.</strong> If at limit: <code>rejected</code> with reason <code>rate_limited_at_execution</code>. Better to surface than silently apply rate-limited writes.</li>
+  <li><strong>Kill switch not engaged.</strong> If engaged: <code>cancelled</code> with reason <code>kill_switch</code>.</li>
+</ol>
+
+<p>Only after all checks pass, the saved action runs. The execution audit entry is attributed to the <strong>requesting token</strong> (so the token's audit log shows what was done in its name) with <code>approved_by_user_id</code> capturing the admin's HA user_id as metadata.</p>
+
+<h3 id="races">Race conditions and ordering</h3>
+
+<p>All status transitions hold <code>store.async_lock</code>. Every concurrency case below resolves cleanly under the lock:</p>
+
+<table>
+<thead><tr><th>Concurrent operations</th><th>Resolution</th></tr></thead>
+<tbody>
+<tr><td>Approve + reject (two admins)</td><td>First writer wins. Loser receives 409 Conflict with current status.</td></tr>
+<tr><td>Approve + TTL expiry</td><td>Lock serializes. If sweeper acquires first, status is <code>expired</code>; admin POST returns 409.</td></tr>
+<tr><td>Approve + token revocation</td><td>Revoke handler scans <code>pending_approvals</code> and sets all token's pendings to <code>cancelled</code> under lock. If admin approve gets lock first, executes; revoke sees no pending. If revoke wins, admin POST returns 409 with status <code>cancelled</code>.</td></tr>
+<tr><td>Approve + kill switch engage</td><td>Same as revocation. Sweeper plus engage path both transition pendings to <code>cancelled</code>.</td></tr>
+<tr><td>Approve + cap downgrade</td><td>Pre-execute re-validation handles. Admin sees execution result with <code>rejected: capability_denied</code> if applicable.</td></tr>
+<tr><td>Two LLM polls during approve</td><td>Read-only; no contention. Both see the new state once written.</td></tr>
+<tr><td>LLM polls + reject</td><td>Reject completes under lock; subsequent poll returns rejected status.</td></tr>
+</tbody>
+</table>
+
+<h3 id="idempotency">Idempotency and replay protection</h3>
+
+<ul>
+  <li><code>POST /api/atm/admin/approvals/{id}/approve</code> and <code>/reject</code> are idempotent on <code>(approval_id, terminal_status)</code>. Repeating an approve on an already-approved request returns the cached record with status 200 (no re-execution). Repeating an approve on a rejected request returns 409.</li>
+  <li>Admin endpoints accept an optional <code>If-Match: &lt;ETag&gt;</code> header carrying the current pending record's hash. If the record changed (e.g., transitioned to expired by sweeper) since the admin viewed it, return 412 Precondition Failed. UI auto-refreshes on 412.</li>
+  <li>All admin POST bodies validated against a strict schema; unknown fields rejected.</li>
+</ul>
+
+<h3 id="tool-response">Tool response when cap mode = <code>confirm</code></h3>
+
+<p>JSON-RPC tool result envelope (matches existing <code>_tool_success</code> shape so clients don't break):</p>
+
+<pre><code>{
+  "content": [{
+    "type": "text",
+    "text": "{\"status\":\"pending_approval\",\"approval_id\":\"appr_abc123\",\"expires_at\":\"2026-05-10T13:30:00Z\",\"review_url\":\"/atm#approvals/appr_abc123\",\"message\":\"This action requires admin approval. The admin has been notified.\"}"
+  }],
+  "isError": false
+}</code></pre>
+
+<p><code>isError: false</code> because pending is a valid outcome, not a tool error. The LLM should not retry; it should poll <code>get_approval_status</code> later or move on. (REST endpoints that gate on caps return HTTP 202 Accepted with the same JSON body; this is a new outcome alongside the existing 200/4xx codes.)</p>
+
+<h3 id="approval-status"><code>get_approval_status</code> MCP tool</h3>
+
+<pre><code>{
+  "name": "get_approval_status",
+  "description": "Check the status of a pending approval created by a previous tool call. Returns status (pending/approved/rejected/expired/cancelled), and the result if approved.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "approval_id": {"type": "string"}
+    },
+    "required": ["approval_id"]
+  }
+}</code></pre>
+
+<p>Always available &mdash; no capability flag required, since the LLM is only ever fetching the status of approvals it created. Tokens can only fetch their own approvals; cross-token reads return 404 (not 403, to avoid an existence oracle). Successful response shape:</p>
+
+<pre><code>{
+  "approval_id": "appr_abc123",
+  "status": "approved",
+  "tool_name": "edit_automation",
+  "created_at": "2026-05-10T12:30:00Z",
+  "expires_at": "2026-05-10T13:30:00Z",
+  "resolved_at": "2026-05-10T12:42:00Z",
+  "result": { "automation_id": "atm_xyz", "alias": "Morning routine" },
+  "rejected_reason": null
+}</code></pre>
+
+<h3 id="admin-endpoints">Admin endpoints</h3>
+
+<ul>
+  <li><code>GET /api/atm/admin/approvals?status=pending&amp;token_id=X&amp;limit=50&amp;offset=0</code> &mdash; paginated list. Default returns pending across all tokens.</li>
+  <li><code>GET /api/atm/admin/approvals/{id}</code> &mdash; full record including diff and full args.</li>
+  <li><code>POST /api/atm/admin/approvals/{id}/approve</code> &mdash; body <code>{}</code> or <code>{"note": "..."}</code>; returns the updated record after re-validation and execution.</li>
+  <li><code>POST /api/atm/admin/approvals/{id}/reject</code> &mdash; body <code>{"reason": "..."}</code> (admin-supplied human reason; distinct from auto-rejection reasons); returns updated record.</li>
+  <li><code>DELETE /api/atm/admin/approvals/{id}</code> &mdash; admin cancellation alias for reject with <code>reason: "admin_cancelled"</code>.</li>
+</ul>
+
+<p>All require HA admin session (existing <code>require_admin</code> helper). All recorded in audit log with <code>token_id="admin"</code>, <code>token_name=f"admin:{user_id}"</code>.</p>
+
+<h3 id="notify">Notification dedup and UX</h3>
+
+<ul>
+  <li>Persistent notification ID format: <code>atm_approval_{approval_id}</code>.</li>
+  <li>Notification is <strong>dismissed</strong> (not just updated) on resolve &mdash; admin shouldn't see stale entries.</li>
+  <li>Multiple pending approvals from the same token: each gets its own notification.</li>
+  <li>HA event <code>atm_approval_requested</code> fires on creation; <code>atm_approval_resolved</code> fires on terminal status with the resolution kind. This lets admins build their own automations (e.g., push to mobile, Slack notify).</li>
+</ul>
+
+<h3 id="record-shape">PendingApproval record shape (storage)</h3>
+
+<pre><code>{
+  "id": "appr_&lt;uuid&gt;",
+  "token_id": "...",
+  "token_name": "...",
+  "tool_name": "edit_automation",
+  "args": { "automation_id": "atm_xyz", "config": {...} },
+  "diff": { /* see Per-tool diff builders below */ },
+  "status": "pending",
+  "created_at": "ISO",
+  "expires_at": "ISO",
+  "resolved_at": null,
+  "approved_by_user_id": null,
+  "rejected_reason": null,
+  "result": null,
+  "request_id": "X-ATM-Request-ID from original call",
+  "client_ip": "..."
+}</code></pre>
+
+<h3 id="diffs">Per-tool diff builders</h3>
+
+<p>Every approval record carries a <code>diff</code> field with a uniform envelope. The <code>kind</code> discriminates how the frontend renders it. Each Confirm-eligible tool implements a <code>_build_diff_&lt;tool&gt;(args, token, hass) -&gt; dict</code> function returning this envelope at request time:</p>
+
+<pre><code>{
+  "kind": "yaml_diff" | "config_diff" | "service_preview" | "system_action" | "file_write",
+  "summary": "Edit automation 'morning_routine'",
+  "target": { "type": "automation", "id": "atm_xyz", "label": "Morning routine" },
+  "before": "...",
+  "after": "...",
+  "preview": { /* kind-specific structured detail */ }
+}</code></pre>
+
+<p>Per-tool diff content (initial set &mdash; extends as new tools are added later):</p>
+
+<table>
+<thead><tr><th>Tool</th><th><code>kind</code></th><th>Content</th></tr></thead>
+<tbody>
+<tr><td><code>edit_automation</code></td><td><code>yaml_diff</code></td><td><code>before</code>: current YAML for this automation_id (extracted from automations.yaml). <code>after</code>: proposed YAML. <code>preview.referenced_entities</code>: entity IDs the new config references, with current accessibility status.</td></tr>
+<tr><td><code>create_automation</code></td><td><code>config_diff</code></td><td><code>before</code>: null. <code>after</code>: proposed config + computed automation_id. <code>preview.referenced_entities</code>: same.</td></tr>
+<tr><td><code>delete_automation</code></td><td><code>system_action</code></td><td><code>before</code>: full current YAML. <code>preview.referenced_by</code>: scenes/scripts that reference this automation (best-effort cross-ref).</td></tr>
+<tr><td><code>edit_script</code> / <code>create_script</code> / <code>delete_script</code></td><td>same as automation</td><td>Same shape, scoped to scripts.yaml.</td></tr>
+<tr><td><code>restart_ha</code></td><td><code>system_action</code></td><td><code>preview</code>: count of currently active SSE connections that will disconnect, list of recently fired automations in the last 5 minutes (so admin sees what was happening).</td></tr>
+<tr><td><code>call_service</code> (when gated by <code>cap_physical_control</code> or future caps)</td><td><code>service_preview</code></td><td><code>preview.domain</code>, <code>preview.service</code>, <code>preview.resolved_entity_ids</code> (full list after target resolution), <code>preview.service_data</code>, <code>preview.entities_dropped</code> (entities the LLM targeted that the token cannot WRITE &mdash; not blocking, just transparency).</td></tr>
+<tr><td>(Future) <code>restore_backup</code></td><td><code>system_action</code></td><td><code>target.id</code>: backup name. <code>preview.created_at</code>: backup age. <code>preview.warning</code>: "this will overwrite all current state".</td></tr>
+<tr><td>(Future) <code>set_yaml_config</code></td><td><code>yaml_diff</code></td><td>Full configuration.yaml before/after. Capped at 100KB inline; over that, hash-only with separate fetch endpoint.</td></tr>
+<tr><td>(Future) <code>write_file</code></td><td><code>file_write</code></td><td><code>target.path</code>, <code>before</code> (truncated), <code>after</code> (truncated), full diff available via fetch endpoint if oversized.</td></tr>
+</tbody>
+</table>
+
+<h3 id="diff-size">Diff size policy</h3>
+
+<ul>
+  <li>Inline <code>before</code>/<code>after</code> capped at 100KB combined per record. Records exceeding the cap store a content hash and the first/last 50 lines; full content is fetchable via <code>GET /api/atm/admin/approvals/{id}/diff/full</code> (admin-only).</li>
+  <li><code>service_preview.resolved_entity_ids</code> capped at 500 entries inline; over that, paginated.</li>
+  <li>All caps live in <code>const.py</code> (<code>MAX_DIFF_INLINE_BYTES</code>, <code>MAX_PREVIEW_ENTITY_IDS</code>) so they can be tuned without code changes.</li>
+</ul>
+
+<h3 id="storage-location">Storage location</h3>
+
+<p>Add <code>pending_approvals: []</code> array to <code>.storage/atm.json</code>. Cap to <code>MAX_PENDING_APPROVALS = 100</code> per token (reject new requests with 429 if at cap). Cleanup task runs every 5 minutes (reuse the existing <code>async_track_time_interval</code> cadence) to expire stale entries.</p>
+
+<h3 id="cap-helper">Generic capability check helper</h3>
+
+<p>Replace scattered <code>if not token.allow_X: return 403</code> checks with a single helper in <code>helpers.py</code>:</p>
+
+<pre><code>async def evaluate_capability(
+    cap_name: str,
+    token: TokenRecord,
+    hass: HomeAssistant,
+    *,
+    diff_builder: Callable[[], dict] | None = None,
+    args: dict,
+    tool_name: str,
+    request_id: str,
+) -&gt; CapabilityResult:
+    """Returns Allow / Deny / PendingApproval(approval_id)."""</code></pre>
+
+<p>Each tool handler calls this once at the top:</p>
+
+<pre><code>result = await evaluate_capability("cap_yaml_edit", token, hass, ...)
+if result.is_deny:
+    return _tool_error("Forbidden")
+if result.is_pending:
+    return _tool_pending(result.approval_id, result.expires_at)
+# proceed with action</code></pre>
+
+<h3 id="exec-path">Approval execution path</h3>
+
+<p>When the admin approves, the backend re-runs the tool's server-side action using the saved args. To make this safe and reusable, factor each tool handler into:</p>
+
+<ol>
+  <li><code>_tool_&lt;name&gt;(args, token, hass)</code> &mdash; entry point: capability check + dispatch.</li>
+  <li><code>_execute_&lt;name&gt;(args, token, hass)</code> &mdash; pure side-effect path that assumes capability is satisfied.</li>
+</ol>
+
+<p><code>_execute_&lt;name&gt;</code> is what the approval handler calls. The original <code>_tool_&lt;name&gt;</code> calls it after a successful Allow check. This is the only refactor required for existing tools that gain a Confirm option.</p>
+
+<h3 id="events">Notifications and events</h3>
+
+<ul>
+  <li>Persistent notification fired on creation: <code>"ATM: Token '{name}' requested {tool_name}. Review at /atm#approvals."</code></li>
+  <li>HA event <code>atm_approval_requested</code> fires for automation hooks (e.g. push notification to admin's phone).</li>
+  <li>HA event <code>atm_approval_resolved</code> fires on approve/reject/expire with status.</li>
+</ul>
+
+<h3 id="pull-model">Why pull model (LLM polls) over hold-the-connection</h3>
+
+<p>Holding the SSE/HTTP connection until admin approves means a tool call can hang for an hour. Most clients time out. Pull model: handler returns immediately with <code>pending_approval</code>; LLM either tells the user "this needs admin approval, I'll check back" or polls via <code>get_approval_status</code>. Cleaner for everyone.</p>
+
+<hr>
+
+<h2 id="frontend">Design: Frontend UX</h2>
+
+<h3>New components</h3>
+
+<ol>
+  <li><strong><code>PersonaPicker</code></strong> &mdash; radio list of personas with one-line descriptions. Selecting one populates the matrix below via PATCH. After applying, the token's <code>persona</code> field records the seed; if the admin then overrides individual caps, the picker shows the persona name with a "(modified)" label and a "Reset to persona defaults" button.</li>
+  <li><strong><code>CapabilityMatrix</code></strong> &mdash; replaces the current toggle list. Rows grouped by tier (Read / Everyday / Config / System / Irreversible) with collapsible group headers. Each row: capability label + one-line description on the left, three radio buttons (Deny / Allow / Confirm) on the right. Caps not in <code>CONFIRM_AVAILABLE_CAPS</code> render Confirm as disabled with a tooltip ("Confirm gating is not meaningful for this capability"). Risk badge per row.</li>
+  <li><strong><code>ApprovalsView</code></strong> &mdash; new top-level panel page (<code>/atm#approvals</code>). See layout below.</li>
+</ol>
+
+<h3><code>ApprovalsView</code> layout and behavior</h3>
+
+<pre><code>+------------------------------------------------------------------+
+| Approvals                                  [Pending 3] [History] |
++------------------------------------------------------------------+
+|                                                                  |
+| Pending approvals                              [Refresh] [TTL]   |
+|                                                                  |
+| +--------------------------------------------------------------+ |
+| | morning_assistant      edit_automation       2m ago, 58m left|
+| | "Edit automation 'morning_routine'"                          | |
+| | Targets: light.kitchen, switch.coffee_maker                  | |
+| | [Review]                [Reject]                             | |
+| +--------------------------------------------------------------+ |
+| | ...                                                          | |
++------------------------------------------------------------------+</code></pre>
+
+<p><strong>Review modal (expanded card)</strong>:</p>
+<ul>
+  <li>Header: token name (link to token detail), tool name, request_id, request time, expiry countdown.</li>
+  <li>Tabs: <strong>Diff</strong> (rendered per <code>kind</code>), <strong>Raw args</strong> (JSON), <strong>Targets</strong> (resolved entity list + accessibility status), <strong>Token activity</strong> (last 20 audit entries for this token).</li>
+  <li>Approve button: confirm-action dialog showing the action summary, requires explicit click-through. Shows pre-execute re-validation results inline before final commit.</li>
+  <li>Reject button: optional reason textarea.</li>
+</ul>
+
+<p><strong>Diff rendering by <code>kind</code></strong>:</p>
+<ul>
+  <li><code>yaml_diff</code>: side-by-side diff view. Use a small dependency-free diff renderer (e.g. roll our own line-diff in TS &mdash; the existing codebase already has TypeScript and we don't want to pull in Monaco for one view). Syntax-highlight YAML via a tiny custom highlighter or <code>prismjs</code> if already in deps.</li>
+  <li><code>config_diff</code>: tree view with added/removed/changed nodes highlighted.</li>
+  <li><code>service_preview</code>: table of resolved entity IDs with current state column, plus the service name and structured <code>service_data</code> block.</li>
+  <li><code>system_action</code>: simple text panel with summary + structured <code>preview</code> rendered as a key-value list.</li>
+  <li><code>file_write</code>: text diff like <code>yaml_diff</code> but with the file path prominent.</li>
+</ul>
+
+<p><strong>Real-time updates</strong>: poll <code>GET /api/atm/admin/approvals?status=pending</code> every 10 seconds while the view is open. Pending approvals are admin-driven (admin opens panel, sees list, acts) &mdash; push isn't required for v1. Optimistic UI on approve/reject (update card immediately, reconcile on response). Defer SSE-from-admin to a later iteration.</p>
+
+<p><strong>Empty state</strong>: "No pending approvals. Tokens with Confirm-mode capabilities will create requests here. Approvals expire after {ttl_minutes} minutes."</p>
+
+<p><strong>Accessibility</strong>:</p>
+<ul>
+  <li>Diff hunks are individually focusable with keyboard navigation (<code>j</code>/<code>k</code> or arrow keys to move between hunks).</li>
+  <li>Added/removed lines use both color and a leading <code>+</code>/<code>-</code> glyph so colorblind users aren't reliant on hue alone.</li>
+  <li>Approve/Reject buttons have full ARIA labels including the action ("Approve edit_automation for token morning_assistant").</li>
+  <li>Live regions announce new pending approvals on poll-tick when the view is open.</li>
+</ul>
+
+<h3>Existing components touched</h3>
+
+<ul>
+  <li><code>TokenDetail.tsx</code> &mdash; replace flag toggles with <code>&lt;PersonaPicker /&gt;</code> + <code>&lt;CapabilityMatrix /&gt;</code>. The existing entity permission tree stays untouched.</li>
+  <li>Main panel nav &mdash; add "Approvals" tab with a badge showing count of pending. Badge updates via the same poll cycle.</li>
+  <li>Settings &mdash; add <code>default_approval_ttl_minutes</code> setting (default 60, range 5&ndash;1440).</li>
+</ul>
+
+<hr>
+
+<h2 id="audit">Audit Log Additions</h2>
+
+<p>The existing <code>audit.py</code> circular buffer entry shape (per CLAUDE.md): <code>request_id</code>, <code>timestamp</code>, <code>token_id</code>, <code>token_name</code>, <code>method</code>, <code>resource</code>, <code>outcome</code>, <code>client_ip</code>.</p>
+
+<h3>New fields</h3>
+<ul>
+  <li><code>cap_mode_at_check</code>: <code>"deny" | "allow" | "confirm" | null</code> &mdash; what the cap was set to when the check ran. <code>null</code> for entries where no cap was checked (e.g., entity-tree-only checks).</li>
+  <li><code>approval_id</code>: string | null &mdash; set when the entry is the original request that created a pending approval, OR the entry that records execution after admin approval.</li>
+  <li><code>executed_via_approval</code>: bool &mdash; <code>true</code> on the audit entry that records the action's actual execution after admin approval; <code>false</code> on the original gate entry and on entries that didn't go through the gate.</li>
+  <li><code>pass_through_at_check</code>: bool &mdash; was the token in pass_through mode when checked.</li>
+  <li><code>approved_by_user_id</code>: string | null &mdash; set on the execution entry to the admin's HA user_id.</li>
+</ul>
+
+<h3>New <code>outcome</code> values</h3>
+<ul>
+  <li><code>pending_approval</code> &mdash; original request created a pending approval; nothing executed yet.</li>
+  <li><code>approval_executed</code> &mdash; a previously-pending approval was approved and the action ran.</li>
+  <li><code>approval_rejected</code> &mdash; admin rejected (or auto-reject from re-validation failure).</li>
+  <li><code>approval_expired</code> &mdash; TTL elapsed.</li>
+  <li><code>approval_cancelled</code> &mdash; token revoked, kill switch engaged, or admin cancelled.</li>
+</ul>
+
+<h3>Lifecycle example</h3>
+
+<p>A single <code>edit_automation</code> that goes through the gate produces these audit entries:</p>
+
+<table>
+<thead><tr><th>Step</th><th>token_id</th><th>outcome</th><th>approval_id</th><th>executed_via_approval</th><th>approved_by_user_id</th></tr></thead>
+<tbody>
+<tr><td>1. Original tool call</td><td>morning_assistant</td><td><code>pending_approval</code></td><td>appr_xyz</td><td>false</td><td>null</td></tr>
+<tr><td>2. Admin approve action</td><td>admin</td><td><code>allowed</code></td><td>appr_xyz</td><td>false</td><td>(the admin's id)</td></tr>
+<tr><td>3. Action execution</td><td>morning_assistant</td><td><code>approval_executed</code></td><td>appr_xyz</td><td>true</td><td>(the admin's id)</td></tr>
+</tbody>
+</table>
+
+<p>Step 3 is attributed to the requesting token so the token's audit log shows what was done in its name. Admin auth is preserved as metadata via <code>approved_by_user_id</code>. Admin actions on the gate (step 2) live in the admin audit stream.</p>
+
+<p>If the admin rejects instead, only steps 1 and 2 occur, with step 2's outcome <code>denied</code> and a separate cross-reference entry on the requesting token's audit stream with outcome <code>approval_rejected</code>.</p>
+
+<hr>
+
+<h2 id="refactor">Capability Check Sites &mdash; Refactor Enumeration</h2>
+
+<p>Every existing site that checks an <code>allow_*</code> flag becomes a call to the new <code>evaluate_capability()</code> helper. Below is the complete enumeration to verify nothing is missed in implementation.</p>
+
+<h3><code>proxy_view.py</code></h3>
+
+<table>
+<thead><tr><th>Line</th><th>Check today</th><th>Refactored to</th></tr></thead>
+<tbody>
+<tr><td>207</td><td><code>service_key in DUAL_GATE_SERVICES and not token.allow_restart</code> (<code>call_service</code>)</td><td><code>evaluate_capability("cap_restart", ...)</code> &mdash; only invoked when the service hits dual-gate.</td></tr>
+<tr><td>212</td><td><code>service_key in PHYSICAL_GATE_SERVICES and not token.allow_physical_control</code></td><td><code>evaluate_capability("cap_physical_control", ...)</code> &mdash; invoked only when service hits physical gate.</td></tr>
+<tr><td>287</td><td><code>token.allow_service_response or token.pass_through</code> (response opt-in)</td><td>Read <code>token.cap_service_response</code> directly; no gate (deny/allow only, no Confirm). Pass-through still bypasses for non-exempt.</td></tr>
+<tr><td>572</td><td><code>not token.allow_config_read and not token.pass_through</code> (<code>/api/atm/config</code>)</td><td><code>evaluate_capability("cap_config_read", ...)</code>.</td></tr>
+<tr><td>607</td><td><code>not token.allow_template_render and not token.pass_through</code> (template)</td><td><code>evaluate_capability("cap_template_render", ...)</code>.</td></tr>
+<tr><td>688</td><td><code>not token.allow_config_read and not token.pass_through</code> (<code>/api/atm/events</code>)</td><td><code>evaluate_capability("cap_config_read", ...)</code>.</td></tr>
+<tr><td>784</td><td><code>not token.allow_log_read</code> (<code>/api/atm/logs</code>)</td><td><code>evaluate_capability("cap_log_read", ...)</code>.</td></tr>
+</tbody>
+</table>
+
+<p>REST endpoints that gate on Confirm-eligible caps return HTTP 202 Accepted with the pending-approval JSON body when the cap mode is <code>confirm</code>. Endpoints currently gating only on read/write caps without Confirm support continue returning 403 / 200 as today.</p>
+
+<h3><code>mcp_view.py</code></h3>
+
+<table>
+<thead><tr><th>Line</th><th>Check today</th><th>Refactored to</th></tr></thead>
+<tbody>
+<tr><td>918</td><td><code>service_key in DUAL_GATE_SERVICES and not token.allow_restart</code> (call_service tool)</td><td><code>evaluate_capability("cap_restart", ..., diff_builder=_build_diff_call_service)</code>.</td></tr>
+<tr><td>921</td><td><code>service_key in PHYSICAL_GATE_SERVICES and not token.allow_physical_control</code></td><td><code>evaluate_capability("cap_physical_control", ..., diff_builder=_build_diff_call_service)</code>.</td></tr>
+<tr><td>987</td><td><code>token.allow_service_response or token.pass_through</code></td><td>Read <code>token.cap_service_response</code>; no gate.</td></tr>
+<tr><td>1036</td><td><code>_tool_get_config</code> cap_config_read check</td><td><code>evaluate_capability("cap_config_read", ...)</code>.</td></tr>
+<tr><td>1052</td><td><code>_tool_get_logs</code> cap_log_read</td><td><code>evaluate_capability("cap_log_read", ...)</code>.</td></tr>
+<tr><td>1082</td><td><code>_tool_render_template</code> cap_template_render</td><td><code>evaluate_capability("cap_template_render", ...)</code>.</td></tr>
+<tr><td>1132, 1176, 1225</td><td>automation CRUD tools cap_automation_write</td><td><code>evaluate_capability("cap_automation_write", ..., diff_builder=_build_diff_&lt;op&gt;_automation)</code>.</td></tr>
+<tr><td>1255, 1299, 1343</td><td>script CRUD tools cap_script_write</td><td><code>evaluate_capability("cap_script_write", ..., diff_builder=_build_diff_&lt;op&gt;_script)</code>.</td></tr>
+<tr><td>1375</td><td><code>_tool_restart_ha</code> cap_restart</td><td><code>evaluate_capability("cap_restart", ..., diff_builder=_build_diff_restart_ha)</code>.</td></tr>
+<tr><td>1635, 1653</td><td>physical entity filter inside <code>HassTurnOn</code>/<code>HassTurnOff</code> (drop physical entities when not allowed)</td><td>Read <code>token.cap_physical_control</code>; if <code>deny</code>, drop. If <code>allow</code>, include. If <code>confirm</code>, include but flag for the gate. The native tools then call <code>evaluate_capability</code> once with the consolidated entity list before executing.</td></tr>
+<tr><td>1733, 1951</td><td><code>HassSetPosition</code>, <code>HassStopMoving</code></td><td>Same as above.</td></tr>
+<tr><td>1969</td><td><code>HassBroadcast</code> cap_broadcast</td><td><code>evaluate_capability("cap_broadcast", ...)</code> (no Confirm option needed in v1; can be added later).</td></tr>
+<tr><td>2136-2144, 2191-2198, 2263-2271</td><td>Capability summary in tools/list, plain-text context, JSON context</td><td>Replace boolean fields with the new tri-state values. The existing "or pass_through" derivation still applies for non-exempt caps; updated formula in helper.</td></tr>
+</tbody>
+</table>
+
+<p>For each tool listed above with an entry in the diff-builder column, split the handler into <code>_tool_&lt;name&gt;</code> (gate) and <code>_execute_&lt;name&gt;</code> (pure side-effect). The latter is the function the approval handler invokes after admin approval.</p>
+
+<h3><code>admin_view.py</code></h3>
+
+<table>
+<thead><tr><th>Line</th><th>Use today</th><th>Refactored to</th></tr></thead>
+<tbody>
+<tr><td>472-474</td><td>PATCH read-only field allow-list</td><td>Replace <code>allow_*</code> names with <code>cap_*</code> names.</td></tr>
+<tr><td>493-495</td><td>PATCH writable field allow-list</td><td>Same. Add <code>persona</code> to the writable fields. Validate that submitted values are in <code>{"deny", "allow", "confirm"}</code>. Validate that <code>confirm</code> is only submitted for caps in <code>CONFIRM_AVAILABLE_CAPS</code>.</td></tr>
+<tr><td>803-811</td><td>Token serialization</td><td>Replace <code>allow_*</code> keys with <code>cap_*</code> keys. Output the tri-state value. Add <code>persona</code> field. Add <code>pending_approvals_count</code> field.</td></tr>
+</tbody>
+</table>
+
+<p>Add new endpoints (already enumerated above): <code>GET/POST/DELETE</code> on <code>/api/atm/admin/approvals*</code>.</p>
+
+<h3><code>helpers.py</code></h3>
+
+<table>
+<thead><tr><th>Line</th><th>Use today</th><th>Refactored</th></tr></thead>
+<tbody>
+<tr><td>47, 88, 155</td><td><code>pass_through</code> references in entity filtering</td><td>Unchanged; pass_through remains an orthogonal flag.</td></tr>
+</tbody>
+</table>
+
+<p>Add new exports: <code>evaluate_capability()</code>, <code>CapabilityResult</code> dataclass, <code>CapabilityMode</code> enum.</p>
+
+<h3><code>mcp_view.py</code> token-self-summary endpoints</h3>
+
+<p>The endpoints that return the token's effective capabilities for LLM context (lines 2136, 2191, 2263) need updated formulas. New helper <code>effective_cap(token, cap_name) -&gt; "deny" | "allow" | "confirm"</code>:</p>
+
+<pre><code>def effective_cap(token, cap_name) -&gt; str:
+    raw = getattr(token, cap_name)  # "deny" | "allow" | "confirm"
+    if cap_name in PASS_THROUGH_EXEMPT_CAPS:
+        return raw  # exempt: pass-through doesn't affect
+    if token.pass_through:
+        if raw == "confirm":
+            return "confirm"  # design decision: confirm honored under pass-through
+        return "allow"  # deny and allow both -&gt; allow under pass-through
+    return raw</code></pre>
+
+<p>This formula applies anywhere the current code computes <code>flag or token.pass_through</code>. Use it consistently across REST and MCP serialization paths.</p>
+
+<hr>
+
+<h2 id="migration">Storage Migration</h2>
+
+<p><code>STORAGE_VERSION</code> bumps from <code>1</code> to <code>2</code>. Implement <code>async_migrate_func</code> on the Store:</p>
+
+<pre><code>async def _migrate_storage(old_version: int, old_data: dict) -&gt; dict:
+    if old_version == 1:
+        for token in old_data.get("tokens", []) + old_data.get("archived_tokens", []):
+            for old_key in [
+                "allow_automation_write", "allow_script_write", "allow_config_read",
+                "allow_template_render", "allow_restart", "allow_physical_control",
+                "allow_service_response", "allow_broadcast", "allow_log_read",
+            ]:
+                new_key = old_key.replace("allow_", "cap_")
+                token[new_key] = "allow" if token.pop(old_key, False) else "deny"
+            token.setdefault("persona", "custom")
+        old_data.setdefault("pending_approvals", [])
+    return old_data</code></pre>
+
+<p>Run automatically on first load of v1 storage.</p>
+
+<hr>
+
+<h2 id="files">Critical Files</h2>
+
+<table>
+<thead><tr><th>File</th><th>Change</th></tr></thead>
+<tbody>
+<tr><td><code>custom_components/atm/const.py</code></td><td>New: <code>CAPABILITY_NAMES</code>, <code>CAPABILITY_TIERS</code>, <code>CONFIRM_AVAILABLE_CAPS</code>, <code>MAX_PENDING_APPROVALS</code>, <code>APPROVAL_DEFAULT_TTL_SECONDS</code>. Update <code>PASS_THROUGH_EXEMPT_FLAGS</code> to use cap_ names.</td></tr>
+<tr><td><code>custom_components/atm/personas.py</code></td><td>New file. Hardcoded persona definitions and resolver.</td></tr>
+<tr><td><code>custom_components/atm/token_store.py</code></td><td>Replace <code>allow_*</code> bool fields (lines 105-113) with <code>cap_*: str</code> fields. Add <code>persona: str</code> field. Update <code>to_dict</code>/<code>from_dict</code>. Update PATCH allow-list (~line 457). Bump <code>STORAGE_VERSION</code> to 2 and add migration.</td></tr>
+<tr><td><code>custom_components/atm/helpers.py</code></td><td>New <code>evaluate_capability()</code> helper. New <code>CapabilityResult</code> dataclass.</td></tr>
+<tr><td><code>custom_components/atm/approvals.py</code></td><td>New file. <code>PendingApproval</code> dataclass, CRUD over the storage array, expiry sweeper, notification + event firing.</td></tr>
+<tr><td><code>custom_components/atm/mcp_view.py</code></td><td>Replace inline flag checks throughout <code>_tool_*</code> handlers with <code>evaluate_capability()</code>. Split each Confirm-eligible handler into <code>_tool_X</code> (gate) and <code>_execute_X</code> (side-effect). Add <code>get_approval_status</code> MCP tool.</td></tr>
+<tr><td><code>custom_components/atm/proxy_view.py</code></td><td>Same refactor for REST endpoints that check capability flags (<code>call_service</code> for restart, etc.).</td></tr>
+<tr><td><code>custom_components/atm/admin_view.py</code></td><td>New endpoints: <code>GET /api/atm/admin/approvals</code>, <code>POST /api/atm/admin/approvals/{id}/approve</code>, <code>POST /api/atm/admin/approvals/{id}/reject</code>.</td></tr>
+<tr><td><code>custom_components/atm/sensor.py</code></td><td>Optional: new <code>pending_approvals</code> sensor per token.</td></tr>
+<tr><td><code>frontend_src/components/PersonaPicker.tsx</code></td><td>New.</td></tr>
+<tr><td><code>frontend_src/components/CapabilityMatrix.tsx</code></td><td>New.</td></tr>
+<tr><td><code>frontend_src/components/CapabilityFlagsEditor.tsx</code> (or current equivalent)</td><td>Delete or repurpose.</td></tr>
+<tr><td><code>frontend_src/views/TokenDetail.tsx</code></td><td>Wire in PersonaPicker + CapabilityMatrix.</td></tr>
+<tr><td><code>frontend_src/views/ApprovalsView.tsx</code></td><td>New top-level page.</td></tr>
+<tr><td><code>frontend_src/atm-panel.css</code></td><td>Styles for matrix, persona picker, approval cards.</td></tr>
+<tr><td><code>frontend_src/version.ts</code></td><td>Bump <code>JS_BUILD</code> before each <code>npm run build</code>.</td></tr>
+<tr><td><code>SPEC.md</code></td><td>Document tri-state caps, personas, approval gate, new storage version.</td></tr>
+<tr><td><code>CLAUDE.md</code></td><td>Update capability-related rules; document <code>evaluate_capability</code> and the split-handler convention.</td></tr>
+<tr><td><code>tests/test_token_store_migration.py</code></td><td>New: v1 -&gt; v2 storage migration.</td></tr>
+<tr><td><code>tests/test_capability_evaluation.py</code></td><td>New: deny/allow/confirm semantics, pass-through interaction.</td></tr>
+<tr><td><code>tests/test_approvals.py</code></td><td>New: pending lifecycle, expiry, approve, reject, max-per-token, exec path.</td></tr>
+</tbody>
+</table>
+
+<hr>
+
+<h2 id="helpers">Existing Helpers to Reuse</h2>
+
+<ul>
+  <li><code>_write_utf8_file_atomic</code> from <code>homeassistant.util.file</code> &mdash; already used for automations.yaml.</li>
+  <li><code>async_track_time_interval</code> &mdash; already used for token cleanup; reuse for approval expiry sweep.</li>
+  <li><code>hass.bus.async_fire</code> &mdash; already used for token events; reuse for approval events.</li>
+  <li><code>hass.components.persistent_notification.async_create</code> &mdash; pattern documented in CLAUDE.md.</li>
+  <li><code>Store.async_save</code> / <code>async_lock</code> &mdash; existing atomic write pattern; pending approvals piggy-back on the same store.</li>
+</ul>
+
+<hr>
+
+<h2 id="verify">Verification</h2>
+
+<ol>
+  <li><strong>Migration</strong>: load a fixture <code>.storage/atm.json</code> v1 with each <code>allow_*</code> permutation; verify all tokens migrate to <code>cap_*</code> correctly and <code>pending_approvals: []</code> is added.</li>
+  <li><strong>Tri-state semantics</strong>:
+    <ul>
+      <li>Token with <code>cap_automation_write = "deny"</code> calling <code>edit_automation</code> returns 403.</li>
+      <li>Same with <code>"allow"</code> succeeds and writes to disk.</li>
+      <li>Same with <code>"confirm"</code> returns <code>pending_approval</code> response, persistent notification fires, automation file unchanged.</li>
+    </ul>
+  </li>
+  <li><strong>Approval execution</strong>: admin POSTs approve, original automation edit applies on disk, audit log shows two entries (request + approval) sharing a request_id.</li>
+  <li><strong>Approval rejection</strong>: POST reject, no side effect, status moves to "rejected", original LLM poll returns rejected.</li>
+  <li><strong>Expiry</strong>: pending older than TTL is auto-expired, sweeper runs on schedule, status returns "expired" on poll.</li>
+  <li><strong>Persona application</strong>: applying <code>voice_assistant</code> populates the matrix correctly. Overriding one cap leaves persona display as "Custom (was: voice_assistant)".</li>
+  <li><strong>Pass-through interaction</strong>: pass-through token with <code>cap_backup = "confirm"</code> calling backup creates a pending approval (still gated). Pass-through token with <code>cap_search = "deny"</code> still has <code>cap_search</code> enforced.</li>
+  <li><strong>Frontend live test</strong> against HA at 192.168.1.11:8123:
+    <ul>
+      <li>Apply <code>automation_builder</code> persona to a test token, run an <code>edit_automation</code> call from the connected MCP client, observe pending approval, approve via UI, observe execution.</li>
+      <li>Bump <code>JS_BUILD</code> in <code>version.ts</code> before <code>npm run build</code> (per saved feedback).</li>
+    </ul>
+  </li>
+  <li><strong>Per saved feedback, do NOT run <code>pytest</code> without explicit user approval.</strong> Tests are written; user runs them.</li>
+</ol>
+
+<hr>
+
+<h2 id="memory">Memory Updates (after this lands)</h2>
+
+<ul>
+  <li>Update <code>feedback_coding.md</code>: relax the "mirror native HA 1:1" rule. The native subset stays 1:1 by default, but optional ATM-only params are permitted on native tools when documented as <code>(ATM extension)</code>.</li>
+  <li>Update <code>project_state.md</code>: record the v2 storage migration, tri-state cap model, persona system, and approval gate as the current state. Note that tool expansion (discovery, registry CRUD, etc.) is the next planned feature on top of this foundation.</li>
+  <li>Add a new feedback memory: any new capability flag must be added to <code>CAPABILITY_NAMES</code>, <code>CAPABILITY_TIERS</code>, and the persona table; a missing entry in any of those is a bug.</li>
+</ul>
+
+<hr>
+
+<h2 id="oos">Out of Scope (deferred to follow-up plan)</h2>
+
+<p>This section captures the full critical analysis of ha-mcp's tool surface so the follow-up plan can pull from a concrete idea bank. Tools listed below are NOT being implemented in this plan; they wait for the capability redesign to land first.</p>
+
+<h3>Tier A &mdash; ha-mcp parity (recommended subset)</h3>
+
+<p>Tools worth importing roughly as-is once the new capability model is in place:</p>
+
+<ul>
+  <li><strong>Discovery / search</strong>: <code>search_entities</code>, <code>deep_search</code>, <code>get_overview</code>. Highest LLM-UX value. Behind <code>cap_search</code>.</li>
+  <li><strong>Registry reads</strong>: <code>list_areas</code>, <code>list_floors</code>, <code>list_zones</code>, <code>list_devices</code>, <code>get_device</code>. Permission-scoped read-only views of HA's registries. Behind <code>cap_registry_read</code>.</li>
+  <li><strong>Scene CRUD</strong>: <code>create_scene</code>, <code>edit_scene</code>, <code>delete_scene</code>, <code>list_scenes</code>. Mirrors existing automation/script CRUD pattern. Behind <code>cap_scene_write</code>.</li>
+  <li><strong>Helper CRUD</strong>: <code>create_helper</code>, <code>edit_helper</code>, <code>delete_helper</code>, <code>list_helpers</code>. Wraps <code>input_*</code>, <code>counter</code>, <code>timer</code>. Behind <code>cap_helper_write</code>. Open question on which helper types support service-based create vs. WebSocket-only.</li>
+  <li><strong>Traces</strong>: <code>get_automation_traces</code>. Behind <code>cap_traces</code>.</li>
+  <li><strong>Diagnostics</strong>: <code>get_system_health</code>, <code>check_config</code>. Behind <code>cap_diagnostics</code>.</li>
+  <li><strong>Risky-tier system tools</strong>: <code>create_backup</code>, <code>restore_backup</code> (<code>cap_backup</code>); <code>set_integration_enabled</code>, HACS install/search (<code>cap_integration_write</code>); dashboard CRUD (<code>cap_lovelace_write</code>); file system access scoped to <code>www/</code>/<code>themes/</code>/<code>custom_templates/</code> (<code>cap_filesystem</code>); raw <code>configuration.yaml</code> edits (<code>cap_yaml_edit</code>). Each of these benefits enormously from the Confirm gate &mdash; they are exactly the cases the gate was designed for.</li>
+</ul>
+
+<h3>Tier A.1 &mdash; ha-mcp tools to skip (questionable value)</h3>
+
+<p>Reasoning recorded so the follow-up plan doesn't relitigate:</p>
+
+<ul>
+  <li><strong><code>ha_install_mcp_tools</code>, <code>ha_manage_custom_tool</code></strong> &mdash; meta-tools for installing more MCP tools. Pointless in ATM since ATM is itself the MCP server.</li>
+  <li><strong><code>ha_report_issue</code></strong> &mdash; bug-report submission. No reason an LLM operating someone's home should file bugs upstream.</li>
+  <li><strong><code>ha_get_blueprint</code>, <code>ha_import_blueprint</code></strong> &mdash; blueprints are templates. LLMs are more likely to write automation YAML directly than browse a catalog. Marginal utility for the surface cost.</li>
+  <li><strong><code>ha_manage_addon</code></strong> &mdash; add-on install/remove is admin-console work. Wrong abstraction for token-scoped LLM access; risky and rarely needed.</li>
+  <li><strong><code>ha_config_set_dashboard_resource</code>, <code>ha_config_list_dashboard_resources</code></strong> &mdash; dashboard internals at extreme granularity. LLMs almost never edit these. Skip even if <code>cap_lovelace_write</code> lands.</li>
+  <li><strong><code>ha_eval_template</code> overlapping <code>ha_get_state</code></strong> &mdash; <code>states('light.x')</code> and <code>get_state('light.x')</code> return the same primitive. ATM keeps both <code>render_template</code> and <code>get_state</code>, but the redundancy is acceptable since each has its own use case (template eval vs. structured state). Just don't add a third path.</li>
+  <li><strong><code>ha_get_camera_image</code></strong> &mdash; useful in principle, but binary over MCP/SSE means base64-encoded chunks; large payload risk and many clients can't render images inline. If added later, do so carefully with a size cap and an opt-in flag.</li>
+</ul>
+
+<h3>Tier B &mdash; improvements over ha-mcp (worth doing rather than copying)</h3>
+
+<p>Each is a deliberate departure from ha-mcp's design, motivated by a specific shortcoming:</p>
+
+<ul>
+  <li><strong>Dry-run mode for service calls + standalone <code>dry_run_service</code></strong> &mdash; <code>call_service</code> (and ha-mcp's <code>bulk_control</code>) execute immediately. Adding an optional <code>dry_run: true</code> argument that returns resolved targets and predicted state changes (without executing) gives LLMs a way to reason about effects before committing. Pairs naturally with the admin-confirmation gate: a Confirm-gated tool can produce a dry-run-style preview for the admin to review. A standalone <code>dry_run_service(domain, service, args)</code> tool is a useful explicit form too.</li>
+  <li><strong><code>whatif(entity_id, hypothetical_state)</code></strong> &mdash; walks loaded automations to show which would fire if X became Y. Predictive analysis without invoking. Much more powerful than just reading automation YAML.</li>
+  <li><strong><code>get_history</code> returning transitions</strong> &mdash; current implementation (and ha-mcp's) returns raw state-per-second dumps that bloat context. Adding a mode that returns only state <em>transitions</em> (or auto-resamples to a granularity hint) is far more useful for LLM reasoning. Make it the default; preserve the raw mode as opt-in.</li>
+  <li><strong><code>get_automation_traces</code> summarized output</strong> &mdash; the raw HA trace structure is dense. Adding a <code>summary: true</code> mode that highlights the failing condition or service call (with the surrounding context only) yields much better "why did this fail?" answers. Keep raw available for debug.</li>
+  <li><strong><code>search_entities</code> with state-aware filters</strong> &mdash; beyond fuzzy name match, support filters like <code>device_class</code>, <code>state</code> value, "stale &gt; N hours," "unavailable," and area scoping. Discovery should be state-aware, not just text-aware.</li>
+  <li><strong><code>deep_search</code> with cross-references</strong> &mdash; instead of plain text matches, return structured relationships: "this automation references entity X," "this entity is referenced by automations Y, Z." Becomes useful for impact analysis, not just keyword search.</li>
+  <li><strong><code>get_state</code> with related context</strong> &mdash; optional flag to include "same device," "same area," and "referenced by" data. Reduces follow-up calls from typical LLM workflows.</li>
+  <li><strong><code>config_set_automation</code> with referenced-entity validation</strong> &mdash; schema-valid is not the same as runtime-valid. Validate that referenced entities exist AND are accessible to the calling token before saving. Prevents broken automations from being created with placeholder entities.</li>
+  <li><strong><code>watch_entity(entity_id, timeout)</code> and <code>subscribe_event(event_type, timeout)</code></strong> &mdash; bounded subscriptions over the existing SSE channel. Lets LLMs verify the effect of an action they just took without polling, and lets them reactively wait for events without persisting an automation. ATM's SSE infrastructure already exists (heartbeat, connection registry, revocation termination) so the wiring is mostly free. Time-boxed (e.g. max 60 seconds, configurable cap) to avoid hanging connections.</li>
+</ul>
+
+<h3>Tier C &mdash; ATM-only opportunities (impossible in ha-mcp's model)</h3>
+
+<p>These are tools that only make sense in a system with scoped tokens, capability flags, and per-token audit history:</p>
+
+<ul>
+  <li><strong><code>get_capability_summary()</code></strong> &mdash; the token introspects: "here is what you can read, here is what you can control, here is what is currently gated by Confirm, here are your active personas, here are your rate limits." Lets the LLM orient itself at session start without trial-and-error tool calls. Particularly valuable in the new tri-state cap model since the LLM can plan around Confirm-gated capabilities rather than discovering them mid-flow. No equivalent exists in ha-mcp because ha-mcp has no scoped-token concept.</li>
+  <li><strong><code>get_audit_summary(window?)</code></strong> &mdash; per-token recent activity. "What have I done in the last hour?" Returns the calling token's own audit entries (request_id, tool, outcome, resource), filtered to that token only &mdash; no leakage across tokens. Useful for LLM self-correction ("did my last service call succeed?") and for end-user transparency. Ties directly to the existing <code>audit.py</code> circular buffer.</li>
+</ul>
+
+<h3>Tier C.1 &mdash; additional missing tools worth considering</h3>
+
+<p>Logged here for completeness; less central than the four ranked items above but recurring useful primitives:</p>
+
+<ul>
+  <li><strong><code>describe_entity(entity_id)</code></strong> &mdash; single call returns: what it is, what services act on it, recent state summary, which automations/scripts/scenes reference it. Comprehension primitive.</li>
+  <li><strong><code>get_relationships(object_id)</code></strong> &mdash; generalised reverse-dependency lookup across entities, automations, scripts, scenes, helpers, dashboards.</li>
+  <li><strong><code>recent_activity(window)</code></strong> &mdash; structured summary of "what changed in the last N minutes" at the home level (not the token level &mdash; that's <code>get_audit_summary</code>). Fired automations, called services, state changes grouped by area. The "catch me up" primitive.</li>
+  <li><strong><code>schedule_action(when, action)</code></strong> &mdash; first-class one-off scheduled action. Currently you have to create-then-delete an automation; awkward.</li>
+  <li><strong><code>set_temporary_state(entity, state, duration)</code></strong> &mdash; assert a state for N minutes then revert. The "turn this on for 10 minutes" primitive.</li>
+  <li><strong><code>compare_state(t1, t2, entity_ids)</code></strong> &mdash; diff two snapshots. "What changed while I was away?"</li>
+  <li><strong><code>describe_area(area_id)</code></strong> &mdash; area summary: entities by domain, aggregate states, devices, occupancy. Area-level context primitive.</li>
+  <li><strong><code>validate_config(yaml_blob, type)</code></strong> &mdash; validate automation/script/scene YAML structurally without saving. Decouples schema check from commit; useful as a precursor when admin-confirmation gating is enabled.</li>
+  <li><strong><code>find_available_actions(entity_id | area_id)</code></strong> &mdash; given a target, what services could be invoked? Useful for empty-state UX and exploration.</li>
+</ul>
+
+<h3>Sequencing for the follow-up plan</h3>
+
+<p>The three tiers compose naturally:</p>
+
+<ol>
+  <li><strong>Tier A</strong> delivers familiar coverage and validates the new capability model under realistic load.</li>
+  <li><strong>Tier B</strong> improves the LLM-reasoning surface where ATM can do better than ha-mcp, leveraging the now-stable foundation.</li>
+  <li><strong>Tier C</strong> exploits ATM's structural advantage with introspection tools that no other HA MCP server can offer.</li>
+</ol>
+
+<p>All of the above benefit from this redesign and become much easier to add cleanly afterward.</p>
+
+</div>
+</body>
+</html>

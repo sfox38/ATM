@@ -1,6 +1,41 @@
 export type NodeState = "GREY" | "YELLOW" | "GREEN" | "RED";
 export type Permission = "WRITE" | "READ" | "DENY" | "NO_ACCESS" | "NOT_FOUND";
-export type Outcome = "allowed" | "denied" | "not_found" | "rate_limited" | "not_implemented" | "invalid_request";
+export type Outcome =
+  | "allowed"
+  | "denied"
+  | "not_found"
+  | "rate_limited"
+  | "not_implemented"
+  | "invalid_request"
+  | "pending_approval"
+  | "approval_executed"
+  | "approval_rejected"
+  | "approval_expired"
+  | "approval_cancelled";
+
+export type CapMode = "deny" | "allow" | "confirm";
+export type Persona =
+  | "read_only"
+  | "voice_assistant"
+  | "automation_builder"
+  | "power_user"
+  | "custom";
+
+export type CapTier = "read" | "everyday" | "config_write" | "system" | "irreversible";
+
+export interface CapabilityFlagsMap {
+  cap_config_read: CapMode;
+  cap_template_render: CapMode;
+  cap_log_read: CapMode;
+  cap_broadcast: CapMode;
+  cap_service_response: CapMode;
+  cap_automation_write: CapMode;
+  cap_script_write: CapMode;
+  cap_physical_control: CapMode;
+  cap_restart: CapMode;
+}
+
+export type CapName = keyof CapabilityFlagsMap;
 
 export interface PermissionNode {
   state: NodeState;
@@ -13,7 +48,7 @@ export interface PermissionTree {
   entities: Record<string, PermissionNode>;
 }
 
-export interface TokenRecord {
+export interface TokenRecord extends CapabilityFlagsMap {
   id: string;
   name: string;
   // token_hash is declared here for type completeness but the backend never includes it
@@ -28,17 +63,9 @@ export interface TokenRecord {
   updated_at: string | null;
   pass_through: boolean;
   use_assist_exposure?: boolean;
+  persona: Persona;
   rate_limit_requests: number;
   rate_limit_burst: number;
-  allow_automation_write: boolean;
-  allow_script_write: boolean;
-  allow_log_read: boolean;
-  allow_config_read: boolean;
-  allow_template_render: boolean;
-  allow_restart: boolean;
-  allow_physical_control: boolean;
-  allow_service_response: boolean;
-  allow_broadcast: boolean;
   permissions: PermissionTree;
 }
 
@@ -136,17 +163,8 @@ export interface ScopeResult {
   token_name: string;
   readable: string[];
   writable: string[];
-  capability_flags: {
-    allow_config_read: boolean;
-    allow_automation_write: boolean;
-    allow_script_write: boolean;
-    allow_template_render: boolean;
-    allow_restart: boolean;
-    allow_service_response: boolean;
-    allow_physical_control: boolean;
-    allow_broadcast: boolean;
-    allow_log_read: boolean;
-  };
+  persona: Persona;
+  capability_flags: CapabilityFlagsMap;
 }
 
 export interface CreateTokenBody {
@@ -163,15 +181,16 @@ export interface PatchTokenBody {
   confirm_pass_through?: boolean;
   rate_limit_requests?: number;
   rate_limit_burst?: number;
-  allow_automation_write?: boolean;
-  allow_script_write?: boolean;
-  allow_log_read?: boolean;
-  allow_config_read?: boolean;
-  allow_template_render?: boolean;
-  allow_restart?: boolean;
-  allow_physical_control?: boolean;
-  allow_service_response?: boolean;
-  allow_broadcast?: boolean;
+  persona?: Persona;
+  cap_automation_write?: CapMode;
+  cap_script_write?: CapMode;
+  cap_log_read?: CapMode;
+  cap_config_read?: CapMode;
+  cap_template_render?: CapMode;
+  cap_restart?: CapMode;
+  cap_physical_control?: CapMode;
+  cap_service_response?: CapMode;
+  cap_broadcast?: CapMode;
   use_assist_exposure?: boolean;
 }
 
@@ -186,6 +205,55 @@ export interface AuditQueryParams {
   token_id?: string;
   outcome?: string;
   ip?: string;
+}
+
+export type ApprovalStatus =
+  | "pending"
+  | "approved"
+  | "rejected"
+  | "expired"
+  | "cancelled";
+
+export interface ApprovalDiff {
+  kind?: "yaml_diff" | "config_diff" | "service_preview" | "system_action" | "file_write";
+  summary?: string;
+  target?: { type?: string; id?: string | null; label?: string | null };
+  before?: string | null;
+  after?: string | null;
+  preview?: Record<string, unknown>;
+}
+
+export interface ApprovalRecord {
+  id: string;
+  token_id: string;
+  token_name: string;
+  tool_name: string;
+  cap_name: string;
+  args: Record<string, unknown>;
+  diff: ApprovalDiff;
+  status: ApprovalStatus;
+  created_at: string;
+  expires_at: string;
+  resolved_at: string | null;
+  approved_by_user_id: string | null;
+  rejected_reason: string | null;
+  result: unknown | null;
+  request_id: string;
+  client_ip: string | null;
+}
+
+export interface ApprovalListResponse {
+  approvals: ApprovalRecord[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+export interface ApprovalListParams {
+  status?: ApprovalStatus;
+  token_id?: string;
+  limit?: number;
+  offset?: number;
 }
 
 declare global {

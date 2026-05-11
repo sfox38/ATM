@@ -201,6 +201,13 @@
 }
 .atm-tab:hover { color: var(--atm-accent); background: var(--atm-accent-lt); }
 .atm-tab.active { color: var(--atm-accent); border-bottom-color: var(--atm-accent); }
+.atm-tab-badge {
+  display: inline-flex; align-items: center; justify-content: center;
+  margin-left: 8px; padding: 0 6px; min-width: 18px; height: 18px;
+  border-radius: 9px; background: var(--atm-warning, #ef6c00); color: #fff;
+  font-size: 10px; font-weight: 700; letter-spacing: 0;
+  line-height: 1;
+}
 .atm-tab-spacer { flex: 1; }
 
 .atm-header-actions {
@@ -989,3 +996,127 @@ select.input {
 
 .reload-btn { background: none; border: 1px solid var(--atm-border); border-radius: var(--atm-radius-xs); cursor: pointer; padding: 4px 8px; font-size: 12px; color: var(--atm-text-2); transition: background 0.12s; }
 .reload-btn:hover { background: var(--atm-surface-2); }
+
+/* ============================================================
+   Persona Picker
+   ============================================================ */
+.persona-picker { display: flex; flex-direction: column; gap: 12px; }
+.persona-helper { font-size: 12px; color: var(--atm-text-2); margin: 0 0 4px 0; }
+.persona-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 8px; }
+.persona-card {
+  text-align: left; padding: 10px 12px; border: 1px solid var(--atm-border);
+  border-radius: var(--atm-radius-sm); background: var(--atm-surface);
+  cursor: pointer; transition: background 0.12s, border-color 0.12s;
+  font-family: inherit; color: inherit;
+}
+.persona-card:hover:not(:disabled) { background: var(--atm-surface-2); }
+.persona-card:disabled { cursor: default; opacity: 0.7; }
+.persona-card-active {
+  border-color: var(--atm-accent, #1976d2); background: var(--atm-surface-2);
+  box-shadow: 0 0 0 1px var(--atm-accent, #1976d2);
+}
+.persona-card-label { font-weight: 600; font-size: 13px; margin-bottom: 4px; }
+.persona-card-desc { font-size: 11px; color: var(--atm-text-2); line-height: 1.4; }
+
+/* ============================================================
+   Capability Matrix
+   ============================================================ */
+.capability-matrix { display: flex; flex-direction: column; gap: 16px; }
+.cap-tier-group { border: 1px solid var(--atm-border); border-radius: var(--atm-radius-sm); overflow: hidden; }
+.cap-tier-header {
+  background: var(--atm-surface-2); padding: 6px 12px;
+  font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em;
+  font-weight: 600; color: var(--atm-text-2);
+  border-bottom: 1px solid var(--atm-border);
+}
+.cap-row {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 10px 12px; gap: 12px;
+  border-top: 1px solid var(--atm-border);
+}
+.cap-row:first-of-type { border-top: none; }
+.cap-row-label { flex: 1 1 auto; min-width: 0; }
+.cap-row-name { font-weight: 500; font-size: 13px; }
+.cap-row-desc { font-size: 11px; color: var(--atm-text-2); margin-top: 2px; line-height: 1.4; }
+.cap-row-modes { display: flex; gap: 4px; flex-shrink: 0; }
+.mode-radio {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 4px 10px; border: 1px solid var(--atm-border);
+  border-radius: var(--atm-radius-xs); cursor: pointer; font-size: 12px;
+  background: var(--atm-surface); transition: background 0.12s, border-color 0.12s;
+  user-select: none;
+}
+.mode-radio input { position: absolute; opacity: 0; pointer-events: none; }
+.mode-radio:hover { background: var(--atm-surface-2); }
+.mode-radio-checked { border-color: currentColor; background: var(--atm-surface-2); font-weight: 600; }
+.mode-radio.mode-deny.mode-radio-checked { color: var(--atm-error, #c62828); }
+.mode-radio.mode-allow.mode-radio-checked { color: var(--atm-success, #2e7d32); }
+.mode-radio.mode-confirm.mode-radio-checked { color: var(--atm-warning, #ef6c00); }
+.mode-radio-unavailable { opacity: 0.35; cursor: not-allowed; }
+.mode-radio-unavailable:hover { background: var(--atm-surface); }
+.mode-radio-dot {
+  width: 8px; height: 8px; border-radius: 50%; border: 1px solid currentColor;
+  background: transparent; flex-shrink: 0;
+}
+.mode-radio-checked .mode-radio-dot { background: currentColor; }
+.mode-radio-label { line-height: 1; }
+
+/* ============================================================
+   Approvals View
+   ============================================================ */
+.approvals-view { display: flex; flex-direction: column; gap: 12px; padding: 16px; max-width: 1100px; margin: 0 auto; }
+.approvals-tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--atm-border); }
+.approvals-tab {
+  background: none; border: none; padding: 8px 16px; cursor: pointer;
+  font-size: 14px; color: var(--atm-text-2); border-bottom: 2px solid transparent;
+  font-family: inherit;
+}
+.approvals-tab:hover { color: var(--atm-text); }
+.approvals-tab.active { color: var(--atm-text); border-bottom-color: var(--atm-accent, #1976d2); font-weight: 600; }
+.approvals-empty { padding: 32px; text-align: center; color: var(--atm-text-2); font-size: 13px; }
+.approvals-list { display: flex; flex-direction: column; gap: 8px; }
+.approval-card {
+  text-align: left; padding: 12px 14px; border: 1px solid var(--atm-border);
+  border-radius: var(--atm-radius-sm); background: var(--atm-surface);
+  cursor: pointer; transition: background 0.12s, border-color 0.12s;
+  font-family: inherit; color: inherit; width: 100%;
+}
+.approval-card:hover { background: var(--atm-surface-2); border-color: var(--atm-accent, #1976d2); }
+.approval-card-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.approval-card-title { display: flex; gap: 8px; align-items: baseline; min-width: 0; }
+.approval-card-token { font-weight: 600; font-size: 13px; }
+.approval-card-tool { font-family: monospace; font-size: 12px; color: var(--atm-text-2); }
+.approval-card-meta { display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--atm-text-2); flex-shrink: 0; }
+.approval-card-summary { font-size: 13px; color: var(--atm-text); margin-top: 6px; }
+.approval-card-reason { font-size: 11px; color: var(--atm-text-2); margin-top: 4px; font-style: italic; }
+.approval-card-time { font-size: 11px; }
+
+.approval-detail-meta {
+  display: grid; grid-template-columns: max-content 1fr; gap: 4px 12px;
+  margin: 12px 0; font-size: 12px;
+}
+.approval-detail-tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--atm-border); margin-top: 12px; }
+.approval-detail-tab {
+  background: none; border: none; padding: 6px 12px; cursor: pointer;
+  font-size: 13px; color: var(--atm-text-2); border-bottom: 2px solid transparent;
+  font-family: inherit;
+}
+.approval-detail-tab.active { color: var(--atm-text); border-bottom-color: var(--atm-accent, #1976d2); font-weight: 600; }
+.approval-detail-body { padding: 12px 0; min-height: 120px; max-height: 50vh; overflow: auto; }
+.approval-pre {
+  background: var(--atm-surface-2); padding: 10px 12px;
+  border-radius: var(--atm-radius-xs); font-size: 11px; line-height: 1.4;
+  overflow: auto; white-space: pre-wrap; word-wrap: break-word; margin: 0;
+  max-height: 40vh;
+}
+.approval-diff-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.approval-diff-col { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.approval-diff-label { font-size: 11px; font-weight: 600; color: var(--atm-text-2); text-transform: uppercase; }
+.approval-summary-line { margin: 4px 0 8px 0; font-size: 13px; }
+.approval-reject-row { display: flex; flex-direction: column; gap: 4px; margin-top: 12px; }
+.approval-reason-label { font-size: 11px; color: var(--atm-text-2); }
+.approval-reason-input {
+  padding: 6px 10px; border: 1px solid var(--atm-border);
+  border-radius: var(--atm-radius-xs); font-size: 13px; font-family: inherit;
+  background: var(--atm-surface); color: var(--atm-text);
+}

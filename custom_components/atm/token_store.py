@@ -16,8 +16,15 @@ from homeassistant.helpers.storage import Store
 from homeassistant.util.dt import parse_datetime, utcnow
 
 from .const import (
+    CAP_ALLOW,
+    CAP_DENY,
+    CAP_MODES,
+    CAPABILITY_NAMES,
+    CONFIRM_AVAILABLE_CAPS,
     DEFAULT_RATE_LIMIT_BURST,
     DEFAULT_RATE_LIMIT_REQUESTS,
+    PERSONA_CUSTOM,
+    PERSONA_NAMES,
     STORAGE_KEY,
     STORAGE_VERSION,
     TOKEN_HEX_LENGTH,
@@ -87,7 +94,12 @@ class PermissionTree:
 
 @dataclass
 class TokenRecord:
-    """Active ATM token with its configuration and permission tree."""
+    """Active ATM token with its configuration and permission tree.
+
+    Capability flags are tri-state strings ("deny" / "allow" / "confirm").
+    "confirm" routes the request through the admin-approval gate; only caps
+    in CONFIRM_AVAILABLE_CAPS may be set to "confirm".
+    """
 
     id: str
     name: str
@@ -102,19 +114,24 @@ class TokenRecord:
     use_assist_exposure: bool = False
     rate_limit_requests: int = DEFAULT_RATE_LIMIT_REQUESTS
     rate_limit_burst: int = DEFAULT_RATE_LIMIT_BURST
-    allow_automation_write: bool = False
-    allow_script_write: bool = False
-    allow_config_read: bool = False
-    allow_template_render: bool = False
-    allow_restart: bool = False
-    allow_physical_control: bool = False
-    allow_service_response: bool = False
-    allow_broadcast: bool = False
-    allow_log_read: bool = False
+    cap_automation_write: str = CAP_DENY
+    cap_script_write: str = CAP_DENY
+    cap_config_read: str = CAP_DENY
+    cap_template_render: str = CAP_DENY
+    cap_restart: str = CAP_DENY
+    cap_physical_control: str = CAP_DENY
+    cap_service_response: str = CAP_DENY
+    cap_broadcast: str = CAP_DENY
+    cap_log_read: str = CAP_DENY
+    persona: str = PERSONA_CUSTOM
     permissions: PermissionTree = field(default_factory=PermissionTree)
 
+    def caps_dict(self) -> dict[str, str]:
+        """Return the cap_*->mode mapping for this token."""
+        return {name: getattr(self, name) for name in CAPABILITY_NAMES}
+
     def to_dict(self) -> dict:
-        return {
+        d = {
             "id": self.id,
             "name": self.name,
             "created_at": self.created_at.isoformat() if self.created_at else None,
@@ -127,17 +144,11 @@ class TokenRecord:
             **({"use_assist_exposure": self.use_assist_exposure} if self.pass_through else {}),
             "rate_limit_requests": self.rate_limit_requests,
             "rate_limit_burst": self.rate_limit_burst,
-            "allow_automation_write": self.allow_automation_write,
-            "allow_script_write": self.allow_script_write,
-            "allow_config_read": self.allow_config_read,
-            "allow_template_render": self.allow_template_render,
-            "allow_restart": self.allow_restart,
-            "allow_physical_control": self.allow_physical_control,
-            "allow_service_response": self.allow_service_response,
-            "allow_broadcast": self.allow_broadcast,
-            "allow_log_read": self.allow_log_read,
+            "persona": self.persona,
             "permissions": self.permissions.to_dict(),
         }
+        d.update(self.caps_dict())
+        return d
 
     def to_storage_dict(self) -> dict:
         d = self.to_dict()
@@ -151,6 +162,15 @@ class TokenRecord:
 
     @classmethod
     def from_dict(cls, data: dict) -> TokenRecord:
+        cap_kwargs: dict[str, str] = {}
+        for cap_name in CAPABILITY_NAMES:
+            value = data.get(cap_name)
+            if value not in CAP_MODES:
+                value = CAP_DENY
+            cap_kwargs[cap_name] = value
+        persona = data.get("persona", PERSONA_CUSTOM)
+        if persona not in PERSONA_NAMES:
+            persona = PERSONA_CUSTOM
         return cls(
             id=data["id"],
             name=data["name"],
@@ -164,17 +184,10 @@ class TokenRecord:
             use_assist_exposure=data.get("use_assist_exposure", False),
             rate_limit_requests=data.get("rate_limit_requests", DEFAULT_RATE_LIMIT_REQUESTS),
             rate_limit_burst=data.get("rate_limit_burst", DEFAULT_RATE_LIMIT_BURST),
-            allow_automation_write=data.get("allow_automation_write", False),
-            allow_script_write=data.get("allow_script_write", False),
-            allow_config_read=data.get("allow_config_read", False),
-            allow_template_render=data.get("allow_template_render", False),
-            allow_restart=data.get("allow_restart", False),
-            allow_physical_control=data.get("allow_physical_control", False),
-            allow_service_response=data.get("allow_service_response", False),
-            allow_broadcast=data.get("allow_broadcast", False),
-            allow_log_read=data.get("allow_log_read", False),
+            persona=persona,
             updated_at=_parse_dt(data.get("updated_at")),
             permissions=PermissionTree.from_dict(data.get("permissions", {})),
+            **cap_kwargs,
         )
 
     def is_expired(self) -> bool:
@@ -299,20 +312,26 @@ class TokenStore:
         self._store = store
         self._tokens: dict[str, TokenRecord] = {}
         self._archived: dict[str, ArchivedTokenRecord] = {}
+        self._pending_approvals: list[dict] = []
         self._settings: GlobalSettings = GlobalSettings()
         self.async_lock: asyncio.Lock = asyncio.Lock()
 
     @classmethod
     async def async_create(cls, hass: HomeAssistant) -> TokenStore:
         """Create a TokenStore and load persisted data from HA storage."""
-        store = Store(hass, STORAGE_VERSION, STORAGE_KEY)
+        store = _ATMStore(hass, STORAGE_VERSION, STORAGE_KEY)
         instance = cls(hass, store)
         await instance.async_load()
         return instance
 
     async def async_load(self) -> None:
-        """Load token and settings data from the HA storage file."""
+        """Load token and settings data from the HA storage file.
+
+        Applies the v1 -> v2 migration in place when older storage is detected.
+        """
         raw = await self._store.async_load() or {}
+        migrated = _migrate_storage_v1_to_v2(raw)
+
         tokens: dict[str, TokenRecord] = {}
         for r in raw.get("tokens", []):
             try:
@@ -332,6 +351,11 @@ class TokenStore:
         self._archived = archived
 
         self._settings = GlobalSettings.from_dict(raw.get("settings", {}))
+        self._pending_approvals = list(raw.get("pending_approvals", []))
+
+        if migrated:
+            _LOGGER.info("ATM storage migrated from v1 to v2; saving canonical form")
+            await self.async_save()
 
     async def async_save(self) -> None:
         """Persist the current in-memory state to HA storage."""
@@ -339,8 +363,17 @@ class TokenStore:
             "version": STORAGE_VERSION,
             "tokens": [t.to_storage_dict() for t in self._tokens.values()],
             "archived_tokens": [a.to_storage_dict() for a in self._archived.values()],
+            "pending_approvals": self._pending_approvals,
             "settings": self._settings.to_dict(),
         })
+
+    def get_pending_approvals(self) -> list[dict]:
+        """Return the pending-approvals array. Mutations require async_lock."""
+        return self._pending_approvals
+
+    def set_pending_approvals(self, approvals: list[dict]) -> None:
+        """Replace the pending-approvals array in memory. Caller must save."""
+        self._pending_approvals = approvals
 
     async def async_create_token(
         self,
@@ -454,21 +487,34 @@ class TokenStore:
             "use_assist_exposure",
             "rate_limit_requests",
             "rate_limit_burst",
-            "allow_automation_write",
-            "allow_script_write",
-            "allow_config_read",
-            "allow_template_render",
-            "allow_restart",
-            "allow_physical_control",
-            "allow_service_response",
-            "allow_broadcast",
-            "allow_log_read",
+            "persona",
         }
+        cap_fields = set(CAPABILITY_NAMES)
+        cap_changed = False
         for key, value in kwargs.items():
-            if key in mutable_fields:
+            if key in cap_fields:
+                if value not in CAP_MODES:
+                    raise ValueError(
+                        f"Invalid capability mode for {key!r}: {value!r}"
+                    )
+                if value == "confirm" and key not in CONFIRM_AVAILABLE_CAPS:
+                    raise ValueError(
+                        f"Capability {key!r} does not support 'confirm' mode"
+                    )
+                setattr(token, key, value)
+                cap_changed = True
+            elif key in mutable_fields:
+                if key == "persona" and value not in PERSONA_NAMES:
+                    raise ValueError(f"Unknown persona: {value!r}")
                 setattr(token, key, value)
         if token.rate_limit_requests == 0:
             token.rate_limit_burst = 0
+        # If any capability changed, re-derive persona from the resulting cap set.
+        # This keeps the persona label honest: applying a preset and then tweaking
+        # any cap drops the token to "custom" (or to a different matching preset).
+        if cap_changed:
+            from .personas import detect_persona  # noqa: PLC0415 — avoid circular import at module load
+            token.persona = detect_persona(token.caps_dict())
         token.updated_at = utcnow()
         await self.async_save()
         return token
@@ -582,3 +628,63 @@ def token_name_slug(name: str) -> str:
 def hmac_compare(stored_hash: str, presented_hash: str) -> bool:
     """Constant-time comparison of two SHA-256 hex digests."""
     return hmac.compare_digest(stored_hash, presented_hash)
+
+
+_LEGACY_ALLOW_TO_CAP = {
+    "allow_automation_write": "cap_automation_write",
+    "allow_script_write": "cap_script_write",
+    "allow_config_read": "cap_config_read",
+    "allow_template_render": "cap_template_render",
+    "allow_restart": "cap_restart",
+    "allow_physical_control": "cap_physical_control",
+    "allow_service_response": "cap_service_response",
+    "allow_broadcast": "cap_broadcast",
+    "allow_log_read": "cap_log_read",
+}
+
+
+class _ATMStore(Store):
+    """Subclass of HA's Store that wires our v1 -> v2 migration into the load path.
+
+    HA's Store invokes `_async_migrate_func` when the stored major version differs
+    from the constructor's version. The default implementation raises
+    NotImplementedError; we override it to run `_migrate_storage_v1_to_v2` in place.
+    """
+
+    async def _async_migrate_func(
+        self, old_major_version: int, old_minor_version: int, old_data: dict
+    ) -> dict:
+        if old_major_version < STORAGE_VERSION:
+            _migrate_storage_v1_to_v2(old_data)
+        return old_data
+
+
+def _migrate_storage_v1_to_v2(raw: dict) -> bool:
+    """Migrate raw storage data from v1 to v2 in place.
+
+    v1 used boolean allow_* flags. v2 uses cap_* tri-state strings
+    ("deny" / "allow" / "confirm"), introduces persona, and adds the
+    pending_approvals array. Returns True if any migration was applied.
+    """
+    if not raw:
+        return False
+    needs_save = False
+    for token in raw.get("tokens", []) or []:
+        for old_key, new_key in _LEGACY_ALLOW_TO_CAP.items():
+            if old_key in token:
+                token[new_key] = CAP_ALLOW if token.pop(old_key) else CAP_DENY
+                needs_save = True
+        if "persona" not in token:
+            token["persona"] = PERSONA_CUSTOM
+            needs_save = True
+    # Archived records do not retain capability flags (spec §2.4),
+    # but if a legacy archive carried them we still drop the keys.
+    for archived in raw.get("archived_tokens", []) or []:
+        for old_key in _LEGACY_ALLOW_TO_CAP:
+            if old_key in archived:
+                archived.pop(old_key, None)
+                needs_save = True
+    if "pending_approvals" not in raw:
+        raw["pending_approvals"] = []
+        needs_save = True
+    return needs_save

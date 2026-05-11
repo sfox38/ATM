@@ -18,6 +18,8 @@ from .audit import generate_request_id
 
 from .const import (
     BLOCKED_DOMAINS,
+    CAP_ALLOW,
+    CAP_DENY,
     DOMAIN,
     DUAL_GATE_SERVICES,
     HIGH_RISK_DOMAINS,
@@ -33,6 +35,7 @@ from .helpers import (
     build_permitted_entity_ids as _build_permitted_entity_ids,
     build_permitted_states as _build_permitted_states,
     collect_log_entries as _collect_log_entries,
+    effective_cap,
     fire_rate_limit_events as _fire_rate_limit_events,
     get_authenticated_token as _get_authenticated_token,
     get_client_ip as _get_client_ip,
@@ -204,12 +207,12 @@ class ATMServiceView(HomeAssistantView):
             return body
 
         service_key = f"{domain}/{service}"
-        if service_key in DUAL_GATE_SERVICES and not token.allow_restart:
+        if service_key in DUAL_GATE_SERVICES and effective_cap(token, "cap_restart") != CAP_ALLOW:
             _log(data, token, request_id=request_id, method="POST", resource=resource,
                  outcome="denied", client_ip=client_ip, payload=body)
             return _error("forbidden", "Forbidden.", 403, request_id)
 
-        if service_key in PHYSICAL_GATE_SERVICES and not token.allow_physical_control:
+        if service_key in PHYSICAL_GATE_SERVICES and effective_cap(token, "cap_physical_control") != CAP_ALLOW:
             _log(data, token, request_id=request_id, method="POST", resource=resource,
                  outcome="denied", client_ip=client_ip, payload=body)
             return _error("forbidden", "Forbidden.", 403, request_id)
@@ -221,7 +224,7 @@ class ATMServiceView(HomeAssistantView):
 
         # DUAL_GATE_SERVICES (homeassistant/restart, homeassistant/stop) have no
         # entities in hass.states. Routing them through resolve_service_targets
-        # always produces an empty list and a spurious 403. The allow_restart
+        # always produces an empty list and a spurious 403. The cap_restart
         # gate above is the only permission check required for these services.
         if service_key in DUAL_GATE_SERVICES:
             if domain in HIGH_RISK_DOMAINS:
@@ -284,7 +287,7 @@ class ATMServiceView(HomeAssistantView):
         }
 
         use_return_response = False
-        if token.allow_service_response or token.pass_through:
+        if effective_cap(token, "cap_service_response") != CAP_DENY:
             try:
                 from homeassistant.core import SupportsResponse as _SR
                 handler = hass.services.async_services().get(domain, {}).get(service)
@@ -551,7 +554,7 @@ class ATMStatisticsView(HomeAssistantView):
 
 
 class ATMConfigView(HomeAssistantView):
-    """GET /api/atm/config - HA configuration (requires allow_config_read or pass_through)."""
+    """GET /api/atm/config - HA configuration (requires cap_config_read)."""
 
     url = "/api/atm/config"
     name = "api:atm:config"
@@ -569,7 +572,7 @@ class ATMConfigView(HomeAssistantView):
             return result
         token, rl_result = result
 
-        if not token.allow_config_read and not token.pass_through:
+        if effective_cap(token, "cap_config_read") == CAP_DENY:
             _log(data, token, request_id=request_id, method="GET", resource=resource,
                  outcome="denied", client_ip=client_ip)
             return _error("forbidden", "Forbidden.", 403, request_id)
@@ -604,7 +607,7 @@ class ATMTemplateView(HomeAssistantView):
             return result
         token, rl_result = result
 
-        if not token.allow_template_render and not token.pass_through:
+        if effective_cap(token, "cap_template_render") == CAP_DENY:
             _log(data, token, request_id=request_id, method="POST", resource=resource,
                  outcome="denied", client_ip=client_ip)
             return _error("forbidden", "Forbidden.", 403, request_id)
@@ -667,7 +670,7 @@ class ATMTemplateView(HomeAssistantView):
 
 
 class ATMEventsView(HomeAssistantView):
-    """GET /api/atm/events - HA event bus listener counts (requires allow_config_read)."""
+    """GET /api/atm/events - HA event bus listener counts (requires cap_config_read)."""
 
     url = "/api/atm/events"
     name = "api:atm:events"
@@ -685,7 +688,7 @@ class ATMEventsView(HomeAssistantView):
             return result
         token, rl_result = result
 
-        if not token.allow_config_read and not token.pass_through:
+        if effective_cap(token, "cap_config_read") == CAP_DENY:
             _log(data, token, request_id=request_id, method="GET", resource=resource,
                  outcome="denied", client_ip=client_ip)
             return _error("forbidden", "Forbidden.", 403, request_id)
@@ -763,7 +766,7 @@ _DEFAULT_LOG_LIMIT = 50
 
 
 class ATMLogsView(HomeAssistantView):
-    """GET /api/atm/logs - HA system log entries (requires allow_log_read)."""
+    """GET /api/atm/logs - HA system log entries (requires cap_log_read)."""
 
     url = "/api/atm/logs"
     name = "api:atm:logs"
@@ -781,7 +784,7 @@ class ATMLogsView(HomeAssistantView):
             return result
         token, rl_result = result
 
-        if not token.allow_log_read:
+        if effective_cap(token, "cap_log_read") == CAP_DENY:
             _log(data, token, request_id=request_id, method="GET", resource=resource,
                  outcome="denied", client_ip=client_ip)
             return _error("forbidden", "Forbidden.", 403, request_id)

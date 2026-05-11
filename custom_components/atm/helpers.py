@@ -8,6 +8,7 @@ import json
 import logging
 import re
 import time
+from dataclasses import dataclass
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
@@ -16,7 +17,19 @@ from homeassistant.core import callback
 from homeassistant.helpers.event import async_call_later
 from homeassistant.util.dt import parse_datetime, utcnow
 
-from .const import BLOCKED_DOMAINS, DOMAIN, MAX_REQUEST_BODY_BYTES, SENSITIVE_ATTRIBUTES, TOKEN_LENGTH, TOKEN_PREFIX
+from .const import (
+    BLOCKED_DOMAINS,
+    CAP_ALLOW,
+    CAP_CONFIRM,
+    CAP_DENY,
+    CAPABILITY_NAMES,
+    DOMAIN,
+    MAX_REQUEST_BODY_BYTES,
+    PASS_THROUGH_EXEMPT_CAPS,
+    SENSITIVE_ATTRIBUTES,
+    TOKEN_LENGTH,
+    TOKEN_PREFIX,
+)
 from .policy_engine import Permission, parse_relative_time, resolve
 from .token_store import token_name_slug
 
@@ -608,3 +621,108 @@ def update_token_counter(data: ATMData, token_id: str, outcome: str) -> None:
     for sensor in data.token_id_sensors.get(token_id, []):
         if sensor.hass is not None:
             sensor.async_write_ha_state()
+
+
+# Capability evaluation
+# ---------------------
+# evaluate_capability returns one of three results:
+#   ("allow", None)          -> proceed to side-effect.
+#   ("deny", None)           -> return forbidden to caller.
+#   ("confirm", approval_id) -> create pending approval, return pending response.
+#
+# effective_cap collapses pass_through interaction into a single value used by
+# self-summary endpoints. It is NOT a substitute for evaluate_capability when
+# enforcing a check, because it does not go through the approval queue.
+
+
+def effective_cap(token: TokenRecord, cap_name: str) -> str:
+    """Return the cap mode after applying pass_through interaction rules.
+
+    Exempt caps are unaffected by pass_through. For non-exempt caps under
+    pass_through, "deny" becomes "allow" but "confirm" is preserved
+    (the admin's intent to gate is honored).
+    """
+    raw = getattr(token, cap_name, CAP_DENY)
+    if cap_name in PASS_THROUGH_EXEMPT_CAPS:
+        return raw
+    if token.pass_through:
+        if raw == CAP_CONFIRM:
+            return CAP_CONFIRM
+        return CAP_ALLOW
+    return raw
+
+
+def effective_caps(token: TokenRecord) -> dict[str, str]:
+    """Return the full cap_*->effective_mode mapping for a token."""
+    return {name: effective_cap(token, name) for name in CAPABILITY_NAMES}
+
+
+@dataclass
+class CapabilityResult:
+    """Outcome of an evaluate_capability call.
+
+    mode is one of "allow" / "deny" / "confirm". When mode is "confirm",
+    approval is the freshly created PendingApproval record and the caller
+    must return a pending response without executing.
+    """
+
+    mode: str
+    approval: Any | None = None
+
+    @property
+    def is_allow(self) -> bool:
+        return self.mode == CAP_ALLOW
+
+    @property
+    def is_deny(self) -> bool:
+        return self.mode == CAP_DENY
+
+    @property
+    def is_pending(self) -> bool:
+        return self.mode == CAP_CONFIRM
+
+
+async def evaluate_capability(
+    cap_name: str,
+    token: TokenRecord,
+    hass: HomeAssistant,
+    data: ATMData,
+    *,
+    tool_name: str,
+    args: dict,
+    request_id: str,
+    diff: dict | None = None,
+    client_ip: str | None = None,
+) -> CapabilityResult:
+    """Resolve a capability check into Allow / Deny / Pending(approval).
+
+    Reads the effective cap mode (after pass-through interaction) and either
+    permits, denies, or creates a pending approval and returns a Confirm result.
+    Diff is supplied by the caller; it appears in the admin review UI.
+    """
+    from .approvals import (  # noqa: PLC0415
+        create_approval_notification,
+        create_pending_approval,
+        fire_approval_requested_event,
+    )
+
+    mode = effective_cap(token, cap_name)
+    if mode == CAP_ALLOW:
+        return CapabilityResult(CAP_ALLOW)
+    if mode == CAP_DENY:
+        return CapabilityResult(CAP_DENY)
+    async with data.store.async_lock:
+        approval = await create_pending_approval(
+            data.store,
+            token_id=token.id,
+            token_name=token.name,
+            tool_name=tool_name,
+            cap_name=cap_name,
+            args=args,
+            diff=diff or {},
+            request_id=request_id,
+            client_ip=client_ip,
+        )
+    create_approval_notification(hass, approval)
+    fire_approval_requested_event(hass, approval)
+    return CapabilityResult(CAP_CONFIRM, approval=approval)
