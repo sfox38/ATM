@@ -91,7 +91,6 @@ function resolvedState(
     const domain = deviceDomain.get(item.id);
     if (domain) toCheck.push(permissions.domains[domain]?.state ?? "GREY");
   }
-  toCheck.push(permissions.global?.state ?? "GREY");
   if (toCheck.some((s) => s === "RED")) return "RED";
   // Pass 2: item's own state is the most specific non-GREY grant
   return item.state;

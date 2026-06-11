@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import re
 from datetime import timedelta
 from typing import Any
 
@@ -30,18 +29,16 @@ from .const import (
 )
 from .data import ATMData
 from .helpers import (
-    FilteredStates as _FilteredStates,
     build_error_response as _error,
     build_permitted_entity_ids as _build_permitted_entity_ids,
-    build_permitted_states as _build_permitted_states,
     collect_log_entries as _collect_log_entries,
     effective_cap,
-    fire_rate_limit_events as _fire_rate_limit_events,
     get_authenticated_token as _get_authenticated_token,
     get_client_ip as _get_client_ip,
     log_request as _log,
     parse_time_param as _parse_time_param,
     read_json_body as _read_json_body,
+    render_template_for_token as _render_template_for_token,
 )
 from .policy_engine import (
     EntityCreationNotPermitted,
@@ -52,10 +49,8 @@ from .policy_engine import (
     resolve_service_targets,
     scrub_sensitive_attributes,
     scrub_state_dict as _scrub_state_dict,
-    template_blocklist_vars,
 )
 from .rate_limiter import RateLimitResult
-from .token_store import TokenRecord
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -621,38 +616,7 @@ class ATMTemplateView(HomeAssistantView):
             return _error("invalid_request", "Missing or invalid 'template' field.", 400, request_id)
 
         try:
-            from homeassistant.helpers import template as template_helper
-
-            permitted = _build_permitted_states(token, hass)
-
-            filtered_states = _FilteredStates(permitted)
-
-            # Override all HA template state helpers with permission-restricted versions.
-            def _state_attr(entity_id: str, attr: str):
-                s = permitted.get(entity_id)
-                return s.attributes.get(attr) if s is not None else None
-
-            def _is_state(entity_id: str, value: str) -> bool:
-                s = permitted.get(entity_id)
-                return s is not None and s.state == value
-
-            def _is_state_attr(entity_id: str, attr: str, value) -> bool:
-                s = permitted.get(entity_id)
-                return s is not None and s.attributes.get(attr) == value
-
-            def _has_value(entity_id: str) -> bool:
-                s = permitted.get(entity_id)
-                return s is not None and s.state not in ("unknown", "unavailable")
-
-            tmpl = template_helper.Template(template_str, hass)
-            rendered = tmpl.async_render(variables={
-                "states": filtered_states,
-                "state_attr": _state_attr,
-                "is_state": _is_state,
-                "is_state_attr": _is_state_attr,
-                "has_value": _has_value,
-                **template_blocklist_vars(),
-            })
+            rendered = _render_template_for_token(template_str, token, hass)
         except Exception:
             _log(data, token, request_id=request_id, method="POST", resource=resource,
                  outcome="invalid_request", client_ip=client_ip)

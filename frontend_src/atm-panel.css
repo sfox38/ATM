@@ -727,6 +727,8 @@ select.input {
 .outcome-not_found     { color: var(--atm-text-2);  font-weight: 500; }
 .outcome-rate_limited  { color: var(--atm-warning); font-weight: 600; }
 .outcome-not_implemented { color: var(--atm-info);  font-weight: 500; }
+.outcome-invalid_request { color: var(--atm-text-2); font-weight: 500; }
+.outcome-pending_approval { color: var(--atm-warning); font-weight: 600; }
 
 .outcome-badge { display: inline-block; padding: 2px 9px; border-radius: 20px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; }
 .outcome-badge.outcome-allowed       { background: var(--atm-success-bg); }
@@ -734,6 +736,8 @@ select.input {
 .outcome-badge.outcome-not_found     { background: var(--atm-grey-tint); }
 .outcome-badge.outcome-rate_limited  { background: var(--atm-warning-bg); }
 .outcome-badge.outcome-not_implemented { background: var(--atm-info-bg); }
+.outcome-badge.outcome-invalid_request { background: var(--atm-grey-tint); }
+.outcome-badge.outcome-pending_approval { background: var(--atm-warning-bg); }
 
 /* ============================================================
    Permission summary

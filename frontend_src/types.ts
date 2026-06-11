@@ -7,11 +7,7 @@ export type Outcome =
   | "rate_limited"
   | "not_implemented"
   | "invalid_request"
-  | "pending_approval"
-  | "approval_executed"
-  | "approval_rejected"
-  | "approval_expired"
-  | "approval_cancelled";
+  | "pending_approval";
 
 export type CapMode = "deny" | "allow" | "confirm";
 export type Persona =
@@ -51,10 +47,6 @@ export interface PermissionTree {
 export interface TokenRecord extends CapabilityFlagsMap {
   id: string;
   name: string;
-  // token_hash is declared here for type completeness but the backend never includes it
-  // in to_dict() responses (only to_storage_dict() uses it). This field will always be
-  // undefined at runtime. Do not read it; use token_hash only in TokenCreateResponse.token.
-  token_hash: string;
   created_at: string;
   created_by: string;
   expires_at: string | null;
@@ -76,14 +68,12 @@ export interface TokenCreateResponse extends TokenRecord {
 export interface ArchivedTokenRecord {
   id: string;
   name: string;
-  token_hash: string;
   created_at: string;
   created_by: string;
   revoked_at: string;
   revoked: boolean;
   expires_at: string | null;
   last_used_at: string | null;
-  pass_through: boolean;
 }
 
 export interface GlobalSettings {

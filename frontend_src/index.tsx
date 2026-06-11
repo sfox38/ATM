@@ -60,8 +60,8 @@ function ATMApp({ hass, narrow, theme, onThemeChange }: { hass: unknown; narrow:
 
   useEffect(() => {
     if (menuRef.current) {
-      (menuRef.current as Record<string, unknown>).hass = hass;
-      (menuRef.current as Record<string, unknown>).narrow = narrow;
+      (menuRef.current as unknown as Record<string, unknown>).hass = hass;
+      (menuRef.current as unknown as Record<string, unknown>).narrow = narrow;
     }
   }, [hass, narrow]);
 

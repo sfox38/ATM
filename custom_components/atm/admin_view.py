@@ -30,7 +30,6 @@ from .const import (
     PERSONA_NAMES,
     TOKEN_NAME_REGEX,
 )
-from .helpers import effective_caps
 from .data import ATMData
 from .helpers import cancel_expiry_timer, notify_tools_list_changed, terminate_token_connections
 from .policy_engine import Permission, get_effective_hint, resolve
@@ -1328,8 +1327,9 @@ async def _resolve_approval(
         token_name=f"admin:{user.id}",
         method=f"approval/{terminal_status}",
         resource=f"approval:{updated.tool_name}:{approval_id}",
-        outcome=f"approval_{terminal_status}",
-        client_ip=None,
+        outcome="denied",
+        client_ip="",
+        settings=data.store.get_settings(),
     )
     return _ok(updated.to_dict(), request_id=rid)
 
@@ -1339,7 +1339,6 @@ async def _approve_approval(hass, request: web.Request, approval_id: str) -> web
     from .approvals import (  # noqa: PLC0415
         REASON_CAPABILITY_DENIED,
         REASON_KILL_SWITCH,
-        REASON_RATE_LIMITED,
         REASON_TOKEN_INACTIVE,
         STATUS_APPROVED,
         STATUS_CANCELLED,
@@ -1438,8 +1437,9 @@ async def _approve_approval(hass, request: web.Request, approval_id: str) -> web
         token_name=record.token_name,
         method=f"approval/{final_status}",
         resource=f"approval:{record.tool_name}:{approval_id}",
-        outcome="approval_executed" if final_status == STATUS_APPROVED else f"approval_{final_status}",
-        client_ip=None,
+        outcome="allowed" if final_status == STATUS_APPROVED else "denied",
+        client_ip="",
+        settings=settings,
     )
     return _ok(updated.to_dict(), request_id=rid)
 

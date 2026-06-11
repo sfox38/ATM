@@ -141,7 +141,7 @@ class AuditLog:
             payload=logged_payload,
         ))
 
-    _VALID_OUTCOMES = frozenset({"allowed", "denied", "not_found", "rate_limited", "not_implemented", "invalid_request"})
+    _VALID_OUTCOMES = frozenset({"allowed", "denied", "not_found", "rate_limited", "not_implemented", "invalid_request", "pending_approval"})
 
     def query(
         self,

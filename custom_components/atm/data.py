@@ -4,14 +4,11 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Callable
+from typing import Callable
 
 from .audit import AuditLog
 from .rate_limiter import RateLimiter
 from .token_store import TokenStore
-
-if TYPE_CHECKING:
-    from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 
 @dataclass

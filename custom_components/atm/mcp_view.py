@@ -35,7 +35,6 @@ from .const import (
     ANNOUNCE_BIT,
     ATM_VERSION,
     BLOCKED_DOMAINS,
-    CAP_ALLOW,
     CAP_CONFIRM,
     CAP_DENY,
     DOMAIN,
@@ -55,7 +54,6 @@ from .const import (
 )
 from .data import ATMData
 from .helpers import (
-    FilteredStates as _FilteredStates,
     archive_expired_token,
     build_error_response as _error,
     build_permitted_states as _build_permitted_states,
@@ -69,6 +67,7 @@ from .helpers import (
     log_request as _log,
     parse_time_param as _parse_time_param,
     read_json_body as _read_json_body,
+    render_template_for_token as _render_template_for_token,
 )
 from .policy_engine import (
     EntityCreationNotPermitted,
@@ -81,7 +80,6 @@ from .policy_engine import (
     resolve_service_targets,
     scrub_sensitive_attributes,
     scrub_state_dict as _scrub_state_dict,
-    template_blocklist_vars,
 )
 from .rate_limiter import RateLimitResult
 from .token_store import TokenRecord
@@ -1185,42 +1183,11 @@ async def _tool_render_template(
         return _tool_error("Missing required argument: template"), "invalid_request", "render_template"
 
     try:
-        from homeassistant.helpers import template as template_helper
-
-        permitted = _build_permitted_states(token, hass)
-
-        filtered_states = _FilteredStates(permitted)
-
-        # Override all HA template state helpers with permission-restricted versions.
-        def _state_attr(entity_id: str, attr: str):
-            s = permitted.get(entity_id)
-            return s.attributes.get(attr) if s is not None else None
-
-        def _is_state(entity_id: str, value: str) -> bool:
-            s = permitted.get(entity_id)
-            return s is not None and s.state == value
-
-        def _is_state_attr(entity_id: str, attr: str, value) -> bool:
-            s = permitted.get(entity_id)
-            return s is not None and s.attributes.get(attr) == value
-
-        def _has_value(entity_id: str) -> bool:
-            s = permitted.get(entity_id)
-            return s is not None and s.state not in ("unknown", "unavailable")
-
-        tmpl = template_helper.Template(template_str, hass)
-        rendered = tmpl.async_render(variables={
-            "states": filtered_states,
-            "state_attr": _state_attr,
-            "is_state": _is_state,
-            "is_state_attr": _is_state_attr,
-            "has_value": _has_value,
-            **template_blocklist_vars(),
-        })
+        rendered = _render_template_for_token(template_str, token, hass)
     except Exception:
         return _tool_error("Template rendering failed. Check your template syntax."), "invalid_request", "render_template"
 
-    return _tool_success(str(rendered)), "allowed", "render_template"
+    return _tool_success(rendered), "allowed", "render_template"
 
 
 async def _tool_create_automation(
@@ -1668,7 +1635,7 @@ def _build_diff_restart_ha(args: dict, token: TokenRecord, hass: Any) -> dict:
         domain_data = hass.data.get(DOMAIN)
         if domain_data is not None and hasattr(domain_data, "sse_connections"):
             sse_count = sum(len(q) for q in domain_data.sse_connections.values())
-    except Exception:  # noqa: BLE001 — diagnostic only
+    except Exception:  # noqa: BLE001 - diagnostic only
         pass
     return {
         "kind": "system_action",
@@ -1679,8 +1646,6 @@ def _build_diff_restart_ha(args: dict, token: TokenRecord, hass: Any) -> dict:
             "warning": "All current ATM SSE connections will disconnect on restart.",
         },
     }
-
-    return _tool_success(json.dumps({"success": True})), "allowed", "restart_ha"
 
 
 _YAML_RESERVED: frozenset[str] = frozenset({
@@ -1904,10 +1869,8 @@ async def _tool_intent_action(
     })), "allowed", tool_name
 
 
-async def _tool_hass_turn_on(
-    args: dict, token: TokenRecord, hass: Any
-) -> tuple[dict, str, str]:
-    entities = resolve_intent_entities(
+def _resolve_turn_entities(args: dict, token: TokenRecord, hass: Any) -> list[str]:
+    return resolve_intent_entities(
         hass, token,
         domains=args.get("domain"),
         device_classes=args.get("device_class"),
@@ -1915,30 +1878,84 @@ async def _tool_hass_turn_on(
         area=args.get("area"),
         floor=args.get("floor"),
     )
-    # homeassistant.turn_on routes lock/alarm/cover entities to their physical
-    # services (lock.lock, alarm_control_panel.alarm_arm_*, cover.open_cover).
-    # Strip those entities when cap_physical_control is not allowed.
-    if effective_cap(token, "cap_physical_control") != CAP_ALLOW:
+
+
+async def _hass_turn_gate(
+    tool_name: str,
+    service: str,
+    args: dict,
+    token: TokenRecord,
+    hass: Any,
+    data: ATMData,
+    request_id: str,
+    client_ip: str | None,
+) -> tuple[dict, str, str]:
+    """Shared gate for HassTurnOn/HassTurnOff.
+
+    homeassistant.turn_on/off route lock/alarm/cover entities to their physical
+    services (lock.lock, alarm_control_panel.alarm_arm_*, cover.open_cover), so a
+    call that targets any of those is subject to cap_physical_control. When that
+    cap is confirm AND physical entities are in scope, the whole call is gated as
+    a pending approval (the executor re-runs it on approval). When the cap is deny
+    the physical entities are silently dropped inside the executor; non-physical
+    entities always proceed immediately.
+    """
+    entities = _resolve_turn_entities(args, token, hass)
+    physical = [e for e in entities if e.split(".")[0] in PHYSICAL_GATE_DOMAINS]
+    if physical and effective_cap(token, "cap_physical_control") == CAP_CONFIRM:
+        blocked = await _gate(
+            "cap_physical_control", token, hass, data,
+            tool_name=tool_name, args=args, request_id=request_id,
+            client_ip=client_ip, diff=_build_diff_hass_turn(service, physical, args, hass),
+        )
+        if blocked is not None:
+            return blocked
+    return await _hass_turn_execute(tool_name, service, args, token, hass, data)
+
+
+async def _hass_turn_execute(
+    tool_name: str, service: str, args: dict, token: TokenRecord, hass: Any, data: ATMData
+) -> tuple[dict, str, str]:
+    entities = _resolve_turn_entities(args, token, hass)
+    # Drop physical entities only when cap_physical_control is deny. Under allow
+    # (direct) or confirm (reached here only after admin approval) they are kept.
+    if effective_cap(token, "cap_physical_control") == CAP_DENY:
         entities = [e for e in entities if e.split(".")[0] not in PHYSICAL_GATE_DOMAINS]
-    return await _tool_intent_action("HassTurnOn", "homeassistant", "turn_on", {}, entities, hass, args=args)
+    return await _tool_intent_action(tool_name, "homeassistant", service, {}, entities, hass, args=args)
+
+
+async def _tool_hass_turn_on(
+    args: dict,
+    token: TokenRecord,
+    hass: Any,
+    data: ATMData,
+    request_id: str = "",
+    client_ip: str | None = None,
+) -> tuple[dict, str, str]:
+    return await _hass_turn_gate("HassTurnOn", "turn_on", args, token, hass, data, request_id, client_ip)
+
+
+async def _execute_hass_turn_on(
+    args: dict, token: TokenRecord, hass: Any, data: ATMData
+) -> tuple[dict, str, str]:
+    return await _hass_turn_execute("HassTurnOn", "turn_on", args, token, hass, data)
 
 
 async def _tool_hass_turn_off(
-    args: dict, token: TokenRecord, hass: Any
+    args: dict,
+    token: TokenRecord,
+    hass: Any,
+    data: ATMData,
+    request_id: str = "",
+    client_ip: str | None = None,
 ) -> tuple[dict, str, str]:
-    entities = resolve_intent_entities(
-        hass, token,
-        domains=args.get("domain"),
-        device_classes=args.get("device_class"),
-        name=args.get("name"),
-        area=args.get("area"),
-        floor=args.get("floor"),
-    )
-    # homeassistant.turn_off routes lock/alarm/cover to physical services.
-    # Strip those entities when cap_physical_control is not allowed.
-    if effective_cap(token, "cap_physical_control") != CAP_ALLOW:
-        entities = [e for e in entities if e.split(".")[0] not in PHYSICAL_GATE_DOMAINS]
-    return await _tool_intent_action("HassTurnOff", "homeassistant", "turn_off", {}, entities, hass, args=args)
+    return await _hass_turn_gate("HassTurnOff", "turn_off", args, token, hass, data, request_id, client_ip)
+
+
+async def _execute_hass_turn_off(
+    args: dict, token: TokenRecord, hass: Any, data: ATMData
+) -> tuple[dict, str, str]:
+    return await _hass_turn_execute("HassTurnOff", "turn_off", args, token, hass, data)
 
 
 async def _tool_hass_light_set(
@@ -2363,9 +2380,9 @@ async def _call_tool(
     if tool_name == "GetDateTime":
         return await _tool_get_date_time(arguments, token, hass)
     if tool_name == "HassTurnOn":
-        return await _tool_hass_turn_on(arguments, token, hass)
+        return await _tool_hass_turn_on(arguments, token, hass, data, request_id, client_ip)
     if tool_name == "HassTurnOff":
-        return await _tool_hass_turn_off(arguments, token, hass)
+        return await _tool_hass_turn_off(arguments, token, hass, data, request_id, client_ip)
     if tool_name == "HassLightSet":
         return await _tool_hass_light_set(arguments, token, hass)
     if tool_name == "HassFanSetSpeed":
@@ -2897,6 +2914,21 @@ class ATMMcpSseView(HomeAssistantView):
         # no performance reason to move it earlier. This is a deliberate deviation from
         # the CLAUDE.md rule 19 wording "before full token validation".
         #
+        # The rate-limit check runs BEFORE the queue/session are registered so a
+        # rejected connection allocates nothing. Doing it after registration (as a
+        # previous version did) leaked a connection slot on every 429 because the
+        # early return skipped cleanup, eventually locking the token out of SSE.
+        data.store.update_last_used(token.id, utcnow())
+
+        rl_result = data.rate_limiter.check(token.id, token.rate_limit_requests, token.rate_limit_burst)
+        if not rl_result.allowed:
+            _fire_rate_limit_events(hass, data, token)
+            _log(data, token, request_id=request_id, method="GET", resource="/api/atm/mcp",
+                 outcome="rate_limited", client_ip=client_ip)
+            resp = _error("rate_limited", "Rate limit exceeded.", 429, request_id)
+            resp.headers["Retry-After"] = str(rl_result.retry_after)
+            return resp
+
         # The lock serialises the count-check-and-add to prevent two concurrent
         # connections from both passing the limit check (TOCTOU race).
         async with data.sse_connect_lock:
@@ -2916,16 +2948,6 @@ class ATMMcpSseView(HomeAssistantView):
                 data.sse_connections[token.id] = set()
             data.sse_connections[token.id].add(queue)
 
-        data.store.update_last_used(token.id, utcnow())
-
-        rl_result = data.rate_limiter.check(token.id, token.rate_limit_requests, token.rate_limit_burst)
-        if not rl_result.allowed:
-            _fire_rate_limit_events(hass, data, token)
-            _log(data, token, request_id=request_id, method="GET", resource="/api/atm/mcp",
-                 outcome="rate_limited", client_ip=client_ip)
-            resp = _error("rate_limited", "Rate limit exceeded.", 429, request_id)
-            resp.headers["Retry-After"] = str(rl_result.retry_after)
-            return resp
         _log(data, token, request_id=request_id, method="GET", resource="/api/atm/mcp",
              outcome="allowed", client_ip=client_ip)
 
@@ -3252,7 +3274,7 @@ def _build_diff_edit_automation(args: dict, token: TokenRecord, hass: Any) -> di
             current = next((a for a in items if a.get("id") == automation_id), None)
             if current is not None:
                 before = _truncate(json.dumps(current, indent=2, default=str))
-    except Exception:  # noqa: BLE001 — diagnostic only
+    except Exception:  # noqa: BLE001 - diagnostic only
         pass
     return {
         "kind": "yaml_diff",
@@ -3274,7 +3296,7 @@ def _build_diff_delete_automation(args: dict, token: TokenRecord, hass: Any) -> 
             current = next((a for a in items if a.get("id") == automation_id), None)
             if current is not None:
                 before = _truncate(json.dumps(current, indent=2, default=str))
-    except Exception:  # noqa: BLE001 — diagnostic only
+    except Exception:  # noqa: BLE001 - diagnostic only
         pass
     return {
         "kind": "system_action",
@@ -3309,7 +3331,7 @@ def _build_diff_edit_script(args: dict, token: TokenRecord, hass: Any) -> dict:
             current = scripts.get(script_id)
             if current is not None:
                 before = _truncate(json.dumps({script_id: current}, indent=2, default=str))
-    except Exception:  # noqa: BLE001 — diagnostic only
+    except Exception:  # noqa: BLE001 - diagnostic only
         pass
     return {
         "kind": "yaml_diff",
@@ -3331,7 +3353,7 @@ def _build_diff_delete_script(args: dict, token: TokenRecord, hass: Any) -> dict
             current = scripts.get(script_id)
             if current is not None:
                 before = _truncate(json.dumps({script_id: current}, indent=2, default=str))
-    except Exception:  # noqa: BLE001 — diagnostic only
+    except Exception:  # noqa: BLE001 - diagnostic only
         pass
     return {
         "kind": "system_action",
@@ -3339,6 +3361,34 @@ def _build_diff_delete_script(args: dict, token: TokenRecord, hass: Any) -> dict
         "target": {"type": "script", "id": script_id, "label": script_id},
         "before": before,
         "preview": {"warning": "This script will be removed permanently."},
+    }
+
+
+def _build_diff_hass_turn(service: str, physical: list[str], args: dict, hass: Any) -> dict:
+    """Diff payload for a HassTurnOn/Off approval triggered by physical entities.
+
+    Only the physical (lock/alarm/cover) targets are listed, since those are the
+    entities cap_physical_control gates; non-physical targets are not part of the
+    approval decision.
+    """
+    targets = []
+    for eid in physical:
+        state = hass.states.get(eid)
+        label = str(state.attributes.get("friendly_name") or eid) if state else eid
+        targets.append({"entity_id": eid, "name": label})
+    verb = "on" if service == "turn_on" else "off"
+    return {
+        "kind": "service_preview",
+        "summary": f"Turn {verb} physical device(s): {', '.join(t['name'] for t in targets)}",
+        "target": {"type": "service", "id": f"homeassistant/{service}", "label": f"homeassistant/{service}"},
+        "preview": {
+            "physical_targets": targets,
+            "name": args.get("name"),
+            "area": args.get("area"),
+            "floor": args.get("floor"),
+            "domain": args.get("domain"),
+            "device_class": args.get("device_class"),
+        },
     }
 
 
@@ -3387,3 +3437,5 @@ _register_executor("edit_script", _execute_edit_script)
 _register_executor("delete_script", _execute_delete_script)
 _register_executor("HassSetPosition", _execute_hass_set_position)
 _register_executor("HassStopMoving", _execute_hass_stop_moving)
+_register_executor("HassTurnOn", _execute_hass_turn_on)
+_register_executor("HassTurnOff", _execute_hass_turn_off)

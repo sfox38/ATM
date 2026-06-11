@@ -30,7 +30,7 @@ from .const import (
     TOKEN_LENGTH,
     TOKEN_PREFIX,
 )
-from .policy_engine import Permission, parse_relative_time, resolve
+from .policy_engine import Permission, parse_relative_time, resolve, template_blocklist_vars
 from .token_store import token_name_slug
 
 if TYPE_CHECKING:
@@ -548,6 +548,117 @@ class FilteredStates:
             if eid.split(".")[0] == domain
         }
         return _DomainFilteredStates(entities)
+
+
+_SAFE_TEMPLATE_ENV = None
+
+
+def safe_template_env():
+    """Return the cached hass-less TemplateEnvironment used for token template renders.
+
+    A TemplateEnvironment constructed without hass never registers the hass-aware
+    helpers (states, expand, area_entities, integration_entities, ...) as globals,
+    filters, or tests, so entity access exists only through the permission-filtered
+    variables ATM injects. Rendering in the full hass environment and shadowing
+    globals with render variables is NOT safe: Jinja2 variables never shadow
+    filters or tests, so {{ 'sensor.x' | states }} would bypass the sandbox.
+    """
+    global _SAFE_TEMPLATE_ENV
+    if _SAFE_TEMPLATE_ENV is None:
+        from homeassistant.helpers.template import TemplateEnvironment  # noqa: PLC0415
+        _SAFE_TEMPLATE_ENV = TemplateEnvironment(None)
+    return _SAFE_TEMPLATE_ENV
+
+
+def render_template_for_token(template_str: str, token: TokenRecord, hass: HomeAssistant) -> str:
+    """Render a Jinja2 template against the token's permitted entity state.
+
+    Renders in safe_template_env() with permission-restricted replacements for the
+    HA state helpers and pure dt_util shims for the time helpers the hass-less
+    environment lacks. Raises (TemplateError, ValueError, jinja2 errors) on any
+    failure; callers map exceptions to an invalid_request response.
+    """
+    from homeassistant.helpers.template import MAX_TEMPLATE_OUTPUT  # noqa: PLC0415
+    from homeassistant.exceptions import TemplateError  # noqa: PLC0415
+    from homeassistant.util import dt as dt_util  # noqa: PLC0415
+
+    permitted = build_permitted_states(token, hass)
+    filtered_states = FilteredStates(permitted)
+
+    # Permission-restricted versions of the HA template state helpers.
+    def _state_attr(entity_id: str, attr: str):
+        s = permitted.get(entity_id)
+        return s.attributes.get(attr) if s is not None else None
+
+    def _is_state(entity_id: str, value: str) -> bool:
+        s = permitted.get(entity_id)
+        return s is not None and s.state == value
+
+    def _is_state_attr(entity_id: str, attr: str, value) -> bool:
+        s = permitted.get(entity_id)
+        return s is not None and s.attributes.get(attr) == value
+
+    def _has_value(entity_id: str) -> bool:
+        s = permitted.get(entity_id)
+        return s is not None and s.state not in ("unknown", "unavailable")
+
+    # Time helpers absent from the hass-less environment. These mirror HA's
+    # DateTimeExtension implementations; they touch only dt_util, never entities.
+    def _today_at(time_str: str = "") -> datetime:
+        today = dt_util.start_of_local_day()
+        if not time_str:
+            return today
+        parsed = dt_util.parse_time(time_str)
+        if parsed is None:
+            raise ValueError(f"could not convert str to datetime: '{time_str}'")
+        return datetime.combine(today, parsed, today.tzinfo)
+
+    def _localize(value: datetime) -> datetime:
+        return value if value.tzinfo else dt_util.as_local(value)
+
+    def _relative_time(value):
+        if not isinstance(value, datetime):
+            return value
+        value = _localize(value)
+        return value if dt_util.now() < value else dt_util.get_age(value)
+
+    def _time_since(value, precision: int = 1):
+        if not isinstance(value, datetime):
+            return value
+        value = _localize(value)
+        return value if dt_util.now() < value else dt_util.get_age(value, precision)
+
+    def _time_until(value, precision: int = 1):
+        if not isinstance(value, datetime):
+            return value
+        value = _localize(value)
+        return value if dt_util.now() > value else dt_util.get_time_remaining(value, precision)
+
+    variables = {
+        "states": filtered_states,
+        "state_attr": _state_attr,
+        "is_state": _is_state,
+        "is_state_attr": _is_state_attr,
+        "has_value": _has_value,
+        "now": dt_util.now,
+        "utcnow": dt_util.utcnow,
+        "today_at": _today_at,
+        "relative_time": _relative_time,
+        "time_since": _time_since,
+        "time_until": _time_until,
+        # Defense in depth: these names do not exist in the hass-less environment,
+        # but spec section 3.4 requires the enumeration helpers to return empty
+        # values rather than raise, so keep the stubs as render variables.
+        **template_blocklist_vars(),
+    }
+
+    compiled = safe_template_env().from_string(template_str)
+    rendered = compiled.render(variables)
+    if len(rendered) > MAX_TEMPLATE_OUTPUT:
+        raise TemplateError(
+            f"Template output exceeded maximum size of {MAX_TEMPLATE_OUTPUT} characters"
+        )
+    return rendered.strip()
 
 
 _LOG_LEVEL_RANK: dict[str, int] = {"DEBUG": 0, "INFO": 1, "WARNING": 2, "ERROR": 3, "CRITICAL": 3}

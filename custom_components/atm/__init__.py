@@ -21,10 +21,12 @@ from .policy_engine import template_blocklist_vars
 from .rate_limiter import RateLimiter
 from .token_store import TokenStore
 
-# HA template globals that are safe (no entity state access). When the runtime
-# audit runs, any global not in this set and not in the blocklist triggers a
-# warning so new HA globals don't silently bypass ATM filtering.
-_SAFE_TEMPLATE_GLOBALS = frozenset({
+# HA-added template names (globals, filters, and tests) that are safe: pure
+# math/string/data helpers with no entity state or registry access. When the
+# runtime audit runs, any name HA adds to the render environment that is not in
+# this set and not in the blocklist triggers a warning so new HA template
+# functions don't silently bypass ATM filtering.
+_SAFE_TEMPLATE_NAMES = frozenset({
     "bool", "float", "int", "version", "typeof", "is_number",
     "zip", "apply", "combine", "iif", "as_function", "pack", "unpack",
     "merge_response", "e", "pi", "tau", "sin", "cos", "tan",
@@ -38,6 +40,14 @@ _SAFE_TEMPLATE_GLOBALS = frozenset({
     "timedelta", "now", "utcnow", "relative_time", "time_since",
     "time_until", "today_at",
     "range", "lipsum", "dict", "cycler", "joiner", "namespace", "undefined",
+    # Filter-only names.
+    "add", "base64_decode", "base64_encode", "contains", "from_hex",
+    "from_json", "is_defined", "multiply", "ord", "ordinal",
+    "regex_findall", "regex_findall_index", "regex_match", "regex_replace",
+    "regex_search", "timestamp_custom", "timestamp_local", "timestamp_utc",
+    "to_json", "random", "round",
+    # Test-only names.
+    "datetime", "list", "match", "search", "string_like",
 })
 
 _LOGGER = logging.getLogger(__name__)
@@ -45,28 +55,41 @@ _LOGGER = logging.getLogger(__name__)
 PLATFORMS = ["sensor"]
 
 
-def _audit_template_sandbox(hass: HomeAssistant) -> None:
-    """Warn about HA template globals not covered by ATM's blocklist.
+def _audit_template_sandbox() -> None:
+    """Warn about unrecognized names in ATM's template render environment.
 
-    Runs once at setup. Any unrecognized global triggers a log warning so
-    future HA versions adding new template functions don't silently bypass
-    ATM entity filtering.
+    Runs once at setup. Audits the hass-less environment actually used by
+    render_template_for_token() across globals, filters, AND tests (Jinja2
+    render variables cannot shadow filters or tests, so every name HA registers
+    there is reachable). Any unrecognized name triggers a log warning so future
+    HA versions adding new template functions don't silently bypass ATM
+    entity filtering.
     """
     try:
-        from homeassistant.helpers.template import TemplateEnvironment
+        import jinja2.sandbox
+
+        from .helpers import safe_template_env
+
         blocked = set(template_blocklist_vars().keys())
         overridden = {"states", "state_attr", "is_state", "is_state_attr", "has_value"}
-        known = blocked | overridden | _SAFE_TEMPLATE_GLOBALS
-        env = TemplateEnvironment(hass, limited=False, log_fn=None)
-        for name in env.globals:
-            if name not in known and not name.startswith("_"):
-                _LOGGER.warning(
-                    "ATM template sandbox: unrecognized HA global '%s' - "
-                    "this function is not blocked and may bypass entity filtering",
-                    name,
-                )
+        known = blocked | overridden | _SAFE_TEMPLATE_NAMES
+        env = safe_template_env()
+        base = jinja2.sandbox.ImmutableSandboxedEnvironment()
+        for kind, names, base_names in (
+            ("global", env.globals, base.globals),
+            ("filter", env.filters, base.filters),
+            ("test", env.tests, base.tests),
+        ):
+            for name in set(names) - set(base_names):
+                if name not in known and not name.startswith("_"):
+                    _LOGGER.warning(
+                        "ATM template sandbox: unrecognized HA template %s '%s' - "
+                        "this function is not blocked and may bypass entity filtering",
+                        kind,
+                        name,
+                    )
     except Exception:
-        _LOGGER.debug("ATM: could not audit template globals", exc_info=True)
+        _LOGGER.debug("ATM: could not audit template environment", exc_info=True)
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -191,7 +214,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STOP, _on_stop)
     )
 
-    _audit_template_sandbox(hass)
+    _audit_template_sandbox()
 
     def _invalidate_entity_tree(_event=None) -> None:
         data.entity_tree_cache_valid = False

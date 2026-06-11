@@ -33,6 +33,8 @@ const OUTCOME_LABEL: Record<Outcome, string> = {
   not_found: "Not Found",
   rate_limited: "Rate Limited",
   not_implemented: "Not Implemented",
+  invalid_request: "Invalid Request",
+  pending_approval: "Pending Approval",
 };
 
 const OUTCOME_CLASS: Record<Outcome, string> = {
@@ -41,6 +43,8 @@ const OUTCOME_CLASS: Record<Outcome, string> = {
   not_found: "outcome-not_found",
   rate_limited: "outcome-rate_limited",
   not_implemented: "outcome-not_implemented",
+  invalid_request: "outcome-invalid_request",
+  pending_approval: "outcome-pending_approval",
 };
 
 type SortKey = "timestamp" | "token_name" | "method" | "resource" | "outcome" | "client_ip";

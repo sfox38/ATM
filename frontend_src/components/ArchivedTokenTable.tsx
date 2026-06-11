@@ -3,7 +3,7 @@ import type { ArchivedTokenRecord } from "../types";
 import { api } from "../api";
 import { formatDate } from "../utils";
 
-type SortKey = "name" | "mode" | "status" | "created" | "archived" | "last_used";
+type SortKey = "name" | "status" | "created" | "archived" | "last_used";
 type SortDir = "asc" | "desc";
 
 interface Props {
@@ -33,7 +33,6 @@ export function ArchivedTokenTable({ tokens, onDeleted }: Props) {
     let vb: string = "";
     switch (sortKey) {
       case "name":      va = a.name.toLowerCase();         vb = b.name.toLowerCase(); break;
-      case "mode":      va = a.pass_through ? "1" : "0";   vb = b.pass_through ? "1" : "0"; break;
       case "status":    va = a.revoked ? "revoked" : "expired"; vb = b.revoked ? "revoked" : "expired"; break;
       case "created":   va = a.created_at ?? "";            vb = b.created_at ?? ""; break;
       case "archived":  va = a.revoked_at ?? "";            vb = b.revoked_at ?? ""; break;
@@ -77,7 +76,6 @@ export function ArchivedTokenTable({ tokens, onDeleted }: Props) {
         <thead>
           <tr>
             {th("name", "Name")}
-            {th("mode", "Mode")}
             {th("status", "Status")}
             {th("created", "Created")}
             {th("archived", "Archived On")}
@@ -89,18 +87,8 @@ export function ArchivedTokenTable({ tokens, onDeleted }: Props) {
           {sorted.map((t) => {
             const status = t.revoked ? "Revoked" : "Expired";
             return (
-              <tr
-                key={t.id}
-                className={t.pass_through ? "pass-through-row" : ""}
-              >
+              <tr key={t.id}>
                 <td>{t.name}</td>
-                <td>
-                  {t.pass_through ? (
-                    <span className="badge badge-amber">Pass Through</span>
-                  ) : (
-                    <span className="badge badge-blue">Scoped</span>
-                  )}
-                </td>
                 <td>
                   <span className={`badge ${status === "Revoked" ? "badge-red" : "badge-grey"}`}>
                     {status}

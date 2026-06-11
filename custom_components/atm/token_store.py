@@ -513,7 +513,7 @@ class TokenStore:
         # This keeps the persona label honest: applying a preset and then tweaking
         # any cap drops the token to "custom" (or to a different matching preset).
         if cap_changed:
-            from .personas import detect_persona  # noqa: PLC0415 — avoid circular import at module load
+            from .personas import detect_persona  # noqa: PLC0415 - avoid circular import at module load
             token.persona = detect_persona(token.caps_dict())
         token.updated_at = utcnow()
         await self.async_save()
