@@ -18,6 +18,7 @@ import type {
   PermissionTree,
   ResolveResult,
   ScopeResult,
+  TokenConnection,
   TokenCreateResponse,
   TokenRecord,
   TokenStats,
@@ -118,6 +119,7 @@ export const api = {
     req<EntityTree>("GET", `/entities${forceReload ? "?force_reload=1" : ""}`),
 
   getTokenStats: (tokenId: string) => req<TokenStats>("GET", `/tokens/${tokenId}/stats`),
+  getTokenConnection: (tokenId: string) => req<TokenConnection>("GET", `/tokens/${tokenId}/connection`),
   getTokenAudit: (tokenId: string, params?: AuditQueryParams) =>
     req<AuditEntry[]>("GET", `/tokens/${tokenId}/audit${buildQuery(params)}`),
   getAudit: (params?: AuditQueryParams) =>

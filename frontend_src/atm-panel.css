@@ -1048,9 +1048,12 @@ select.input {
   padding: 4px 10px; border: 1px solid var(--atm-border);
   border-radius: var(--atm-radius-xs); cursor: pointer; font-size: 12px;
   background: var(--atm-surface); transition: background 0.12s, border-color 0.12s;
-  user-select: none;
+  position: relative; user-select: none;
 }
-.mode-radio input { position: absolute; opacity: 0; pointer-events: none; }
+.mode-radio input {
+  position: absolute; inset: 0; width: 100%; height: 100%; margin: 0;
+  opacity: 0; pointer-events: none;
+}
 .mode-radio:hover { background: var(--atm-surface-2); }
 .mode-radio-checked { border-color: currentColor; background: var(--atm-surface-2); font-weight: 600; }
 .mode-radio.mode-deny.mode-radio-checked { color: var(--atm-error, #c62828); }
@@ -1124,6 +1127,67 @@ select.input {
   border-radius: var(--atm-radius-xs); font-size: 13px; font-family: inherit;
   background: var(--atm-surface); color: var(--atm-text);
 }
+
+/* Onboarding wizard */
+.wizard-hero { text-align: center; padding: 40px 24px; }
+.wizard-hero-title { font-size: 22px; font-weight: 700; color: var(--atm-text); margin-bottom: 10px; }
+.wizard-hero-sub { font-size: 14px; color: var(--atm-text-2); max-width: 520px; margin: 0 auto 20px; }
+.wizard-hero-actions { display: flex; justify-content: center; }
+
+/* Center the wizard both axes; margin:auto is scroll-safe for tall steps. */
+.wizard-root { display: flex; min-height: 100%; }
+.wizard-center { margin: auto; width: 100%; max-width: 760px; }
+
+.wizard-stepper { display: flex; gap: 6px; list-style: none; padding: 0; margin: 0 0 16px 0; flex-wrap: wrap; justify-content: center; }
+.wizard-step { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--atm-text-2); opacity: 0.7; }
+.wizard-step-num {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 20px; height: 20px; border-radius: 50%; font-size: 11px; font-weight: 700;
+  background: var(--atm-border); color: var(--atm-text-2);
+}
+.wizard-step + .wizard-step::before { content: ""; }
+.wizard-step-active { opacity: 1; color: var(--atm-text); }
+.wizard-step-active .wizard-step-num { background: var(--atm-accent); color: var(--atm-accent-fg); }
+.wizard-step-done { opacity: 1; }
+.wizard-step-done .wizard-step-num { background: var(--atm-info); color: #fff; }
+
+.wizard-body { max-width: 720px; }
+.wizard-title { font-size: 18px; font-weight: 700; margin: 0 0 6px 0; color: var(--atm-text); }
+.wizard-sub { font-size: 13px; color: var(--atm-text-2); margin: 0 0 16px 0; }
+.wizard-hint { font-size: 12px; color: var(--atm-text-2); margin-top: 4px; }
+.wizard-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 20px; flex-wrap: wrap; }
+.wizard-connect-status { margin-top: 14px; font-size: 13px; color: var(--atm-text-2); }
+.wizard-connect-status-ok { color: var(--atm-accent); font-weight: 700; }
+/* Stable width so the label flip Copy -> Copied! never reflows the button. */
+.wizard-copy-btn { min-width: 78px; }
+
+.connect-field { display: flex; align-items: center; gap: 8px; margin: 8px 0; flex-wrap: nowrap; }
+.connect-field-label { font-size: 11px; font-weight: 700; color: var(--atm-text-2); text-transform: uppercase; letter-spacing: 0.06em; min-width: 90px; }
+.connect-field-value { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; background: var(--atm-surface-2, var(--atm-surface)); padding: 6px 10px; border-radius: var(--atm-radius-xs); border: 1px solid var(--atm-border); font-size: 12px; }
+
+/* Agent tabs on the Connect step. Pill/segmented style so they read clearly as
+   a chooser; the active tab is filled with the accent color. */
+.wizard-tabs-label { font-size: 11px; font-weight: 700; color: var(--atm-text-2); text-transform: uppercase; letter-spacing: 0.06em; margin: 16px 0 6px; }
+.wizard-tabs { display: flex; gap: 6px; flex-wrap: wrap; margin: 0 0 14px; }
+.wizard-tab { background: var(--atm-surface-2, var(--atm-surface)); border: 1px solid var(--atm-border); border-radius: var(--atm-radius-xs); padding: 7px 14px; font-size: 13px; font-weight: 600; color: var(--atm-text-2); cursor: pointer; }
+.wizard-tab:hover { color: var(--atm-text); border-color: var(--atm-accent); }
+.wizard-tab-active { background: var(--atm-accent); color: var(--atm-accent-fg); border-color: var(--atm-accent); }
+.wizard-tab-active:hover { color: var(--atm-accent-fg); }
+
+.command-block { margin: 12px 0; }
+.command-block-title { font-size: 12px; font-weight: 700; color: var(--atm-text); margin-bottom: 2px; }
+.command-block .wizard-hint { display: block; margin-bottom: 6px; }
+/* Every value (URL, token, command, JSON, header field) renders as a full-width
+   box with the Copy button pinned inside at the top-right. */
+.command-field { margin: 8px 0; }
+.command-field-label { font-size: 11px; font-weight: 700; color: var(--atm-text-2); text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 3px; }
+.command-block-codewrap { position: relative; border: 1px solid var(--atm-border); border-radius: var(--atm-radius-sm); overflow: hidden; background: var(--atm-surface-2, var(--atm-surface)); }
+.command-block-code { margin: 0; padding: 10px 96px 10px 10px; font-size: 12px; line-height: 1.5; overflow-x: auto; white-space: pre; color: var(--atm-text); background: transparent; }
+.command-block-input { width: 100%; box-sizing: border-box; border: none; outline: none; background: transparent; color: var(--atm-text); font-family: var(--atm-mono, monospace); font-size: 12px; padding: 10px 96px 10px 10px; }
+.command-copy { position: absolute; top: 7px; right: 7px; z-index: 1; }
+
+.connect-details { margin: 12px 0; }
+.connect-details > summary { cursor: pointer; font-weight: 700; font-size: 13px; color: var(--atm-accent); padding: 6px 0; }
 
 /* MESA profile editor + previews */
 .mesa-editor-body { display: flex; flex-direction: column; gap: 2px; max-height: 60vh; overflow-y: auto; }

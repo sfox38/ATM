@@ -177,11 +177,15 @@ PERSONA_VOICE_ASSISTANT = "voice_assistant"
 PERSONA_AUTOMATION_BUILDER = "automation_builder"
 PERSONA_POWER_USER = "power_user"
 PERSONA_CUSTOM = "custom"
+# Gentle starter persona seeded by the onboarding wizard. Hidden from the normal
+# persona picker; reads plus service calls, physical control gated to confirm.
+PERSONA_NEW_USER = "new_user"
 PERSONA_NAMES = frozenset({
     PERSONA_READ_ONLY,
     PERSONA_VOICE_ASSISTANT,
     PERSONA_AUTOMATION_BUILDER,
     PERSONA_POWER_USER,
+    PERSONA_NEW_USER,
     PERSONA_CUSTOM,
 })
 

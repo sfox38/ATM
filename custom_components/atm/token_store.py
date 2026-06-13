@@ -114,6 +114,10 @@ class TokenRecord:
     updated_at: datetime | None = None
     pass_through: bool = False
     use_assist_exposure: bool = False
+    # When False (default), the MCP tools/list is gated to the tools this token
+    # can actually use (its caps and write scope). True announces the full tool
+    # surface (diagnostic / opt-out). Not a capability: a presentation toggle.
+    announce_all_tools: bool = False
     rate_limit_requests: int = DEFAULT_RATE_LIMIT_REQUESTS
     rate_limit_burst: int = DEFAULT_RATE_LIMIT_BURST
     cap_automation_write: str = CAP_DENY
@@ -144,6 +148,7 @@ class TokenRecord:
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
             "pass_through": self.pass_through,
             **({"use_assist_exposure": self.use_assist_exposure} if self.pass_through else {}),
+            "announce_all_tools": self.announce_all_tools,
             "rate_limit_requests": self.rate_limit_requests,
             "rate_limit_burst": self.rate_limit_burst,
             "persona": self.persona,
@@ -184,6 +189,7 @@ class TokenRecord:
             last_used_at=_parse_dt(data.get("last_used_at")),
             pass_through=data.get("pass_through", False),
             use_assist_exposure=data.get("use_assist_exposure", False),
+            announce_all_tools=data.get("announce_all_tools", False),
             rate_limit_requests=data.get("rate_limit_requests", DEFAULT_RATE_LIMIT_REQUESTS),
             rate_limit_burst=data.get("rate_limit_burst", DEFAULT_RATE_LIMIT_BURST),
             persona=persona,
@@ -491,6 +497,7 @@ class TokenStore:
         mutable_fields = {
             "pass_through",
             "use_assist_exposure",
+            "announce_all_tools",
             "rate_limit_requests",
             "rate_limit_burst",
             "persona",

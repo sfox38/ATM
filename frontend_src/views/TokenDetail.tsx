@@ -3,8 +3,10 @@ import type { TokenRecord, PatchTokenBody } from "../types";
 import ATM_ICON from "../../custom_components/atm/brand/icon.png";
 import { api } from "../api";
 import { Loading, ErrorMsg } from "../index";
-import { formatDateTime, tokenStatus, copyToClipboard } from "../utils";
+import { formatDateTime, tokenStatus } from "../utils";
 import { Modal } from "../components/Modal";
+import { RawTokenDisplay } from "../components/TokenCreateModal";
+import { ConnectInstructions } from "../components/ConnectInstructions";
 import { CapabilityMatrix } from "../components/CapabilityMatrix";
 import { PersonaPicker } from "../components/PersonaPicker";
 import { RateLimitConfig } from "../components/RateLimitConfig";
@@ -61,7 +63,6 @@ function ConfirmModal({ title, body, checkLabel, confirmLabel, confirmClass, loa
 }
 
 function RotatedTokenModal({ rawToken, tokenName, onClose }: { rawToken: string; tokenName: string; onClose: () => void }) {
-  const [copied, setCopied] = useState(false);
   const [closeEnabled, setCloseEnabled] = useState(false);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -70,21 +71,21 @@ function RotatedTokenModal({ rawToken, tokenName, onClose }: { rawToken: string;
     return () => { if (timerRef.current) clearTimeout(timerRef.current); };
   }, []);
 
-  async function copy() {
-    await copyToClipboard(rawToken);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  }
-
   return (
     <Modal titleId="rotated-token-title" onClose={closeEnabled ? onClose : undefined}>
       <h3 className="modal-title" id="rotated-token-title">Token Rotated: {tokenName}</h3>
-      <div className="amber-block">
-        <p><strong>The old token value is now invalid.</strong> Copy the new token before closing. It will not be shown again.</p>
+      <RawTokenDisplay
+        rawToken={rawToken}
+        note={<p><strong>The old token value is now invalid.</strong> Copy the new token before closing; it will not be shown again.</p>}
+      />
+      <div className="banner banner-info">
+        The old token no longer works. Update this new token in your agent's MCP server config so it keeps working.
       </div>
-      <div className="token-display">{rawToken}</div>
+      <details className="connect-details">
+        <summary>Help me connect this token to an agent</summary>
+        <ConnectInstructions token={rawToken} />
+      </details>
       <div className="modal-actions">
-        <button className="btn btn-primary" onClick={copy}>{copied ? "Copied!" : "Copy to clipboard"}</button>
         <button
           className="btn btn-text"
           onClick={onClose}
@@ -95,6 +96,43 @@ function RotatedTokenModal({ rawToken, tokenName, onClose }: { rawToken: string;
         </button>
       </div>
     </Modal>
+  );
+}
+
+function ToolAnnouncementToggle({ token, onUpdate }: { token: TokenRecord; onUpdate: (t: TokenRecord) => void }) {
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  async function toggle(value: boolean) {
+    setSaving(true);
+    setError(null);
+    try {
+      const updated = await api.patchToken(token.id, { announce_all_tools: value });
+      onUpdate(updated);
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Failed to update tool announcement.");
+    } finally {
+      setSaving(false);
+    }
+  }
+  return (
+    <>
+      {error && <div className="banner banner-error mb-8">{error}</div>}
+      <div className="toggle-row">
+        <div className="toggle-label">
+          <span>Always announce all tools</span>
+          <small>By default the agent is only shown the tools this token can actually use (its capabilities and write access), which limits token spend and keeps the agent from attempting actions it cannot perform. Enable this to advertise the full tool set, for example while troubleshooting.</small>
+        </div>
+        <label className="toggle-switch">
+          <input
+            type="checkbox"
+            checked={!!token.announce_all_tools}
+            disabled={saving}
+            onChange={(e) => toggle(e.target.checked)}
+          />
+          <span className="toggle-switch-track" />
+        </label>
+      </div>
+    </>
   );
 }
 
@@ -349,6 +387,10 @@ export function TokenDetailView({ tokenId, onBack, onRefresh }: Props) {
             <div className="card">
               <div className="card-header">Capabilities</div>
               <CapabilityMatrix token={token} onUpdate={setToken} />
+            </div>
+            <div className="card">
+              <div className="card-header">Tool Announcement</div>
+              <ToolAnnouncementToggle token={token} onUpdate={setToken} />
             </div>
             <div className="card">
               <div className="card-header">Rate Limiting</div>

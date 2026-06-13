@@ -17,12 +17,24 @@ from .const import (
     CAPABILITY_NAMES,
     PERSONA_AUTOMATION_BUILDER,
     PERSONA_CUSTOM,
+    PERSONA_NEW_USER,
     PERSONA_POWER_USER,
     PERSONA_READ_ONLY,
     PERSONA_VOICE_ASSISTANT,
 )
 
 PERSONA_DEFINITIONS: dict[str, dict[str, str]] = {
+    PERSONA_NEW_USER: {
+        "cap_config_read": CAP_ALLOW,
+        "cap_template_render": CAP_ALLOW,
+        "cap_log_read": CAP_DENY,
+        "cap_broadcast": CAP_DENY,
+        "cap_service_response": CAP_ALLOW,
+        "cap_automation_write": CAP_DENY,
+        "cap_script_write": CAP_DENY,
+        "cap_physical_control": CAP_CONFIRM,
+        "cap_restart": CAP_DENY,
+    },
     PERSONA_READ_ONLY: {
         "cap_config_read": CAP_ALLOW,
         "cap_template_render": CAP_ALLOW,
@@ -70,6 +82,7 @@ PERSONA_DEFINITIONS: dict[str, dict[str, str]] = {
 }
 
 PERSONA_DESCRIPTIONS: dict[str, str] = {
+    PERSONA_NEW_USER: "Gentle starter for first-time setup. Reads state and can control the devices you grant; locks, alarms, and covers require admin confirmation.",
     PERSONA_READ_ONLY: "Observer. Reads state, history, logs, templates. No actions, no broadcast.",
     PERSONA_VOICE_ASSISTANT: "Everyday assistant. Reads + service calls + broadcast. Locks, alarms, and covers require admin confirmation.",
     PERSONA_AUTOMATION_BUILDER: "Editor. Everything voice_assistant has, plus automation and script CRUD. Restart and physical actions require confirmation.",

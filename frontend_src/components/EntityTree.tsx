@@ -14,6 +14,9 @@ interface Props {
   onPermissionsChange: (tree: PermissionTree) => void;
   onEntityClick?: (entityId: string, depth?: "entity" | "device" | "domain") => void;
   collapseKey?: number;
+  // When set, only these domains render. Used by the onboarding wizard to show
+  // a single, less-daunting domain (e.g. ["light"]).
+  domainAllowlist?: string[];
 }
 
 function effectivePermission(
@@ -437,7 +440,7 @@ function DomainGroup({
   );
 }
 
-export function EntityTree({ tokenId, permissions, onPermissionsChange, onEntityClick, collapseKey }: Props) {
+export function EntityTree({ tokenId, permissions, onPermissionsChange, onEntityClick, collapseKey, domainAllowlist }: Props) {
   const [tree, setTree] = useState<EntityTree | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -471,7 +474,9 @@ export function EntityTree({ tokenId, permissions, onPermissionsChange, onEntity
   if (error) return <div className="banner banner-error">{error}</div>;
   if (!tree) return null;
 
-  const domainKeys = Object.keys(tree).sort();
+  const domainKeys = Object.keys(tree)
+    .filter((d) => !domainAllowlist || domainAllowlist.includes(d))
+    .sort();
 
   return (
     <div>

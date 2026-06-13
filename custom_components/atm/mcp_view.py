@@ -71,6 +71,7 @@ from .helpers import (
     parse_time_param as _parse_time_param,
     read_json_body as _read_json_body,
     render_template_for_token as _render_template_for_token,
+    token_has_write_scope,
 )
 from .policy_engine import (
     EntityCreationNotPermitted,
@@ -716,6 +717,37 @@ _NATIVE_TOOL_DEFS: list[dict] = [
         },
     },
 ]
+
+
+# Tools that perform writes/actions. They are announced in tools/list only when
+# the token has write scope (any GREEN grant or pass_through). Cap-tied tools
+# (those with a "cap" key) gate on their capability instead; all remaining tools
+# (reads, GetDateTime, get_approval_status) are always announced. The
+# announce_all_tools token flag overrides this gating entirely.
+_WRITE_GATED_TOOLS = frozenset({
+    "call_service",
+    "HassTurnOn", "HassTurnOff", "HassLightSet", "HassFanSetSpeed",
+    "HassClimateSetTemperature", "HassSetPosition", "HassSetVolume",
+    "HassSetVolumeRelative", "HassMediaPause", "HassMediaUnpause",
+    "HassMediaNext", "HassMediaPrevious", "HassMediaSearchAndPlay",
+    "HassMediaPlayerMute", "HassMediaPlayerUnmute", "HassCancelAllTimers",
+    "HassStopMoving",
+})
+
+
+def _tool_is_announced(tool_def: dict, token: TokenRecord, has_write: bool) -> bool:
+    """Whether a tool should appear in tools/list for this token.
+
+    cap-tied tools gate on their capability; write/action tools gate on write
+    scope; everything else (reads, GetDateTime, get_approval_status) is always
+    announced. The caller applies the announce_all_tools override separately.
+    """
+    cap = tool_def.get("cap")
+    if cap is not None:
+        return effective_cap(token, cap) != CAP_DENY
+    if tool_def["name"] in _WRITE_GATED_TOOLS:
+        return has_write
+    return True
 
 
 def _jsonrpc_result(msg_id: Any, result: Any) -> dict:
@@ -2727,11 +2759,15 @@ async def _dispatch_mcp(
         return resp, "ping", "/api/atm/mcp", "allowed"
 
     if method == "tools/list":
-        tools = list(_ENTITY_TOOL_DEFS) + list(_NATIVE_TOOL_DEFS)
+        # Announce only the tools this token can use, unless announce_all_tools
+        # is set. Cap-tied tools gate on their cap; write/action tools gate on
+        # write scope; reads are always announced.
+        announce_all = getattr(token, "announce_all_tools", False)
+        has_write = token_has_write_scope(token)
         mesa_defs = mesa_tool_defs() if data.mesa is not None else []
-        for tool_def in list(_SYSTEM_TOOL_DEFS) + mesa_defs:
-            cap = tool_def["cap"]
-            if effective_cap(token, cap) != CAP_DENY:
+        tools = []
+        for tool_def in list(_ENTITY_TOOL_DEFS) + list(_NATIVE_TOOL_DEFS) + list(_SYSTEM_TOOL_DEFS) + mesa_defs:
+            if announce_all or _tool_is_announced(tool_def, token, has_write):
                 tools.append({k: v for k, v in tool_def.items() if k != "cap"})
         resp = _jsonrpc_result(msg_id, {"tools": tools})
         _log(data, token, request_id=request_id, method="tools/list",

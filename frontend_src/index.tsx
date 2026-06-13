@@ -7,6 +7,7 @@ import { AuditView } from "./views/AuditView";
 import { SettingsView } from "./views/SettingsView";
 import { ApprovalsView } from "./views/ApprovalsView";
 import { MesaView } from "./views/MesaView";
+import { OnboardingWizard } from "./views/OnboardingWizard";
 import { api, setHass } from "./api";
 import PANEL_CSS from "./atm-panel.css?inline";
 
@@ -44,7 +45,8 @@ export { RefreshIcon };
 
 type View =
   | { name: "list" }
-  | { name: "detail"; tokenId: string };
+  | { name: "detail"; tokenId: string }
+  | { name: "wizard" };
 
 const TAB_LABELS: Record<Tab, string> = { tokens: "Tokens", approvals: "Approvals", mesa: "MESA", audit: "Audit Logs", settings: "Settings" };
 
@@ -102,6 +104,11 @@ function ATMApp({ hass, narrow, theme, onThemeChange }: { hass: unknown; narrow:
   const openDetail = useCallback((id: string) => {
     setView({ name: "detail", tokenId: id });
     setTab("tokens");
+  }, []);
+
+  const openWizard = useCallback(() => {
+    setTab("tokens");
+    setView({ name: "wizard" });
   }, []);
 
   const goBack = useCallback(() => {
@@ -185,9 +192,13 @@ function ATMApp({ hass, narrow, theme, onThemeChange }: { hass: unknown; narrow:
             error={tokensError}
             onRefresh={refreshTokens}
             onOpenDetail={openDetail}
+            onLaunchWizard={openWizard}
             showCreate={showCreate}
             onCloseCreate={() => setShowCreate(false)}
           />
+        )}
+        {tab === "tokens" && view.name === "wizard" && (
+          <OnboardingWizard onCancel={goBack} onFinish={openDetail} />
         )}
         {tab === "tokens" && view.name === "detail" && (
           <TokenDetailView

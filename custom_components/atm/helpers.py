@@ -763,6 +763,25 @@ def effective_cap(token: TokenRecord, cap_name: str) -> str:
     return raw
 
 
+def token_has_write_scope(token: TokenRecord) -> bool:
+    """True if the token can write to at least one entity.
+
+    Used to decide whether to announce the control tools (call_service, the
+    native Hass* action tools) in the MCP tools/list. Pass-through always has
+    write scope; otherwise any GREEN grant in the permission tree counts. This
+    is an advisory over-approximation (a GREEN under a RED ancestor still counts
+    here), which is fine: the per-call permission check is the real gate.
+    """
+    if token.pass_through:
+        return True
+    tree = token.permissions
+    for nodes in (tree.domains, tree.devices, tree.entities):
+        for node in nodes.values():
+            if node.state == "GREEN":
+                return True
+    return False
+
+
 def effective_caps(token: TokenRecord) -> dict[str, str]:
     """Return the full cap_*->effective_mode mapping for a token."""
     return {name: effective_cap(token, name) for name in CAPABILITY_NAMES}

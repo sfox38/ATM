@@ -11,6 +11,7 @@ export type Outcome =
 
 export type CapMode = "deny" | "allow" | "confirm";
 export type Persona =
+  | "new_user"
   | "read_only"
   | "voice_assistant"
   | "automation_builder"
@@ -55,6 +56,7 @@ export interface TokenRecord extends CapabilityFlagsMap {
   updated_at: string | null;
   pass_through: boolean;
   use_assist_exposure?: boolean;
+  announce_all_tools?: boolean;
   persona: Persona;
   rate_limit_requests: number;
   rate_limit_burst: number;
@@ -199,6 +201,12 @@ export interface ResolveResult {
   effective_hint: string | null;
 }
 
+export interface TokenConnection {
+  has_live_session: boolean;
+  last_used_at: string | null;
+  request_count: number;
+}
+
 export interface TokenStats {
   token_id: string;
   token_name: string;
@@ -243,6 +251,7 @@ export interface PatchTokenBody {
   cap_service_response?: CapMode;
   cap_broadcast?: CapMode;
   use_assist_exposure?: boolean;
+  announce_all_tools?: boolean;
 }
 
 export interface PermissionPatchBody {

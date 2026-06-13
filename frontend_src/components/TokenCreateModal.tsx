@@ -3,6 +3,7 @@ import type { TokenRecord, CreateTokenBody } from "../types";
 import { api } from "../api";
 import { copyToClipboard } from "../utils";
 import { Modal } from "./Modal";
+import { ConnectInstructions, CopyCodeBox } from "./ConnectInstructions";
 
 const NAME_REGEX = /^[A-Za-z0-9_\-]{3,32}$/;
 
@@ -24,7 +25,7 @@ function addMinutes(m: number): string {
 }
 
 
-function CopyButton({ text }: { text: string }) {
+export function CopyButton({ text, label = "Copy to clipboard" }: { text: string; label?: string }) {
   const [copied, setCopied] = useState(false);
   async function copy() {
     await copyToClipboard(text);
@@ -33,8 +34,23 @@ function CopyButton({ text }: { text: string }) {
   }
   return (
     <button className="btn btn-primary" onClick={copy}>
-      {copied ? "Copied!" : "Copy to clipboard"}
+      {copied ? "Copied!" : label}
     </button>
+  );
+}
+
+// The raw-token reveal block (amber warning + monospace token). Shared by the
+// post-create modal and the onboarding wizard so both look identical. The
+// warning text is overridable because the wizard shows the token again on its
+// Connect step, so the default "will not be shown again" copy is inaccurate there.
+export function RawTokenDisplay({ rawToken, note }: { rawToken: string; note?: React.ReactNode }) {
+  return (
+    <>
+      <div className="amber-block">
+        {note ?? <p><strong>This token will not be shown again.</strong> Copy it now before closing.</p>}
+      </div>
+      <CopyCodeBox value={rawToken} />
+    </>
   );
 }
 
@@ -56,12 +72,15 @@ function TokenDisplayModal({ rawToken, tokenName, onClose }: TokenDisplayProps) 
   return (
     <Modal titleId="created-token-title" onClose={closeEnabled ? onClose : undefined}>
       <h3 className="modal-title" id="created-token-title">Token Created: {tokenName}</h3>
-      <div className="amber-block">
-        <p><strong>This token will not be shown again.</strong> Copy it now before closing.</p>
+      <RawTokenDisplay rawToken={rawToken} />
+      <div className="banner banner-info">
+        To use this token, either replace the token in your agent's existing ATM server config, or add ATM as a new MCP server with this token.
       </div>
-      <div className="token-display">{rawToken}</div>
+      <details className="connect-details">
+        <summary>Help me connect this token to an agent</summary>
+        <ConnectInstructions token={rawToken} />
+      </details>
       <div className="modal-actions">
-        <CopyButton text={rawToken} />
         <button
           className="btn btn-text"
           onClick={onClose}

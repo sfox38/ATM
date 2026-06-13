@@ -482,10 +482,12 @@ class ATMAdminTokenView(HomeAssistantView):
                     return _err("invalid_request", "confirm_pass_through: true is required when enabling pass_through.", 400, rid)
 
             allowed_keys = {
-                "pass_through", "use_assist_exposure", "rate_limit_requests", "rate_limit_burst",
-                "persona",
+                "pass_through", "use_assist_exposure", "announce_all_tools",
+                "rate_limit_requests", "rate_limit_burst", "persona",
             } | set(CAPABILITY_NAMES)
             patchable = {k: v for k, v in body.items() if k in allowed_keys}
+            if "announce_all_tools" in patchable and not isinstance(patchable["announce_all_tools"], bool):
+                return _err("invalid_request", "announce_all_tools must be a boolean.", 400, rid)
             for cap_name in set(CAPABILITY_NAMES) & patchable.keys():
                 value = patchable[cap_name]
                 if value not in CAP_MODES:
@@ -521,7 +523,7 @@ class ATMAdminTokenView(HomeAssistantView):
             updated = await data.store.async_patch_token(token_id, **patchable)
 
         _TOOLS_LIST_FLAGS = {
-            "pass_through", "use_assist_exposure", "persona",
+            "pass_through", "use_assist_exposure", "announce_all_tools", "persona",
         } | set(CAPABILITY_NAMES)
         if patchable.keys() & _TOOLS_LIST_FLAGS:
             notify_tools_list_changed(token_id, data.sse_connections)
@@ -634,6 +636,9 @@ class ATMAdminPermissionsView(HomeAssistantView):
 
             updated = await data.store.async_set_permissions(token_id, new_tree)
 
+        # Write scope can change (a first GREEN grant), which changes tools/list.
+        notify_tools_list_changed(token_id, data.sse_connections)
+
         user = request[KEY_HASS_USER]
         data.audit.record(
             request_id=rid,
@@ -722,6 +727,9 @@ async def _patch_permission_node(
         updated = await data.store.async_patch_permission_node(
             token_id, node_type, node_id, state, hint
         )
+
+    # A GREEN grant changing can flip write scope, which changes tools/list.
+    notify_tools_list_changed(token_id, data.sse_connections)
 
     user = request[KEY_HASS_USER]
     data.audit.record(
@@ -899,6 +907,41 @@ class ATMAdminTokenStatsView(HomeAssistantView):
             "rate_limit_hits": counters["rate_limit_hits"],
             "last_used_at": last_used,
             "status": status,
+        }, request_id=rid)
+
+
+class ATMAdminTokenConnectionView(HomeAssistantView):
+    """GET /api/atm/admin/tokens/{token_id}/connection - live connection signals.
+
+    Used by the onboarding wizard to detect when a token's MCP client has
+    connected. ``has_live_session`` reflects the legacy SSE transport
+    (GET /api/atm/mcp); the common Streamable HTTP transport does not register a
+    session, so ``request_count`` is the cross-transport signal: any
+    authenticated MCP request bumps it. The wizard treats the token as connected
+    when ``has_live_session`` is true OR ``request_count`` is above zero.
+    """
+
+    url = "/api/atm/admin/tokens/{token_id}/connection"
+    name = "api:atm:admin:token_connection"
+    requires_auth = True
+
+    @require_admin
+    async def get(self, request: web.Request, token_id: str) -> web.Response:
+        rid = request["atm_rid"]
+        data: ATMData = self.hass.data[DOMAIN]
+        token = data.store.get_token_by_id(token_id)
+        if token is None:
+            return _err("not_found", "Token not found.", 404, rid)
+
+        conns = data.sse_connections.get(token_id)
+        has_live_session = bool(conns)
+        counters = data.token_counters.get(token_id, {})
+        last_used = token.last_used_at.isoformat() if token.last_used_at else None
+
+        return _ok({
+            "has_live_session": has_live_session,
+            "last_used_at": last_used,
+            "request_count": counters.get("request_count", 0),
         }, request_id=rid)
 
 
@@ -1826,6 +1869,7 @@ ALL_ADMIN_VIEWS: list[type[HomeAssistantView]] = [
     ATMAdminScopeView,
     ATMAdminEntityTreeView,
     ATMAdminTokenStatsView,
+    ATMAdminTokenConnectionView,
     ATMAdminTokenAuditView,
     ATMAdminAuditView,
     ATMAdminSettingsView,
