@@ -355,16 +355,46 @@ function BeforeAfter({ before, after }: { before: string | null; after: string |
 }
 
 function ServicePreview({ preview }: { preview: Record<string, unknown> }) {
+  const mesa = preview.mesa as Record<string, unknown> | undefined;
   return (
     <div>
       <div className="approval-detail-meta">
-        {Object.entries(preview).map(([k, v]) => (
+        {Object.entries(preview).filter(([k]) => k !== "mesa").map(([k, v]) => (
           <React.Fragment key={k}>
             <span className="stat-label">{k}</span>
             <span><code>{Array.isArray(v) ? v.join(", ") : v == null ? "(none)" : String(v)}</code></span>
           </React.Fragment>
         ))}
       </div>
+      {mesa && <MesaPreviewBlock mesa={mesa} />}
+    </div>
+  );
+}
+
+function MesaPreviewBlock({ mesa }: { mesa: Record<string, unknown> }) {
+  const confirm = (mesa.confirm_entities as string[]) ?? [];
+  const allowed = (mesa.allowed_entities as string[]) ?? [];
+  const blocked = (mesa.blocked as Array<{ entity_id: string; rule: string }>) ?? [];
+  const warnings = (mesa.warnings as string[]) ?? [];
+  return (
+    <div className="mesa-preview-block">
+      <div className="approval-detail-meta">
+        <span className="stat-label">MESA confirm</span>
+        <span><code>{confirm.length ? confirm.join(", ") : "(none)"}</code></span>
+        <span className="stat-label">Also allowed</span>
+        <span><code>{allowed.length ? allowed.join(", ") : "(none)"}</code></span>
+        {blocked.length > 0 && (
+          <>
+            <span className="stat-label">Blocked</span>
+            <span><code>{blocked.map((b) => `${b.entity_id} (${b.rule})`).join(", ")}</code></span>
+          </>
+        )}
+      </div>
+      {warnings.length > 0 && (
+        <ul className="mesa-preview-warnings">
+          {warnings.map((w, i) => <li key={i}>{w}</li>)}
+        </ul>
+      )}
     </div>
   );
 }

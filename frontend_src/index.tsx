@@ -6,10 +6,11 @@ import { TokenDetailView } from "./views/TokenDetail";
 import { AuditView } from "./views/AuditView";
 import { SettingsView } from "./views/SettingsView";
 import { ApprovalsView } from "./views/ApprovalsView";
+import { MesaView } from "./views/MesaView";
 import { api, setHass } from "./api";
 import PANEL_CSS from "./atm-panel.css?inline";
 
-type Tab = "tokens" | "approvals" | "audit" | "settings";
+type Tab = "tokens" | "approvals" | "mesa" | "audit" | "settings";
 type Theme = "light" | "dark" | "auto";
 
 export { HIGH_RISK_DOMAINS } from "./utils";
@@ -45,7 +46,7 @@ type View =
   | { name: "list" }
   | { name: "detail"; tokenId: string };
 
-const TAB_LABELS: Record<Tab, string> = { tokens: "Tokens", approvals: "Approvals", audit: "Audit Logs", settings: "Settings" };
+const TAB_LABELS: Record<Tab, string> = { tokens: "Tokens", approvals: "Approvals", mesa: "MESA", audit: "Audit Logs", settings: "Settings" };
 
 function ATMApp({ hass, narrow, theme, onThemeChange }: { hass: unknown; narrow: boolean; theme: Theme; onThemeChange: (t: Theme) => void }) {
   const [tab, setTab] = useState<Tab>("tokens");
@@ -114,7 +115,7 @@ function ATMApp({ hass, narrow, theme, onThemeChange }: { hass: unknown; narrow:
     if (t === "tokens") refreshTokens();
   }, [refreshTokens]);
 
-  const TABS: Tab[] = ["tokens", "approvals", "audit", "settings"];
+  const TABS: Tab[] = ["tokens", "approvals", "mesa", "audit", "settings"];
 
   function handleTabKeyDown(e: React.KeyboardEvent) {
     const idx = TABS.indexOf(tab);
@@ -196,6 +197,7 @@ function ATMApp({ hass, narrow, theme, onThemeChange }: { hass: unknown; narrow:
           />
         )}
         {tab === "approvals" && <ApprovalsView onCountChange={refreshPendingCount} />}
+        {tab === "mesa" && <MesaView />}
         {tab === "audit" && <AuditView tokens={tokens} />}
         {tab === "settings" && (
           <SettingsView

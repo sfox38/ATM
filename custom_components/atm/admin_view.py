@@ -26,6 +26,8 @@ from .const import (
     DOMAIN,
     GITHUB_URL,
     MAX_REQUEST_BODY_BYTES,
+    MESA_CONFIRM_CAP,
+    MESA_MODES,
     MIN_HA_VERSION,
     PERSONA_NAMES,
     TOKEN_NAME_REGEX,
@@ -1001,12 +1003,16 @@ class ATMAdminSettingsView(HomeAssistantView):
         })
         patchable = {
             k: v for k, v in body.items()
-            if k in _BOOL_SETTINGS | {"audit_flush_interval", "audit_log_maxlen"}
+            if k in _BOOL_SETTINGS | {"audit_flush_interval", "audit_log_maxlen", "mesa_mode"}
         }
         for key in _BOOL_SETTINGS:
             if key in patchable:
                 if not isinstance(patchable[key], bool):
                     return _err("invalid_request", f"{key!r} must be a boolean (true or false).", 400, rid)
+
+        if "mesa_mode" in patchable:
+            if patchable["mesa_mode"] not in MESA_MODES:
+                return _err("invalid_request", f"mesa_mode must be one of: {sorted(MESA_MODES)}.", 400, rid)
 
         if "audit_flush_interval" in patchable:
             try:
@@ -1030,6 +1036,9 @@ class ATMAdminSettingsView(HomeAssistantView):
 
         if "audit_log_maxlen" in patchable:
             data.audit.resize(patchable["audit_log_maxlen"])
+
+        if "mesa_mode" in patchable and data.mesa is not None:
+            data.mesa.set_mode(updated.mesa_mode)
 
         if "kill_switch" in patchable:
             new_kill_switch = updated.kill_switch
@@ -1376,7 +1385,10 @@ async def _approve_approval(hass, request: web.Request, approval_id: str) -> web
                 fire_approval_resolved_event(hass, updated)
             return _err("not_found", "Token no longer active.", 409, rid)
 
-        if effective_cap(token, record.cap_name) == "deny":
+        # The MESA sentinel cap is not a real token capability, so effective_cap
+        # would auto-deny it. The MESA re-evaluation happens inside the executor
+        # instead (it rejects entities that became prohibited/read_only).
+        if record.cap_name != MESA_CONFIRM_CAP and effective_cap(token, record.cap_name) == "deny":
             await update_approval_status(
                 data.store, approval_id,
                 status=STATUS_REJECTED,
@@ -1444,6 +1456,361 @@ async def _approve_approval(hass, request: web.Request, approval_id: str) -> web
     return _ok(updated.to_dict(), request_id=rid)
 
 
+# ---------------------------------------------------------------------------
+# MESA profile administration (Phase 5)
+# ---------------------------------------------------------------------------
+
+
+def _mesa_runtime(hass, rid):
+    """Return the MESA runtime, or an error response when MESA is unavailable."""
+    data: ATMData = hass.data[DOMAIN]
+    if data.mesa is None:
+        return None, _err("service_unavailable", "MESA is not available.", 503, rid)
+    return data.mesa, None
+
+
+def _audit_admin(hass, request, rid, resource) -> None:
+    data: ATMData = hass.data[DOMAIN]
+    user = request[KEY_HASS_USER]
+    data.audit.record(
+        request_id=rid,
+        token_id="admin",
+        token_name=f"admin:{user.id}",
+        method=request.method,
+        resource=resource,
+        outcome="allowed",
+        client_ip=request.remote or "",
+        settings=data.store.get_settings(),
+    )
+
+
+class ATMAdminMesaProfilesView(HomeAssistantView):
+    """GET /api/atm/admin/mesa/profiles - list stored entity profiles (paginated)."""
+
+    url = "/api/atm/admin/mesa/profiles"
+    name = "api:atm:admin:mesa:profiles"
+    requires_auth = True
+
+    @require_admin
+    async def get(self, request: web.Request) -> web.Response:
+        rid = request["atm_rid"]
+        runtime, err = _mesa_runtime(self.hass, rid)
+        if err is not None:
+            return err
+
+        from .mesa_core.exceptions import InvalidCursorError  # noqa: PLC0415
+
+        q = request.query
+        tag = q.get("tag")
+        area = q.get("area")
+        try:
+            limit = int(q.get("limit", 50))
+        except (TypeError, ValueError):
+            return _err("invalid_request", "limit must be an integer.", 400, rid)
+        try:
+            result = runtime.store.list(
+                domain=q.get("domain"),
+                tags=[tag] if tag else None,
+                areas=[area] if area else None,
+                origin=q.get("origin"),
+                include_inferred=True,  # admin sees every origin, including inferred
+                limit=limit,
+                cursor=q.get("cursor"),
+            )
+        except InvalidCursorError as exc:
+            return _err("invalid_request", str(exc), 400, rid)
+        except ValueError as exc:
+            return _err("invalid_request", str(exc), 400, rid)
+
+        return _ok(
+            {
+                "profiles": [
+                    {"entity_id": p.entity_id, "document": p.to_dict()}
+                    for p in result.profiles
+                ],
+                "total_matched": result.total_matched,
+                "has_more": result.has_more,
+                "next_cursor": result.next_cursor,
+            },
+            request_id=rid,
+        )
+
+
+class ATMAdminMesaProfileView(HomeAssistantView):
+    """GET/PUT/DELETE /api/atm/admin/mesa/profiles/{entity_id} - one entity profile."""
+
+    url = "/api/atm/admin/mesa/profiles/{entity_id}"
+    name = "api:atm:admin:mesa:profile"
+    requires_auth = True
+
+    @require_admin
+    async def get(self, request: web.Request, entity_id: str) -> web.Response:
+        rid = request["atm_rid"]
+        runtime, err = _mesa_runtime(self.hass, rid)
+        if err is not None:
+            return err
+        stored = runtime.store.get(entity_id)
+        effective = runtime.store.get_effective(entity_id)
+        explanation = runtime.resolver.explain(entity_id)
+        return _ok(
+            {
+                "entity_id": entity_id,
+                "stored": stored.to_dict() if stored is not None else None,
+                "effective": effective.to_dict(),
+                "explanation": explanation.to_dict(),
+            },
+            request_id=rid,
+        )
+
+    @require_admin
+    async def put(self, request: web.Request, entity_id: str) -> web.Response:
+        rid = request["atm_rid"]
+        runtime, err = _mesa_runtime(self.hass, rid)
+        if err is not None:
+            return err
+
+        if not _ENTITY_RE.match(entity_id):
+            return _err("invalid_request", "Invalid entity ID format.", 400, rid)
+
+        body = await _read_body(request, rid)
+        if isinstance(body, web.Response):
+            return body
+
+        from .mesa import read_automation_configs  # noqa: PLC0415
+        from .mesa_core import MetadataOrigin, SemanticProfile  # noqa: PLC0415
+        from .mesa_core.exceptions import MesaValidationError  # noqa: PLC0415
+
+        try:
+            profile = SemanticProfile.from_dict(
+                entity_id, body, default_origin=MetadataOrigin.USER
+            )
+        except MesaValidationError as exc:
+            return _err("invalid_request", str(exc), 400, rid)
+
+        async with runtime.lock:
+            runtime.store.set(entity_id, profile)
+            await runtime.async_save()
+
+        # Cross-check the new profile against the automation registry.
+        configs = await self.hass.async_add_executor_job(read_automation_configs, self.hass)
+        issues = runtime.validator.validate_entity(entity_id, lambda: configs)
+
+        _audit_admin(self.hass, request, rid, request.path)
+        return _ok(
+            {
+                "entity_id": entity_id,
+                "stored": profile.to_dict(),
+                "warnings": [_issue_to_dict(i) for i in issues],
+            },
+            request_id=rid,
+        )
+
+    @require_admin
+    async def delete(self, request: web.Request, entity_id: str) -> web.Response:
+        rid = request["atm_rid"]
+        runtime, err = _mesa_runtime(self.hass, rid)
+        if err is not None:
+            return err
+        async with runtime.lock:
+            runtime.store.delete(entity_id)
+            await runtime.async_save()
+        _audit_admin(self.hass, request, rid, request.path)
+        return _ok({"entity_id": entity_id, "deleted": True}, request_id=rid)
+
+
+class ATMAdminMesaDomainView(HomeAssistantView):
+    """GET/PUT/DELETE /api/atm/admin/mesa/domains/{domain} - one domain-level profile."""
+
+    url = "/api/atm/admin/mesa/domains/{domain}"
+    name = "api:atm:admin:mesa:domain"
+    requires_auth = True
+
+    @require_admin
+    async def get(self, request: web.Request, domain: str) -> web.Response:
+        rid = request["atm_rid"]
+        runtime, err = _mesa_runtime(self.hass, rid)
+        if err is not None:
+            return err
+        stored = runtime.store.get_domain_profile(domain)
+        return _ok(
+            {"domain": domain, "stored": stored.to_dict() if stored is not None else None},
+            request_id=rid,
+        )
+
+    @require_admin
+    async def put(self, request: web.Request, domain: str) -> web.Response:
+        rid = request["atm_rid"]
+        runtime, err = _mesa_runtime(self.hass, rid)
+        if err is not None:
+            return err
+        if not _DOMAIN_RE.match(domain):
+            return _err("invalid_request", "Invalid domain name.", 400, rid)
+        body = await _read_body(request, rid)
+        if isinstance(body, web.Response):
+            return body
+
+        from .mesa_core import MetadataOrigin, SemanticProfile  # noqa: PLC0415
+        from .mesa_core.exceptions import MesaValidationError  # noqa: PLC0415
+
+        try:
+            profile = SemanticProfile.from_dict(domain, body, default_origin=MetadataOrigin.USER)
+        except MesaValidationError as exc:
+            return _err("invalid_request", str(exc), 400, rid)
+
+        async with runtime.lock:
+            runtime.store.set_domain_profile(domain, profile)
+            await runtime.async_save()
+        _audit_admin(self.hass, request, rid, request.path)
+        return _ok({"domain": domain, "stored": profile.to_dict()}, request_id=rid)
+
+    @require_admin
+    async def delete(self, request: web.Request, domain: str) -> web.Response:
+        rid = request["atm_rid"]
+        runtime, err = _mesa_runtime(self.hass, rid)
+        if err is not None:
+            return err
+        async with runtime.lock:
+            runtime.store.delete_domain_profile(domain)
+            await runtime.async_save()
+        _audit_admin(self.hass, request, rid, request.path)
+        return _ok({"domain": domain, "deleted": True}, request_id=rid)
+
+
+class ATMAdminMesaAreaView(HomeAssistantView):
+    """GET/PUT/DELETE /api/atm/admin/mesa/areas/{area_id} - one area-level profile."""
+
+    url = "/api/atm/admin/mesa/areas/{area_id}"
+    name = "api:atm:admin:mesa:area"
+    requires_auth = True
+
+    @require_admin
+    async def get(self, request: web.Request, area_id: str) -> web.Response:
+        rid = request["atm_rid"]
+        runtime, err = _mesa_runtime(self.hass, rid)
+        if err is not None:
+            return err
+        stored = runtime.store.get_area_profile(area_id)
+        return _ok(
+            {"area_id": area_id, "stored": stored.to_dict() if stored is not None else None},
+            request_id=rid,
+        )
+
+    @require_admin
+    async def put(self, request: web.Request, area_id: str) -> web.Response:
+        rid = request["atm_rid"]
+        runtime, err = _mesa_runtime(self.hass, rid)
+        if err is not None:
+            return err
+        node_err = _validate_node_id("area", area_id, rid)
+        if node_err is not None:
+            return node_err
+        body = await _read_body(request, rid)
+        if isinstance(body, web.Response):
+            return body
+
+        from .mesa_core import MetadataOrigin, SemanticProfile  # noqa: PLC0415
+        from .mesa_core.exceptions import MesaValidationError  # noqa: PLC0415
+
+        try:
+            profile = SemanticProfile.from_dict(area_id, body, default_origin=MetadataOrigin.USER)
+        except MesaValidationError as exc:
+            return _err("invalid_request", str(exc), 400, rid)
+
+        async with runtime.lock:
+            runtime.store.set_area_profile(area_id, profile)
+            await runtime.async_save()
+        _audit_admin(self.hass, request, rid, request.path)
+        return _ok({"area_id": area_id, "stored": profile.to_dict()}, request_id=rid)
+
+    @require_admin
+    async def delete(self, request: web.Request, area_id: str) -> web.Response:
+        rid = request["atm_rid"]
+        runtime, err = _mesa_runtime(self.hass, rid)
+        if err is not None:
+            return err
+        async with runtime.lock:
+            runtime.store.delete_area_profile(area_id)
+            await runtime.async_save()
+        _audit_admin(self.hass, request, rid, request.path)
+        return _ok({"area_id": area_id, "deleted": True}, request_id=rid)
+
+
+class ATMAdminMesaDefaultsView(HomeAssistantView):
+    """GET/PUT /api/atm/admin/mesa/defaults - deployment defaults for unprofiled entities."""
+
+    url = "/api/atm/admin/mesa/defaults"
+    name = "api:atm:admin:mesa:defaults"
+    requires_auth = True
+
+    @require_admin
+    async def get(self, request: web.Request) -> web.Response:
+        rid = request["atm_rid"]
+        runtime, err = _mesa_runtime(self.hass, rid)
+        if err is not None:
+            return err
+        defaults = runtime.store.get_deployment_defaults()
+        return _ok(
+            {"deployment_defaults": defaults.to_dict() if defaults is not None else None},
+            request_id=rid,
+        )
+
+    @require_admin
+    async def put(self, request: web.Request) -> web.Response:
+        rid = request["atm_rid"]
+        runtime, err = _mesa_runtime(self.hass, rid)
+        if err is not None:
+            return err
+        body = await _read_body(request, rid)
+        if isinstance(body, web.Response):
+            return body
+        try:
+            async with runtime.lock:
+                runtime.store.set_deployment_defaults(body)
+                await runtime.async_save()
+        except (ValueError, KeyError) as exc:
+            return _err("invalid_request", f"Invalid deployment defaults: {exc}", 400, rid)
+        _audit_admin(self.hass, request, rid, request.path)
+        stored = runtime.store.get_deployment_defaults()
+        return _ok(
+            {"deployment_defaults": stored.to_dict() if stored is not None else None},
+            request_id=rid,
+        )
+
+
+class ATMAdminMesaIssuesView(HomeAssistantView):
+    """GET /api/atm/admin/mesa/issues - TriggerValidator issues and orphaned profiles."""
+
+    url = "/api/atm/admin/mesa/issues"
+    name = "api:atm:admin:mesa:issues"
+    requires_auth = True
+
+    @require_admin
+    async def get(self, request: web.Request) -> web.Response:
+        rid = request["atm_rid"]
+        runtime, err = _mesa_runtime(self.hass, rid)
+        if err is not None:
+            return err
+        if request.query.get("refresh"):
+            from .mesa import async_refresh_trigger_issues, refresh_orphans  # noqa: PLC0415
+
+            await async_refresh_trigger_issues(self.hass, runtime)
+            refresh_orphans(self.hass, runtime)
+        return _ok(
+            {
+                "issues": [_issue_to_dict(i) for i in runtime.trigger_issues],
+                "orphans": list(runtime.orphans),
+            },
+            request_id=rid,
+        )
+
+
+def _issue_to_dict(issue) -> dict:
+    """Serialise a mesa-core ValidationIssue dataclass."""
+    import dataclasses  # noqa: PLC0415
+
+    return dataclasses.asdict(issue)
+
+
 ALL_ADMIN_VIEWS: list[type[HomeAssistantView]] = [
     ATMAdminInfoView,
     ATMAdminArchivedTokensView,
@@ -1467,4 +1834,10 @@ ALL_ADMIN_VIEWS: list[type[HomeAssistantView]] = [
     ATMAdminApprovalView,
     ATMAdminApprovalApproveView,
     ATMAdminApprovalRejectView,
+    ATMAdminMesaProfilesView,
+    ATMAdminMesaProfileView,
+    ATMAdminMesaDomainView,
+    ATMAdminMesaAreaView,
+    ATMAdminMesaDefaultsView,
+    ATMAdminMesaIssuesView,
 ]

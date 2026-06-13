@@ -117,6 +117,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # is always at most one entry. Keying by entry ID would add complexity for no benefit.
     hass.data[DOMAIN] = data
 
+    # Build the MESA runtime unconditionally (even under the kill switch): the
+    # admin profile API must work regardless, and the enforcement gate is simply
+    # never reached when no proxy/MCP routes are registered. A failure here must
+    # not block ATM setup; MESA degrades to off (data.mesa stays None).
+    from .mesa import async_setup_mesa
+    try:
+        data.mesa = await async_setup_mesa(hass, store.get_settings().mesa_mode)
+    except Exception:  # noqa: BLE001 - MESA must never block ATM startup
+        _LOGGER.exception("ATM: MESA runtime setup failed; MESA disabled this session")
+        data.mesa = None
+
     from .admin_view import ALL_ADMIN_VIEWS
     for view_cls in ALL_ADMIN_VIEWS:
         view = view_cls()
@@ -226,6 +237,37 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     ):
         entry.async_on_unload(
             hass.bus.async_listen(_registry_event, _invalidate_entity_tree)
+        )
+
+    if data.mesa is not None:
+        from .mesa import (
+            async_import_sidecar_profiles,
+            async_refresh_trigger_issues,
+            refresh_orphans,
+        )
+
+        async def _mesa_startup() -> None:
+            """Import sidecar profiles and prime trigger/orphan caches."""
+            try:
+                count = await async_import_sidecar_profiles(hass, data.mesa)
+                if count:
+                    _LOGGER.info("ATM MESA: imported %d developer domain profile(s)", count)
+                await async_refresh_trigger_issues(hass, data.mesa)
+                refresh_orphans(hass, data.mesa)
+            except Exception:  # noqa: BLE001 - background priming must not crash setup
+                _LOGGER.warning("ATM MESA: startup priming failed", exc_info=True)
+
+        mesa_task = hass.async_create_background_task(_mesa_startup(), "atm_mesa_startup")
+        entry.async_on_unload(mesa_task.cancel)
+
+        async def _on_automation_reloaded(_event=None) -> None:
+            await async_refresh_trigger_issues(hass, data.mesa)
+            refresh_orphans(hass, data.mesa)
+
+        # "automation_reloaded" is fired by HA's automation component on reload;
+        # listen by string so we do not force-import that component.
+        entry.async_on_unload(
+            hass.bus.async_listen("automation_reloaded", _on_automation_reloaded)
         )
 
     return True

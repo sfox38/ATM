@@ -87,6 +87,67 @@ export interface GlobalSettings {
   notify_on_rate_limit: boolean;
   audit_flush_interval: number;
   audit_log_maxlen: number;
+  mesa_mode: MesaMode;
+}
+
+export type MesaMode = "off" | "advisory" | "enforced";
+
+// A MESA profile document (root form): the shape mesa-core serialises and
+// accepts. Kept loose because the kernel is a small fixed subset of a larger
+// optional schema that ATM does not re-specify on the frontend.
+export interface MesaProfileDocument {
+  semantic_profile?: Record<string, unknown>;
+  privacy_classification?: Record<string, unknown>;
+}
+
+export interface MesaProfileListItem {
+  entity_id: string;
+  document: MesaProfileDocument;
+}
+
+export interface MesaProfilesResponse {
+  profiles: MesaProfileListItem[];
+  total_matched: number;
+  has_more: boolean;
+  next_cursor: string | null;
+}
+
+export interface MesaProfileDetail {
+  entity_id: string;
+  stored: MesaProfileDocument | null;
+  effective: MesaProfileDocument;
+  explanation: {
+    entity_id: string;
+    explanation: Array<{
+      field_path: string;
+      effective_value: unknown;
+      provided_by_level: string;
+      provided_by_origin: string;
+      conflict: boolean;
+    }>;
+    conflicts_detected: boolean;
+    warnings: string[];
+  };
+}
+
+export interface MesaValidationIssue {
+  entity_id: string;
+  declared_value: string;
+  automation_id: string;
+  role: string;
+  severity: string;
+  recommendation: string;
+}
+
+export interface MesaIssuesResponse {
+  issues: MesaValidationIssue[];
+  orphans: string[];
+}
+
+export interface MesaPutResponse {
+  entity_id: string;
+  stored: MesaProfileDocument;
+  warnings: MesaValidationIssue[];
 }
 
 export interface AuditEntry {

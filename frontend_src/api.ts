@@ -8,6 +8,11 @@ import type {
   CreateTokenBody,
   EntityTree,
   GlobalSettings,
+  MesaIssuesResponse,
+  MesaProfileDetail,
+  MesaProfileDocument,
+  MesaProfilesResponse,
+  MesaPutResponse,
   PatchTokenBody,
   PermissionPatchBody,
   PermissionTree,
@@ -135,6 +140,41 @@ export const api = {
     const q = p.toString();
     return req<ApprovalListResponse>("GET", `/approvals${q ? `?${q}` : ""}`);
   },
+  listMesaProfiles: (params?: { domain?: string; tag?: string; area?: string; origin?: string; limit?: number; cursor?: string }) => {
+    const p = new URLSearchParams();
+    if (params?.domain) p.set("domain", params.domain);
+    if (params?.tag) p.set("tag", params.tag);
+    if (params?.area) p.set("area", params.area);
+    if (params?.origin) p.set("origin", params.origin);
+    if (params?.limit !== undefined) p.set("limit", String(params.limit));
+    if (params?.cursor) p.set("cursor", params.cursor);
+    const q = p.toString();
+    return req<MesaProfilesResponse>("GET", `/mesa/profiles${q ? `?${q}` : ""}`);
+  },
+  getMesaProfile: (entityId: string) =>
+    req<MesaProfileDetail>("GET", `/mesa/profiles/${encodeURIComponent(entityId)}`),
+  putMesaProfile: (entityId: string, doc: MesaProfileDocument) =>
+    req<MesaPutResponse>("PUT", `/mesa/profiles/${encodeURIComponent(entityId)}`, doc),
+  deleteMesaProfile: (entityId: string) =>
+    req<{ entity_id: string; deleted: boolean }>("DELETE", `/mesa/profiles/${encodeURIComponent(entityId)}`),
+
+  getMesaDomain: (domain: string) =>
+    req<{ domain: string; stored: MesaProfileDocument | null }>("GET", `/mesa/domains/${encodeURIComponent(domain)}`),
+  putMesaDomain: (domain: string, doc: MesaProfileDocument) =>
+    req<{ domain: string; stored: MesaProfileDocument }>("PUT", `/mesa/domains/${encodeURIComponent(domain)}`, doc),
+  deleteMesaDomain: (domain: string) =>
+    req<{ domain: string; deleted: boolean }>("DELETE", `/mesa/domains/${encodeURIComponent(domain)}`),
+
+  getMesaArea: (areaId: string) =>
+    req<{ area_id: string; stored: MesaProfileDocument | null }>("GET", `/mesa/areas/${encodeURIComponent(areaId)}`),
+  putMesaArea: (areaId: string, doc: MesaProfileDocument) =>
+    req<{ area_id: string; stored: MesaProfileDocument }>("PUT", `/mesa/areas/${encodeURIComponent(areaId)}`, doc),
+  deleteMesaArea: (areaId: string) =>
+    req<{ area_id: string; deleted: boolean }>("DELETE", `/mesa/areas/${encodeURIComponent(areaId)}`),
+
+  getMesaIssues: (refresh = false) =>
+    req<MesaIssuesResponse>("GET", `/mesa/issues${refresh ? "?refresh=1" : ""}`),
+
   getApproval: (id: string) => req<ApprovalRecord>("GET", `/approvals/${encodeURIComponent(id)}`),
   approveApproval: (id: string, body: { note?: string } = {}) =>
     req<ApprovalRecord>("POST", `/approvals/${encodeURIComponent(id)}/approve`, body),

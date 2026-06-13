@@ -1,0 +1,484 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mesa-spec.org/schemas/mesa_profile.schema.json",
+  "title": "MESA profile document",
+  "description": "Canonical machine-readable schema for MESA profiles (MESA Specification v1.0). Root document form: semantic_profile with privacy_classification as a sibling key.",
+  "type": "object",
+  "properties": {
+    "semantic_profile": {
+      "$ref": "#/$defs/semanticProfile"
+    },
+    "privacy_classification": {
+      "$ref": "#/$defs/privacyClassification"
+    },
+    "diagnostic_profile": {
+      "type": "object"
+    }
+  },
+  "$defs": {
+    "semanticProfile": {
+      "type": "object",
+      "properties": {
+        "schema_version": {
+          "type": "string"
+        },
+        "profile_version": {
+          "type": "string"
+        },
+        "metadata_origin": {
+          "$ref": "#/$defs/metadataOrigin"
+        },
+        "semantic_tags": {
+          "type": "array",
+          "items": {
+            "anyOf": [
+              {
+                "enum": [
+                  "assist.always_on",
+                  "assist.announcement_capable",
+                  "assist.cloud",
+                  "assist.local",
+                  "assist.satellite",
+                  "audio.high_fidelity",
+                  "audio.multiroom",
+                  "audio.synchronised_playback",
+                  "audio.voice_optimised",
+                  "automation.climate",
+                  "automation.energy_conservation",
+                  "automation.lighting",
+                  "automation.maintenance",
+                  "automation.media",
+                  "automation.notification",
+                  "automation.presence_response",
+                  "automation.schedule_based",
+                  "automation.security",
+                  "climate.air_quality",
+                  "climate.comfort_optimization",
+                  "climate.cooling",
+                  "climate.energy_optimization",
+                  "climate.heating",
+                  "climate.humidity_control",
+                  "climate.zone_control",
+                  "diagnostic.causality",
+                  "diagnostic.confidence_scored",
+                  "diagnostic.drift_prone",
+                  "diagnostic.history_log",
+                  "diagnostic.read_only",
+                  "energy.battery",
+                  "energy.grid_aware",
+                  "energy.high_consumption",
+                  "energy.monitoring",
+                  "energy.solar",
+                  "helper.config_parameter",
+                  "helper.coordination_signal",
+                  "helper.counter_metric",
+                  "helper.dashboard_only",
+                  "helper.high_impact",
+                  "helper.mode_flag",
+                  "helper.timer_control",
+                  "helper.user_preference",
+                  "latency.high",
+                  "latency.low",
+                  "latency.medium",
+                  "lighting.accent",
+                  "lighting.ambient",
+                  "lighting.circadian",
+                  "lighting.colour",
+                  "lighting.dimming",
+                  "lighting.scene",
+                  "lighting.security",
+                  "lighting.task",
+                  "media.casting",
+                  "media.hardware_sync",
+                  "media.local_only",
+                  "media.lossless",
+                  "media.multiroom",
+                  "media.voice_control",
+                  "person.caregiver",
+                  "person.child",
+                  "person.guest",
+                  "person.primary_resident",
+                  "person.secondary_resident",
+                  "presence.arrival_departure",
+                  "presence.occupancy",
+                  "presence.person_identification",
+                  "presence.sleep_tracking",
+                  "reliability.high",
+                  "reliability.poll_dependent",
+                  "resource.battery_powered",
+                  "resource.cloud_dependent",
+                  "resource.grid_aware",
+                  "resource.high_power",
+                  "resource.local_only",
+                  "scene.arrival",
+                  "scene.away",
+                  "scene.climate",
+                  "scene.guest",
+                  "scene.lighting",
+                  "scene.media",
+                  "scene.security",
+                  "scene.sleep",
+                  "security.access_control",
+                  "security.alarm",
+                  "security.camera",
+                  "security.entry_monitoring",
+                  "security.motion_detection",
+                  "security.perimeter",
+                  "space.entertainment",
+                  "space.media",
+                  "space.outdoor",
+                  "space.sleeping",
+                  "space.transition",
+                  "space.utility",
+                  "space.working",
+                  "sync.hardware_precise",
+                  "tts.auto_chunking",
+                  "tts.expressive_voices",
+                  "tts.multilingual",
+                  "ui.accessible",
+                  "ui.glanceable",
+                  "zone.child_associated",
+                  "zone.healthcare",
+                  "zone.high_sensitivity",
+                  "zone.home",
+                  "zone.school",
+                  "zone.workplace"
+                ]
+              },
+              {
+                "type": "string",
+                "pattern": "^(?!(?:assist|audio|automation|climate|diagnostic|energy|helper|latency|lighting|media|person|presence|reliability|resource|scene|security|space|sync|tts|ui|zone)\\.)[a-z][a-z0-9_]*(?:\\.[a-z0-9_]+)+$"
+              }
+            ]
+          }
+        },
+        "last_updated": {
+          "type": "string"
+        },
+        "inheritance_scope": {
+          "enum": [
+            "entity",
+            "domain",
+            "area"
+          ]
+        },
+        "profile_valid_for": {
+          "type": "object"
+        },
+        "operational_boundaries": {
+          "$ref": "#/$defs/operationalBoundaries"
+        },
+        "privacy_classification": {
+          "$ref": "#/$defs/privacyClassification"
+        }
+      }
+    },
+    "metadataOrigin": {
+      "type": "object",
+      "properties": {
+        "source": {
+          "enum": [
+            "developer",
+            "user",
+            "hybrid",
+            "inferred_ai",
+            "unknown"
+          ]
+        },
+        "confidence": {
+          "type": "number",
+          "minimum": 0.0,
+          "maximum": 1.0
+        },
+        "generated_at": {
+          "type": "string"
+        },
+        "staleness_window_days": {
+          "type": "number"
+        },
+        "confirmed_fields": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "if": {
+        "properties": {
+          "source": {
+            "const": "inferred_ai"
+          }
+        },
+        "required": [
+          "source"
+        ]
+      },
+      "then": {
+        "required": [
+          "confidence",
+          "generated_at"
+        ]
+      }
+    },
+    "operationalBoundaries": {
+      "type": "object",
+      "properties": {
+        "control_mode": {
+          "enum": [
+            "autonomous",
+            "confirm",
+            "read_only",
+            "prohibited"
+          ]
+        },
+        "triggers_automations": {
+          "enum": [
+            "likely",
+            "none",
+            "unknown",
+            "deployment_defined"
+          ]
+        },
+        "reversible": {
+          "type": "boolean"
+        },
+        "reversibility_cost": {
+          "enum": [
+            "none",
+            "trivial",
+            "moderate",
+            "high"
+          ]
+        },
+        "reversibility_note": {
+          "type": "string"
+        },
+        "reversibility_window_seconds": {
+          "type": "number"
+        },
+        "idempotent": {
+          "type": "boolean"
+        },
+        "state_persistence": {
+          "enum": [
+            "permanent",
+            "temporary",
+            "session",
+            "transient"
+          ]
+        },
+        "expected_latency_ms": {
+          "type": "number"
+        },
+        "side_effect_scope": {
+          "enum": [
+            "entity_only",
+            "device_localized",
+            "room_localized",
+            "zone_wide",
+            "deployment_wide"
+          ]
+        },
+        "state_volatility": {
+          "enum": [
+            "static",
+            "low",
+            "medium",
+            "high",
+            "realtime"
+          ]
+        },
+        "enforcement_mode": {
+          "enum": [
+            "advisory",
+            "enforced"
+          ]
+        },
+        "control_reason": {
+          "type": "string"
+        },
+        "human_reason": {
+          "type": "string"
+        },
+        "override_triggers_automations": {
+          "type": "boolean"
+        },
+        "override_control_mode": {
+          "type": "boolean"
+        },
+        "declared_limits": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/declaredLimit"
+          }
+        },
+        "temporal_constraints": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/temporalConstraint"
+          }
+        }
+      }
+    },
+    "privacyClassification": {
+      "type": "object",
+      "required": [
+        "level"
+      ],
+      "properties": {
+        "level": {
+          "enum": [
+            "public",
+            "normal",
+            "sensitive",
+            "restricted"
+          ]
+        },
+        "deny_response_mode": {
+          "enum": [
+            "omit",
+            "redact",
+            "error"
+          ]
+        },
+        "access_roles": {
+          "type": "object"
+        },
+        "privacy_note": {
+          "type": "string"
+        }
+      }
+    },
+    "predicate": {
+      "anyOf": [
+        {
+          "type": "object",
+          "required": [
+            "entity",
+            "operator",
+            "value"
+          ],
+          "properties": {
+            "entity": {
+              "type": "string"
+            },
+            "operator": {
+              "enum": [
+                "eq",
+                "neq",
+                "gt",
+                "gte",
+                "lt",
+                "lte",
+                "in",
+                "contains"
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "type",
+            "condition"
+          ],
+          "properties": {
+            "type": {
+              "const": "ha_condition"
+            },
+            "condition": {
+              "type": "object"
+            }
+          }
+        }
+      ]
+    },
+    "declaredLimit": {
+      "type": "object",
+      "required": [
+        "id",
+        "predicate",
+        "limit"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "predicate": {
+          "$ref": "#/$defs/predicate"
+        },
+        "limit": {
+          "type": "object",
+          "required": [
+            "service",
+            "parameter"
+          ],
+          "properties": {
+            "service": {
+              "type": "string"
+            },
+            "parameter": {
+              "type": "string"
+            }
+          }
+        },
+        "human_reason": {
+          "type": "string"
+        }
+      }
+    },
+    "temporalConstraint": {
+      "type": "object",
+      "required": [
+        "id",
+        "condition",
+        "effect"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "condition": {
+          "type": "object",
+          "required": [
+            "type"
+          ],
+          "properties": {
+            "type": {
+              "enum": [
+                "time_range",
+                "day_of_week",
+                "calendar_entity",
+                "solar_angle",
+                "duration",
+                "relative_to_event"
+              ]
+            },
+            "negate": {
+              "type": "boolean"
+            }
+          }
+        },
+        "effect": {
+          "type": "object",
+          "minProperties": 1,
+          "properties": {
+            "control_mode": {
+              "enum": [
+                "autonomous",
+                "confirm",
+                "read_only",
+                "prohibited"
+              ]
+            }
+          }
+        },
+        "human_reason": {
+          "type": "string"
+        }
+      }
+    }
+  }
+}

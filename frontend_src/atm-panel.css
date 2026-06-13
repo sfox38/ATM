@@ -1124,3 +1124,11 @@ select.input {
   border-radius: var(--atm-radius-xs); font-size: 13px; font-family: inherit;
   background: var(--atm-surface); color: var(--atm-text);
 }
+
+/* MESA profile editor + previews */
+.mesa-editor-body { display: flex; flex-direction: column; gap: 2px; max-height: 60vh; overflow-y: auto; }
+.mesa-explain { margin-top: 12px; font-size: 12px; }
+.mesa-explain summary { cursor: pointer; color: var(--atm-text-2); font-weight: 600; }
+.mesa-preview-block { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--atm-border); }
+.mesa-preview-warnings { margin: 6px 0 0 0; padding-left: 18px; font-size: 12px; color: var(--atm-text-2); }
+.mesa-scope-note { font-size: 12px; color: var(--atm-text-2); margin: 0 0 10px 0; }

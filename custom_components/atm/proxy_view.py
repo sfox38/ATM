@@ -28,6 +28,7 @@ from .const import (
     PROXY_TIMEOUT_SECONDS,
 )
 from .data import ATMData
+from .mesa import apply_mesa_to_call, fire_mesa_blocked_event
 from .helpers import (
     build_error_response as _error,
     build_permitted_entity_ids as _build_permitted_entity_ids,
@@ -265,6 +266,35 @@ class ATMServiceView(HomeAssistantView):
             _log(data, token, request_id=request_id, method="POST", resource=resource,
                  outcome="denied", client_ip=client_ip, payload=body)
             return _error("forbidden", "Forbidden.", 403, request_id)
+
+        # MESA enforcement runs on the flattened, ATM-permitted entity list.
+        mesa_outcome = await apply_mesa_to_call(
+            hass, data, token,
+            domain=domain, service=service, service_data=service_data,
+            entities=permitted_entities,
+            request_id=request_id, client_ip=client_ip, session_id=request_id,
+        )
+        if mesa_outcome.blocked:
+            fire_mesa_blocked_event(hass, token, mesa_outcome.blocked)
+        if mesa_outcome.decision == "pending":
+            approval = mesa_outcome.approval
+            _log(data, token, request_id=request_id, method="POST", resource=resource,
+                 outcome="pending_approval", client_ip=client_ip, payload=body)
+            return _json_response(
+                {
+                    "status": "pending_approval",
+                    "approval_id": approval.id,
+                    "expires_at": approval.expires_at.isoformat() if approval.expires_at else None,
+                    "review_url": f"/atm#approvals/{approval.id}",
+                    "message": "This action requires admin approval. The admin has been notified.",
+                },
+                202, request_id, rl_result,
+            )
+        if mesa_outcome.decision == "deny":
+            _log(data, token, request_id=request_id, method="POST", resource=resource,
+                 outcome="denied", client_ip=client_ip, payload=body)
+            return _error("forbidden", "Forbidden.", 403, request_id)
+        permitted_entities = mesa_outcome.entities
 
         if domain in HIGH_RISK_DOMAINS:
             _LOGGER.info(

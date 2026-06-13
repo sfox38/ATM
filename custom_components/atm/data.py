@@ -4,11 +4,14 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass, field
-from typing import Callable
+from typing import TYPE_CHECKING, Callable
 
 from .audit import AuditLog
 from .rate_limiter import RateLimiter
 from .token_store import TokenStore
+
+if TYPE_CHECKING:
+    from .mesa import MesaRuntime
 
 
 @dataclass
@@ -23,6 +26,9 @@ class ATMData:
     rate_limiter: RateLimiter
     audit: AuditLog
     sse_connections: dict[str, set[asyncio.Queue]]
+    # MESA semantic-safety runtime (store, resolver, enforcer, validator).
+    # None only if MESA setup failed; views guard accordingly.
+    mesa: MesaRuntime | None = None
     # Tracks the monotonic time of the last rate-limit notification per token
     # to enforce the one-per-minute throttle on atm_rate_limited bus events.
     rate_limit_notified: dict[str, float] = field(default_factory=dict)

@@ -36,6 +36,28 @@ AUDIT_STORAGE_VERSION = 1
 # audit_flush_interval is stored and exposed in minutes (not seconds).
 # Valid values: 0 (disable periodic flush), 5, 10, 15, 30, 60.
 
+# MESA (semantic safety layer) integration. Profiles persist in a separate
+# Store from tokens so the two storage versions evolve independently.
+MESA_STORAGE_KEY = "atm_mesa"
+MESA_STORAGE_VERSION = 1
+# Global enforcement mode for the vendored MesaEnforcer. "off" disables MESA
+# entirely; "advisory" warns but never blocks (except read_only, which is
+# entity-nature, not policy); "enforced" blocks and routes confirm through the
+# admin approval gate. Default advisory: the zero-profile domain baseline is
+# aggressive (lock/alarm prohibited), so enforced is opt-in.
+MESA_MODE_OFF = "off"
+MESA_MODE_ADVISORY = "advisory"
+MESA_MODE_ENFORCED = "enforced"
+MESA_MODES = frozenset({MESA_MODE_OFF, MESA_MODE_ADVISORY, MESA_MODE_ENFORCED})
+# Sentinel cap_name on a PendingApproval created by a MESA control_mode:confirm
+# block. It is not a real capability; the approval re-validation path special-
+# cases it so effective_cap() (which would auto-deny an unknown cap) is skipped.
+MESA_CONFIRM_CAP = "mesa_control_mode"
+# Executor key for re-running a MESA-gated service call after admin approval.
+# Registered in mcp_view._EXECUTOR_REGISTRY but never dispatchable from the
+# tool router, so a token cannot invoke the approved-bypass path directly.
+MESA_APPROVED_EXECUTOR = "call_service_mesa_approved"
+
 SENSITIVE_ATTRIBUTES = frozenset({
     "entity_picture",
     "stream_url",

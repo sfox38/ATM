@@ -44,6 +44,7 @@ from .const import (
     MAX_HISTORY_RANGE_DAYS,
     MAX_LOG_ENTRIES,
     MAX_SSE_CONNECTIONS_PER_TOKEN,
+    MESA_APPROVED_EXECUTOR,
     PHYSICAL_GATE_DOMAINS,
     PHYSICAL_GATE_SERVICES,
     PROXY_TIMEOUT_SECONDS,
@@ -53,6 +54,8 @@ from .const import (
     TOKEN_PREFIX,
 )
 from .data import ATMData
+from .mesa import apply_mesa_to_call, fire_mesa_blocked_event
+from .mesa_tools import MESA_TOOL_NAMES, call_mesa_tool, mesa_tool_defs
 from .helpers import (
     archive_expired_token,
     build_error_response as _error,
@@ -1003,11 +1006,20 @@ async def _tool_call_service(
         )
         if blocked is not None:
             return blocked
-    return await _execute_call_service(args, token, hass, data)
+    return await _execute_call_service(
+        args, token, hass, data, request_id=request_id, client_ip=client_ip,
+    )
 
 
 async def _execute_call_service(
-    args: dict, token: TokenRecord, hass: Any, data: ATMData
+    args: dict,
+    token: TokenRecord,
+    hass: Any,
+    data: ATMData,
+    *,
+    request_id: str = "",
+    client_ip: str | None = None,
+    mesa_approved: bool = False,
 ) -> tuple[dict, str, str]:
     domain = args.get("domain", "")
     service = args.get("service", "")
@@ -1070,6 +1082,29 @@ async def _execute_call_service(
     if not permitted_entities:
         return _tool_error("Forbidden."), "denied", resource
 
+    # MESA enforcement runs last, on the flattened entity list ATM already
+    # permitted (rule 15: never pass device_id/area_id/"all" to HA). MESA never
+    # sees entities ATM denied; it can drop entities, gate the whole call for
+    # confirmation, or block outright.
+    mesa_outcome = await apply_mesa_to_call(
+        hass, data, token,
+        domain=domain, service=service, service_data=service_data,
+        entities=permitted_entities,
+        request_id=request_id, client_ip=client_ip, session_id=request_id,
+        confirm_approved=mesa_approved,
+    )
+    if mesa_outcome.blocked:
+        fire_mesa_blocked_event(hass, token, mesa_outcome.blocked)
+    if mesa_outcome.decision == "pending":
+        return (
+            _tool_pending(mesa_outcome.approval),
+            "pending_approval",
+            _approval_resource(mesa_outcome.approval),
+        )
+    if mesa_outcome.decision == "deny":
+        return _tool_error("Forbidden."), "denied", resource
+    permitted_entities = mesa_outcome.entities
+
     if domain in HIGH_RISK_DOMAINS:
         _LOGGER.info(
             "High-risk service call %s/%s by token %s",
@@ -1123,6 +1158,20 @@ async def _execute_call_service(
         body["service_response"] = filtered_response
 
     return _tool_success(json.dumps(body, default=str)), "allowed", resource
+
+
+async def _execute_call_service_mesa_approved(
+    args: dict, token: TokenRecord, hass: Any, data: ATMData
+) -> tuple[dict, str, str]:
+    """Re-run a MESA-gated service call after admin approval.
+
+    Registered under MESA_APPROVED_EXECUTOR but never dispatchable from the tool
+    router, so a token cannot reach the confirm-approved path itself. Re-runs
+    ATM scope resolution and MESA evaluation; only control_mode:confirm blocks
+    are treated as satisfied, so an entity that became prohibited or read_only
+    since the request is still rejected.
+    """
+    return await _execute_call_service(args, token, hass, data, mesa_approved=True)
 
 
 async def _tool_get_config(
@@ -1829,11 +1878,40 @@ async def _tool_intent_action(
     service_data: dict,
     entities: list[str],
     hass: Any,
+    token: TokenRecord,
     args: dict | None = None,
 ) -> tuple[dict, str, str]:
-    """Execute a service call on pre-resolved, permission-filtered entity list."""
+    """Execute a service call on pre-resolved, permission-filtered entity list.
+
+    MESA enforcement runs here, the single choke point for all native Hass*
+    tools, on the already-flattened entity list. data/request_id are fetched
+    from hass since native tools do not thread them; when the MESA runtime is
+    absent (tests, setup failure) the gate degrades to allow-all.
+    """
     if not entities:
         return _tool_error("No accessible entities matched your request."), "denied", tool_name
+
+    data = hass.data.get(DOMAIN)
+    if data is not None and getattr(data, "mesa", None) is not None:
+        request_id = generate_request_id()
+        mesa_outcome = await apply_mesa_to_call(
+            hass, data, token,
+            domain=service_domain, service=service_name, service_data=service_data,
+            entities=entities, request_id=request_id, client_ip=None,
+            session_id=request_id,
+        )
+        if mesa_outcome.blocked:
+            fire_mesa_blocked_event(hass, token, mesa_outcome.blocked)
+        if mesa_outcome.decision == "pending":
+            return (
+                _tool_pending(mesa_outcome.approval),
+                "pending_approval",
+                _approval_resource(mesa_outcome.approval),
+            )
+        if mesa_outcome.decision == "deny":
+            return _tool_error("No accessible entities matched your request."), "denied", tool_name
+        entities = mesa_outcome.entities
+
     call_data = dict(service_data)
     call_data["entity_id"] = entities
     try:
@@ -1921,7 +1999,7 @@ async def _hass_turn_execute(
     # (direct) or confirm (reached here only after admin approval) they are kept.
     if effective_cap(token, "cap_physical_control") == CAP_DENY:
         entities = [e for e in entities if e.split(".")[0] not in PHYSICAL_GATE_DOMAINS]
-    return await _tool_intent_action(tool_name, "homeassistant", service, {}, entities, hass, args=args)
+    return await _tool_intent_action(tool_name, "homeassistant", service, {}, entities, hass, token, args=args)
 
 
 async def _tool_hass_turn_on(
@@ -1985,7 +2063,7 @@ async def _tool_hass_light_set(
         service_data["color_name"] = args["color"]
     if "temperature" in args and args["temperature"] is not None:
         service_data["color_temp_kelvin"] = args["temperature"]
-    return await _tool_intent_action("HassLightSet", "light", "turn_on", service_data, entities, hass, args=args)
+    return await _tool_intent_action("HassLightSet", "light", "turn_on", service_data, entities, hass, token, args=args)
 
 
 async def _tool_hass_fan_set_speed(
@@ -2006,7 +2084,7 @@ async def _tool_hass_fan_set_speed(
     service_data: dict[str, Any] = {}
     if "percentage" in args and args["percentage"] is not None:
         service_data["percentage"] = args["percentage"]
-    return await _tool_intent_action("HassFanSetSpeed", "fan", "set_percentage", service_data, entities, hass, args=args)
+    return await _tool_intent_action("HassFanSetSpeed", "fan", "set_percentage", service_data, entities, hass, token, args=args)
 
 
 async def _tool_hass_climate_set_temperature(
@@ -2027,7 +2105,7 @@ async def _tool_hass_climate_set_temperature(
     service_data: dict[str, Any] = {}
     if "temperature" in args and args["temperature"] is not None:
         service_data["temperature"] = args["temperature"]
-    return await _tool_intent_action("HassClimateSetTemperature", "climate", "set_temperature", service_data, entities, hass, args=args)
+    return await _tool_intent_action("HassClimateSetTemperature", "climate", "set_temperature", service_data, entities, hass, token, args=args)
 
 
 async def _tool_hass_set_position(
@@ -2067,7 +2145,7 @@ async def _execute_hass_set_position(
     service_data: dict[str, Any] = {}
     if "position" in args and args["position"] is not None:
         service_data["position"] = args["position"]
-    return await _tool_intent_action("HassSetPosition", "cover", "set_cover_position", service_data, entities, hass, args=args)
+    return await _tool_intent_action("HassSetPosition", "cover", "set_cover_position", service_data, entities, hass, token, args=args)
 
 
 async def _tool_hass_set_volume(
@@ -2089,7 +2167,7 @@ async def _tool_hass_set_volume(
     service_data: dict[str, Any] = {}
     if "volume_level" in args and args["volume_level"] is not None:
         service_data["volume_level"] = args["volume_level"] / 100.0
-    return await _tool_intent_action("HassSetVolume", "media_player", "volume_set", service_data, entities, hass, args=args)
+    return await _tool_intent_action("HassSetVolume", "media_player", "volume_set", service_data, entities, hass, token, args=args)
 
 
 async def _tool_hass_set_volume_relative(
@@ -2123,7 +2201,7 @@ async def _tool_hass_set_volume_relative(
         svc = "volume_down"
     else:
         svc = "volume_up"
-    return await _tool_intent_action("HassSetVolumeRelative", "media_player", svc, {}, entities, hass, args=args)
+    return await _tool_intent_action("HassSetVolumeRelative", "media_player", svc, {}, entities, hass, token, args=args)
 
 
 async def _tool_hass_media_pause(
@@ -2138,7 +2216,7 @@ async def _tool_hass_media_pause(
         floor=args.get("floor"),
     )
     entities = [e for e in entities if (s := hass.states.get(e)) and s.state == "playing"]
-    return await _tool_intent_action("HassMediaPause", "media_player", "media_pause", {}, entities, hass, args=args)
+    return await _tool_intent_action("HassMediaPause", "media_player", "media_pause", {}, entities, hass, token, args=args)
 
 
 async def _tool_hass_media_unpause(
@@ -2153,7 +2231,7 @@ async def _tool_hass_media_unpause(
         floor=args.get("floor"),
     )
     entities = [e for e in entities if (s := hass.states.get(e)) and s.state == "paused"]
-    return await _tool_intent_action("HassMediaUnpause", "media_player", "media_play", {}, entities, hass, args=args)
+    return await _tool_intent_action("HassMediaUnpause", "media_player", "media_play", {}, entities, hass, token, args=args)
 
 
 async def _tool_hass_media_next(
@@ -2168,7 +2246,7 @@ async def _tool_hass_media_next(
         floor=args.get("floor"),
     )
     entities = [e for e in entities if (s := hass.states.get(e)) and s.state == "playing"]
-    return await _tool_intent_action("HassMediaNext", "media_player", "media_next_track", {}, entities, hass, args=args)
+    return await _tool_intent_action("HassMediaNext", "media_player", "media_next_track", {}, entities, hass, token, args=args)
 
 
 async def _tool_hass_media_previous(
@@ -2183,7 +2261,7 @@ async def _tool_hass_media_previous(
         floor=args.get("floor"),
     )
     entities = [e for e in entities if (s := hass.states.get(e)) and s.state in ("playing", "paused")]
-    return await _tool_intent_action("HassMediaPrevious", "media_player", "media_previous_track", {}, entities, hass, args=args)
+    return await _tool_intent_action("HassMediaPrevious", "media_player", "media_previous_track", {}, entities, hass, token, args=args)
 
 
 async def _tool_hass_media_search_and_play(
@@ -2202,7 +2280,7 @@ async def _tool_hass_media_search_and_play(
         "media_content_id": search_query,
         "media_content_type": media_class,
     }
-    return await _tool_intent_action("HassMediaSearchAndPlay", "media_player", "play_media", service_data, entities, hass, args=args)
+    return await _tool_intent_action("HassMediaSearchAndPlay", "media_player", "play_media", service_data, entities, hass, token, args=args)
 
 
 async def _tool_hass_media_player_mute(
@@ -2216,7 +2294,7 @@ async def _tool_hass_media_player_mute(
         area=args.get("area"),
         floor=args.get("floor"),
     )
-    return await _tool_intent_action("HassMediaPlayerMute", "media_player", "volume_mute", {"is_volume_muted": True}, entities, hass, args=args)
+    return await _tool_intent_action("HassMediaPlayerMute", "media_player", "volume_mute", {"is_volume_muted": True}, entities, hass, token, args=args)
 
 
 async def _tool_hass_media_player_unmute(
@@ -2230,7 +2308,7 @@ async def _tool_hass_media_player_unmute(
         area=args.get("area"),
         floor=args.get("floor"),
     )
-    return await _tool_intent_action("HassMediaPlayerUnmute", "media_player", "volume_mute", {"is_volume_muted": False}, entities, hass, args=args)
+    return await _tool_intent_action("HassMediaPlayerUnmute", "media_player", "volume_mute", {"is_volume_muted": False}, entities, hass, token, args=args)
 
 
 async def _tool_hass_cancel_all_timers(
@@ -2292,7 +2370,7 @@ async def _execute_hass_stop_moving(
         area=args.get("area"),
         floor=args.get("floor"),
     )
-    return await _tool_intent_action("HassStopMoving", "cover", "stop_cover", {}, entities, hass, args=args)
+    return await _tool_intent_action("HassStopMoving", "cover", "stop_cover", {}, entities, hass, token, args=args)
 
 
 async def _tool_hass_broadcast(
@@ -2375,6 +2453,8 @@ async def _call_tool(
         return await _tool_restart_ha(arguments, token, hass, data, request_id, client_ip)
     if tool_name == "get_approval_status":
         return await _tool_get_approval_status(arguments, token, hass, data)
+    if tool_name in MESA_TOOL_NAMES:
+        return await call_mesa_tool(tool_name, arguments, token, hass, data, request_id)
     if tool_name == "GetLiveContext":
         return await _tool_get_live_context(arguments, token, hass)
     if tool_name == "GetDateTime":
@@ -2648,7 +2728,8 @@ async def _dispatch_mcp(
 
     if method == "tools/list":
         tools = list(_ENTITY_TOOL_DEFS) + list(_NATIVE_TOOL_DEFS)
-        for tool_def in _SYSTEM_TOOL_DEFS:
+        mesa_defs = mesa_tool_defs() if data.mesa is not None else []
+        for tool_def in list(_SYSTEM_TOOL_DEFS) + mesa_defs:
             cap = tool_def["cap"]
             if effective_cap(token, cap) != CAP_DENY:
                 tools.append({k: v for k, v in tool_def.items() if k != "cap"})
@@ -3439,3 +3520,6 @@ _register_executor("HassSetPosition", _execute_hass_set_position)
 _register_executor("HassStopMoving", _execute_hass_stop_moving)
 _register_executor("HassTurnOn", _execute_hass_turn_on)
 _register_executor("HassTurnOff", _execute_hass_turn_off)
+# MESA control_mode:confirm re-execution. Registered but intentionally NOT
+# dispatchable from _call_tool, so only the admin approve path can reach it.
+_register_executor(MESA_APPROVED_EXECUTOR, _execute_call_service_mesa_approved)

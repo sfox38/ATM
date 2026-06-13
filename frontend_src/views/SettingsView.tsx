@@ -33,7 +33,7 @@ export function SettingsView({ settings, onSettingsChange, theme, onThemeChange 
     }).catch(() => {});
   }, []);
 
-  async function patchSetting(key: keyof GlobalSettings, value: boolean | number) {
+  async function patchSetting(key: keyof GlobalSettings, value: boolean | number | string) {
     setSaving(true);
     setError(null);
     try {
@@ -125,6 +125,38 @@ export function SettingsView({ settings, onSettingsChange, theme, onThemeChange 
               onToggle={patchSetting}
               saving={saving}
             />
+          </div>
+
+          <div className="card">
+            <div className="card-header">MESA Semantic Safety</div>
+            <div className="toggle-row">
+              <div className="toggle-label">
+                <span>Enforcement mode</span>
+                <small>
+                  MESA describes each entity's control mode, automation impact, and privacy.
+                  Advisory surfaces warnings only; Enforced blocks unsafe calls and routes
+                  confirm-mode entities through the Approvals queue.
+                </small>
+              </div>
+              <select
+                className="input input-auto"
+                value={settings.mesa_mode}
+                disabled={saving}
+                onChange={(e) => patchSetting("mesa_mode", e.target.value)}
+              >
+                <option value="off">Off</option>
+                <option value="advisory">Advisory</option>
+                <option value="enforced">Enforced</option>
+              </select>
+            </div>
+            {settings.mesa_mode === "enforced" && (
+              <div className="banner banner-warn settings-toggle-mt">
+                In Enforced mode, entities with no MESA profile fall back to the built-in
+                domain safety baseline: locks and alarm panels are blocked, and most other
+                domains require confirmation. Author profiles or set deployment defaults
+                before relying on Enforced mode.
+              </div>
+            )}
           </div>
 
           <div className="card">

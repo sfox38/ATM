@@ -23,6 +23,8 @@ from .const import (
     CONFIRM_AVAILABLE_CAPS,
     DEFAULT_RATE_LIMIT_BURST,
     DEFAULT_RATE_LIMIT_REQUESTS,
+    MESA_MODE_ADVISORY,
+    MESA_MODES,
     PERSONA_CUSTOM,
     PERSONA_NAMES,
     STORAGE_KEY,
@@ -273,6 +275,7 @@ class GlobalSettings:
     notify_on_rate_limit: bool = False
     audit_flush_interval: int = 15
     audit_log_maxlen: int = 10000
+    mesa_mode: str = MESA_MODE_ADVISORY
 
     def to_dict(self) -> dict:
         return {
@@ -286,10 +289,12 @@ class GlobalSettings:
             "notify_on_rate_limit": self.notify_on_rate_limit,
             "audit_flush_interval": self.audit_flush_interval,
             "audit_log_maxlen": self.audit_log_maxlen,
+            "mesa_mode": self.mesa_mode,
         }
 
     @classmethod
     def from_dict(cls, data: dict) -> GlobalSettings:
+        mesa_mode = data.get("mesa_mode", MESA_MODE_ADVISORY)
         return cls(
             kill_switch=bool(data.get("kill_switch", False)),
             disable_all_logging=bool(data.get("disable_all_logging", False)),
@@ -301,6 +306,7 @@ class GlobalSettings:
             notify_on_rate_limit=bool(data.get("notify_on_rate_limit", False)),
             audit_flush_interval=_clamp_int(data.get("audit_flush_interval"), {0, 5, 10, 15, 30, 60}, 15),
             audit_log_maxlen=_clamp_int(data.get("audit_log_maxlen"), {100, 1000, 5000, 10000}, 10000),
+            mesa_mode=mesa_mode if mesa_mode in MESA_MODES else MESA_MODE_ADVISORY,
         )
 
 
