@@ -374,6 +374,31 @@ def evaluate_service_entities(
     return verdict
 
 
+def entity_control_mode(
+    runtime: MesaRuntime, token: TokenRecord, entity_id: str, session_id: str = "atm"
+) -> str | None:
+    """Best-effort effective MESA control_mode for one entity (advisory display).
+
+    control_mode is an entity-level property, so the representative service used
+    to drive the evaluation does not change it. Returns the control_mode string
+    (autonomous, confirm, read_only, prohibited) or None if it cannot be
+    determined. Callers only pass entities the token can already access, so this
+    is not an enumeration oracle.
+    """
+    try:
+        result = runtime.enforcer.evaluate(
+            entity_id=entity_id,
+            service=f"{entity_id.split('.')[0]}.turn_on",
+            service_params={"entity_id": entity_id},
+            caller_context=build_caller_context(token, session_id),
+            current_time=dt_util.now(),
+        )
+        cm = result.effective_profile.operational_boundaries.control_mode
+        return getattr(cm, "value", cm) if cm is not None else None
+    except Exception:  # noqa: BLE001 - advisory display must never break the caller
+        return None
+
+
 def build_mesa_service_diff(
     domain: str,
     service: str,

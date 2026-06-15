@@ -46,6 +46,7 @@ from .const import (
     MAX_LOG_ENTRIES,
     MAX_SSE_CONNECTIONS_PER_TOKEN,
     MESA_APPROVED_EXECUTOR,
+    MESA_MODE_OFF,
     PHYSICAL_GATE_DOMAINS,
     PHYSICAL_GATE_SERVICES,
     PROXY_TIMEOUT_SECONDS,
@@ -55,7 +56,7 @@ from .const import (
     TOKEN_PREFIX,
 )
 from .data import ATMData
-from .mesa import apply_mesa_to_call, fire_mesa_blocked_event
+from .mesa import apply_mesa_to_call, entity_control_mode, fire_mesa_blocked_event
 from .mesa_tools import MESA_TOOL_NAMES, call_mesa_tool, mesa_tool_defs
 from .helpers import (
     archive_expired_token,
@@ -197,7 +198,11 @@ _ENTITY_TOOL_DEFS: list[dict] = [
     },
     {
         "name": "get_history",
-        "description": "Get the state history for a Home Assistant entity.",
+        "description": (
+            "Get the state history for a Home Assistant entity. "
+            "Defaults to 'transitions' mode (one compact entry per state change); "
+            "use mode 'raw' for full per-sample state dicts with attributes."
+        ),
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -209,6 +214,12 @@ _ENTITY_TOOL_DEFS: list[dict] = [
                 "end_time": {
                     "type": "string",
                     "description": "ISO timestamp or relative string. Defaults to now.",
+                },
+                "mode": {
+                    "type": "string",
+                    "enum": ["transitions", "raw"],
+                    "default": "transitions",
+                    "description": "transitions: compact state-change list (default). raw: full state dicts.",
                 },
             },
             "required": ["entity_id", "start_time"],
@@ -510,6 +521,102 @@ _SYSTEM_TOOL_DEFS: list[dict] = [
             },
             "required": ["device_id"],
         },
+    },
+    {
+        "name": "search_entities",
+        "description": (
+            "Search the entities this token can access by name, domain, area, device_class, or state. "
+            "For semantic/profile-based discovery (tags, classification, control mode) use mesa_query_profiles instead. "
+            "Filters combine with AND. Returns a compact list (entity_id, state, friendly_name, domain, area)."
+        ),
+        "cap": "cap_search",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "Substring matched against entity_id and friendly name (case-insensitive)."},
+                "domain": {
+                    "oneOf": [{"type": "string"}, {"type": "array", "items": {"type": "string"}}],
+                    "description": "Restrict to one or more domains, e.g. light or [light, switch].",
+                },
+                "area": {"type": "string", "description": "Area name (case-insensitive) or area_id."},
+                "device_class": {"type": "string", "description": "Exact device_class attribute, e.g. motion, temperature."},
+                "state": {"type": "string", "description": "Exact current state value, e.g. on, off, home."},
+                "unavailable": {"type": "boolean", "description": "If true, only entities in state unavailable or unknown."},
+                "stale_hours": {"type": "number", "description": "Only entities unchanged for at least this many hours."},
+                "limit": {"type": "integer", "minimum": 1, "maximum": 500, "default": 100},
+            },
+        },
+    },
+    {
+        "name": "get_overview",
+        "description": (
+            "A compact summary of the home as this token sees it: total accessible entities, "
+            "counts by domain and by area, and how many are unavailable. Good for orienting at session start."
+        ),
+        "cap": "cap_search",
+        "inputSchema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "describe_area",
+        "description": (
+            "Describe one area: its floor and the entities this token can access in it, grouped by domain. "
+            "Returns 'not found' if the area does not exist or has no accessible entities."
+        ),
+        "cap": "cap_search",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "area": {"type": "string", "description": "Area name (case-insensitive), alias, or area_id."},
+            },
+            "required": ["area"],
+        },
+    },
+    {
+        "name": "find_available_actions",
+        "description": (
+            "Given an accessible entity, list the services in its domain and whether this token can "
+            "invoke each right now (considering write access and capability gates). Includes the "
+            "entity's MESA control_mode when MESA is active. Returns 'not found' if the entity is not accessible."
+        ),
+        "cap": "cap_search",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "entity_id": {"type": "string", "description": "The entity to find actions for."},
+            },
+            "required": ["entity_id"],
+        },
+    },
+    {
+        "name": "get_automation_traces",
+        "description": (
+            "Get execution traces for an accessible automation, to debug why it did or did not run. "
+            "Without run_id, returns a list of recent run summaries (newest first). With run_id, returns "
+            "that run; set summary true for a condensed view that highlights the error and last step. "
+            "Returns 'not found' if the automation is not accessible."
+        ),
+        "cap": "cap_traces",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "automation_id": {"type": "string", "description": "Automation entity_id (automation.x) or its automation id."},
+                "run_id": {"type": "string", "description": "Optional specific run to fetch."},
+                "summary": {"type": "boolean", "description": "Condensed view highlighting error and last step.", "default": False},
+            },
+            "required": ["automation_id"],
+        },
+    },
+    {
+        "name": "get_system_health",
+        "description": "Get Home Assistant system health: version and per-integration health info.",
+        "cap": "cap_diagnostics",
+        "inputSchema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "check_config",
+        "description": "Validate the Home Assistant configuration files and return any errors and warnings.",
+        "cap": "cap_diagnostics",
+        "inputSchema": {"type": "object", "properties": {}},
     },
 ]
 
@@ -939,6 +1046,10 @@ async def _tool_get_history(
     if perm in (Permission.NO_ACCESS, Permission.DENY):
         return _tool_error("Entity not found."), "denied", entity_id
 
+    mode = str(args.get("mode") or "transitions").strip().lower()
+    if mode not in ("transitions", "raw"):
+        mode = "transitions"
+
     start_time_raw = args.get("start_time", "")
     if not start_time_raw:
         return _tool_error("Missing required argument: start_time"), "denied", entity_id
@@ -982,14 +1093,25 @@ async def _tool_get_history(
         _LOGGER.warning("MCP history call failed for entity %s", entity_id, exc_info=True)
         return _tool_error("History call failed."), "denied", entity_id
 
-    output = {}
-    for eid, states_list in result.items():
-        output[eid] = [
-            _scrub_state_dict(s.as_dict() if hasattr(s, "as_dict") else s)
-            for s in states_list
-        ]
+    states_list = result.get(entity_id, [])
+    dicts = [s.as_dict() if hasattr(s, "as_dict") else s for s in states_list]
 
-    return _tool_success(json.dumps(output, default=str)), "allowed", entity_id
+    if mode == "raw":
+        history = [_scrub_state_dict(d) for d in dicts]
+    else:
+        # Transitions: one entry per state-value change, dropping attribute noise
+        # and consecutive duplicates. Far more compact than the raw per-sample dump.
+        history = []
+        last_state = None
+        for d in dicts:
+            state_val = d.get("state")
+            if state_val == last_state:
+                continue
+            history.append({"state": state_val, "when": d.get("last_changed") or d.get("last_updated")})
+            last_state = state_val
+
+    body = {"entity_id": entity_id, "mode": mode, "count": len(history), "history": history}
+    return _tool_success(json.dumps(body, default=str)), "allowed", entity_id
 
 
 async def _tool_get_statistics(
@@ -2692,6 +2814,346 @@ async def _tool_get_device(
     }, default=str)), "allowed", device_id
 
 
+def _area_name_for_entity(eid: str, registry: Any, dev_reg: Any, area_reg: Any) -> str | None:
+    """Return the area NAME for an entity, or None if it has no area."""
+    area_id = _resolve_area_id(registry.async_get(eid), dev_reg)
+    if not area_id:
+        return None
+    area = area_reg.async_get_area(area_id)
+    return area.name if area is not None else area_id
+
+
+async def _tool_search_entities(
+    args: dict, token: TokenRecord, hass: Any
+) -> tuple[dict, str, str]:
+    """MCP tool: filter the token's accessible entities by name/domain/area/etc."""
+    if effective_cap(token, "cap_search") == CAP_DENY:
+        return _tool_error("Forbidden."), "denied", "search_entities"
+
+    query = str(args.get("query") or args.get("name") or "").strip().lower()
+    domains = args.get("domain")
+    if isinstance(domains, str):
+        domains = [domains]
+    domain_set = {d for d in domains} if domains else None
+    device_class = args.get("device_class")
+    state_filter = args.get("state")
+    area_filter = str(args.get("area") or "").strip().lower()
+    want_unavailable = bool(args.get("unavailable"))
+    stale_hours = args.get("stale_hours")
+    stale_threshold: float | None = None
+    if stale_hours is not None:
+        try:
+            stale_threshold = float(stale_hours)
+        except (TypeError, ValueError):
+            stale_threshold = None
+    try:
+        limit = int(args.get("limit", 100))
+    except (TypeError, ValueError):
+        limit = 100
+    limit = max(1, min(limit, 500))
+
+    registry = er.async_get(hass)
+    dev_reg = dr.async_get(hass)
+    area_reg = ar.async_get(hass)
+    now = utcnow()
+
+    matches: list[dict] = []
+    for e in filter_entities_for_token(hass.states.async_all(), token, hass):
+        eid = e["entity_id"]
+        domain = eid.split(".")[0]
+        if domain_set is not None and domain not in domain_set:
+            continue
+        attrs = e.get("attributes", {})
+        fname = attrs.get("friendly_name") or ""
+        if query and query not in eid.lower() and query not in fname.lower():
+            continue
+        if device_class is not None and attrs.get("device_class") != device_class:
+            continue
+        state_val = e.get("state")
+        if state_filter is not None and state_val != state_filter:
+            continue
+        if want_unavailable and state_val not in ("unavailable", "unknown"):
+            continue
+        area_name = _area_name_for_entity(eid, registry, dev_reg, area_reg)
+        if area_filter:
+            area_id = _resolve_area_id(registry.async_get(eid), dev_reg)
+            if not area_id:
+                continue
+            if area_filter != area_id.lower() and area_filter != (area_name or "").lower():
+                continue
+        if stale_threshold is not None:
+            last_changed = e.get("last_changed")
+            if last_changed is None or (now - last_changed).total_seconds() < stale_threshold * 3600:
+                continue
+        matches.append({
+            "entity_id": eid,
+            "state": state_val,
+            "friendly_name": fname or None,
+            "domain": domain,
+            "area": area_name,
+            "device_class": attrs.get("device_class"),
+        })
+
+    truncated = len(matches) > limit
+    body = {"count": min(len(matches), limit), "truncated": truncated, "entities": matches[:limit]}
+    return _tool_success(json.dumps(body, default=str)), "allowed", "search_entities"
+
+
+async def _tool_get_overview(
+    args: dict, token: TokenRecord, hass: Any
+) -> tuple[dict, str, str]:
+    """MCP tool: compact home summary scoped to the token."""
+    if effective_cap(token, "cap_search") == CAP_DENY:
+        return _tool_error("Forbidden."), "denied", "get_overview"
+
+    registry = er.async_get(hass)
+    dev_reg = dr.async_get(hass)
+    area_reg = ar.async_get(hass)
+    accessible = filter_entities_for_token(hass.states.async_all(), token, hass)
+    by_domain: dict[str, int] = {}
+    by_area: dict[str, int] = {}
+    unavailable = 0
+    for e in accessible:
+        eid = e["entity_id"]
+        by_domain[eid.split(".")[0]] = by_domain.get(eid.split(".")[0], 0) + 1
+        if e.get("state") in ("unavailable", "unknown"):
+            unavailable += 1
+        area_name = _area_name_for_entity(eid, registry, dev_reg, area_reg) or "(no area)"
+        by_area[area_name] = by_area.get(area_name, 0) + 1
+
+    body = {
+        "total_accessible_entities": len(accessible),
+        "unavailable_count": unavailable,
+        "by_domain": dict(sorted(by_domain.items())),
+        "by_area": dict(sorted(by_area.items())),
+    }
+    return _tool_success(json.dumps(body, default=str)), "allowed", "get_overview"
+
+
+async def _tool_describe_area(
+    args: dict, token: TokenRecord, hass: Any
+) -> tuple[dict, str, str]:
+    """MCP tool: describe one area and its accessible entities.
+
+    Returns not_found for both a nonexistent area and an area with no accessible
+    entities, so there is no existence oracle across the area set.
+    """
+    if effective_cap(token, "cap_search") == CAP_DENY:
+        return _tool_error("Forbidden."), "denied", "describe_area"
+
+    area_query = str(args.get("area") or args.get("area_id") or "").strip()
+    if not area_query:
+        return _tool_error("Missing required argument: area"), "invalid_request", "describe_area"
+
+    area_reg = ar.async_get(hass)
+    target = area_reg.async_get_area(area_query)
+    if target is None:
+        ql = area_query.lower()
+        for a in area_reg.async_list_areas():
+            aliases = {al.lower() for al in (a.aliases or [])}
+            if (a.name or "").lower() == ql or ql in aliases:
+                target = a
+                break
+
+    registry = er.async_get(hass)
+    dev_reg = dr.async_get(hass)
+    entities_by_domain: dict[str, list[dict]] = {}
+    count = 0
+    if target is not None:
+        for e in filter_entities_for_token(hass.states.async_all(), token, hass):
+            eid = e["entity_id"]
+            if _resolve_area_id(registry.async_get(eid), dev_reg) != target.id:
+                continue
+            entities_by_domain.setdefault(eid.split(".")[0], []).append({
+                "entity_id": eid,
+                "state": e.get("state"),
+                "friendly_name": e.get("attributes", {}).get("friendly_name"),
+            })
+            count += 1
+
+    if target is None or count == 0:
+        return _tool_error("Area not found."), "not_found", area_query
+
+    floor_name = None
+    if target.floor_id:
+        floor = fr.async_get(hass).async_get_floor(target.floor_id)
+        floor_name = floor.name if floor is not None else None
+
+    body = {
+        "area_id": target.id,
+        "name": target.name,
+        "floor_id": target.floor_id,
+        "floor_name": floor_name,
+        "accessible_entity_count": count,
+        "entities_by_domain": entities_by_domain,
+    }
+    return _tool_success(json.dumps(body, default=str)), "allowed", target.id
+
+
+async def _tool_find_available_actions(
+    args: dict, token: TokenRecord, hass: Any, data: ATMData
+) -> tuple[dict, str, str]:
+    """MCP tool: which services in an entity's domain this token can invoke now.
+
+    Availability reflects ATM scope (write access + physical/dual gate caps).
+    MESA still enforces per-entity nature at call time; the entity's control_mode
+    is surfaced as an advisory hint when MESA is active.
+    """
+    if effective_cap(token, "cap_search") == CAP_DENY:
+        return _tool_error("Forbidden."), "denied", "find_available_actions"
+
+    entity_id = args.get("entity_id", "")
+    if not entity_id:
+        return _tool_error("Missing required argument: entity_id"), "invalid_request", "find_available_actions"
+
+    perm = resolve(entity_id, token, hass)
+    if perm not in (Permission.READ, Permission.WRITE):
+        # nonexistent and inaccessible both look identical (no oracle).
+        return _tool_error("Entity not found."), "not_found", entity_id
+
+    domain = entity_id.split(".")[0]
+    writable = token.pass_through or perm == Permission.WRITE
+    physical_ok = effective_cap(token, "cap_physical_control") != CAP_DENY
+    restart_ok = effective_cap(token, "cap_restart") != CAP_DENY
+
+    actions: list[dict] = []
+    for svc in sorted(hass.services.async_services().get(domain, {}).keys()):
+        key = f"{domain}/{svc}"
+        available = writable
+        reason: str | None = None
+        if not writable:
+            reason = "read-only access to this entity"
+        elif key in PHYSICAL_GATE_SERVICES and not physical_ok:
+            available, reason = False, "requires physical control capability"
+        elif key in DUAL_GATE_SERVICES and not restart_ok:
+            available, reason = False, "requires restart capability"
+        entry = {"service": f"{domain}.{svc}", "available": available}
+        if reason:
+            entry["reason"] = reason
+        actions.append(entry)
+
+    body: dict = {
+        "entity_id": entity_id,
+        "domain": domain,
+        "writable": writable,
+        "actions": actions,
+    }
+
+    settings = data.store.get_settings()
+    if data.mesa is not None and settings.mesa_mode != MESA_MODE_OFF:
+        control_mode = entity_control_mode(data.mesa, token, entity_id)
+        if control_mode is not None:
+            body["mesa_control_mode"] = control_mode
+            body["mesa_note"] = (
+                "MESA enforces this entity's nature at call time; "
+                "read_only and prohibited block writes, confirm may require admin approval."
+            )
+
+    return _tool_success(json.dumps(body, default=str)), "allowed", entity_id
+
+
+def _trace_summary(short: dict) -> dict:
+    """Condense a trace short-dict to the fields that explain a run's outcome."""
+    return {
+        "run_id": short.get("run_id"),
+        "state": short.get("state"),
+        "script_execution": short.get("script_execution"),
+        "last_step": short.get("last_step"),
+        "error": short.get("error"),
+        "timestamp": short.get("timestamp"),
+    }
+
+
+async def _tool_get_automation_traces(
+    args: dict, token: TokenRecord, hass: Any
+) -> tuple[dict, str, str]:
+    """MCP tool: execution traces for an accessible automation."""
+    if effective_cap(token, "cap_traces") == CAP_DENY:
+        return _tool_error("Forbidden."), "denied", "get_automation_traces"
+
+    raw = str(args.get("automation_id") or args.get("entity_id") or "").strip()
+    if not raw:
+        return _tool_error("Missing required argument: automation_id"), "invalid_request", "get_automation_traces"
+
+    registry = er.async_get(hass)
+    if raw.startswith("automation."):
+        entity_id = raw
+        entry = registry.async_get(entity_id)
+        unique_id = entry.unique_id if entry is not None else None
+    else:
+        unique_id = raw
+        entity_id = None
+        for e in registry.entities.values():
+            if e.domain == "automation" and e.unique_id == raw:
+                entity_id = e.entity_id
+                break
+
+    # Scope: nonexistent and inaccessible look identical (no oracle).
+    if entity_id is None or unique_id is None or resolve(entity_id, token, hass) not in (Permission.READ, Permission.WRITE):
+        return _tool_error("Automation not found."), "not_found", raw
+
+    from homeassistant.components.trace.const import DATA_TRACE  # noqa: PLC0415
+    runs = hass.data.get(DATA_TRACE, {}).get(f"automation.{unique_id}", {})
+    summary = bool(args.get("summary"))
+    run_id = args.get("run_id")
+
+    if run_id:
+        trace = runs.get(run_id)
+        if trace is None:
+            return _tool_error("Trace run not found."), "not_found", raw
+        body = _trace_summary(trace.as_short_dict()) if summary else trace.as_dict()
+        return _tool_success(json.dumps(body, default=str)), "allowed", entity_id
+
+    items = sorted(
+        (t.as_short_dict() for t in runs.values()),
+        key=lambda d: d.get("timestamp", {}).get("start") or "",
+        reverse=True,
+    )
+    if summary:
+        items = [_trace_summary(d) for d in items]
+    body = {"automation_id": unique_id, "entity_id": entity_id, "count": len(items), "traces": items}
+    return _tool_success(json.dumps(body, default=str)), "allowed", entity_id
+
+
+async def _tool_get_system_health(
+    args: dict, token: TokenRecord, hass: Any
+) -> tuple[dict, str, str]:
+    """MCP tool: HA version + per-integration system health info."""
+    if effective_cap(token, "cap_diagnostics") == CAP_DENY:
+        return _tool_error("Forbidden."), "denied", "get_system_health"
+
+    from homeassistant.const import __version__ as ha_version  # noqa: PLC0415
+    integrations: dict = {}
+    try:
+        from homeassistant.components import system_health  # noqa: PLC0415
+        integrations = await system_health.get_info(hass)
+    except Exception:  # noqa: BLE001 - system_health may be unavailable
+        integrations = {}
+
+    body = {"home_assistant_version": ha_version, "integrations": integrations}
+    return _tool_success(json.dumps(body, default=str)), "allowed", "get_system_health"
+
+
+async def _tool_check_config(
+    args: dict, token: TokenRecord, hass: Any
+) -> tuple[dict, str, str]:
+    """MCP tool: validate HA config files and return errors/warnings."""
+    if effective_cap(token, "cap_diagnostics") == CAP_DENY:
+        return _tool_error("Forbidden."), "denied", "check_config"
+
+    from homeassistant.helpers import check_config  # noqa: PLC0415
+    try:
+        result = await check_config.async_check_ha_config_file(hass)
+    except Exception:  # noqa: BLE001 - surface as a tool error, never 500
+        _LOGGER.warning("MCP check_config failed", exc_info=True)
+        return _tool_error("Config check failed."), "invalid_request", "check_config"
+
+    errors = [{"message": e.message, "domain": e.domain} for e in result.errors]
+    warnings = [{"message": e.message, "domain": e.domain} for e in result.warnings]
+    body = {"valid": not errors, "errors": errors, "warnings": warnings}
+    return _tool_success(json.dumps(body, default=str)), "allowed", "check_config"
+
+
 async def _call_tool(
     tool_name: str,
     arguments: dict,
@@ -2786,6 +3248,20 @@ async def _call_tool(
         return await _tool_list_devices(arguments, token, hass)
     if tool_name == "get_device":
         return await _tool_get_device(arguments, token, hass)
+    if tool_name == "search_entities":
+        return await _tool_search_entities(arguments, token, hass)
+    if tool_name == "get_overview":
+        return await _tool_get_overview(arguments, token, hass)
+    if tool_name == "describe_area":
+        return await _tool_describe_area(arguments, token, hass)
+    if tool_name == "find_available_actions":
+        return await _tool_find_available_actions(arguments, token, hass, data)
+    if tool_name == "get_automation_traces":
+        return await _tool_get_automation_traces(arguments, token, hass)
+    if tool_name == "get_system_health":
+        return await _tool_get_system_health(arguments, token, hass)
+    if tool_name == "check_config":
+        return await _tool_check_config(arguments, token, hass)
     return _tool_error(f"Unknown tool: {tool_name}"), "denied", tool_name
 
 
