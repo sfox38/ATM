@@ -143,7 +143,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         """Register the proxy and MCP views. Skipped when kill switch is active."""
         from .proxy_view import ALL_VIEWS
         from .mcp_view import ALL_MCP_VIEWS
-        for view_cls in ALL_VIEWS + ALL_MCP_VIEWS:
+        from .skill_view import ALL_SKILL_VIEWS
+        for view_cls in ALL_VIEWS + ALL_MCP_VIEWS + ALL_SKILL_VIEWS:
             view = view_cls()
             view.hass = hass
             hass.http.register_view(view)

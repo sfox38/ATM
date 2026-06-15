@@ -4141,6 +4141,50 @@ def _build_context_json(token: TokenRecord, hass: Any) -> dict:
     }
 
 
+def _build_instructions(token: TokenRecord, data: ATMData, base_url: str) -> str:
+    """Token-aware MCP `instructions` primer (skills Channel A).
+
+    Short, injected every session: the etiquette that prevents the common
+    failure modes (treating pending_approval as an error, retrying, ignoring the
+    per-entity safety layer) plus this token's gated capabilities and a link to
+    the full guide at /api/atm/skill.
+    """
+    caps = effective_caps(token)
+    confirm_gated = sorted(c for c, m in caps.items() if m == CAP_CONFIRM)
+    lines = [
+        "You are connected to Home Assistant through ATM, a scoped gateway. This token "
+        "sees only the entities and tools an operator granted it, and some actions are gated.",
+        "",
+        "- Call get_capability_summary first to see what you can read, control, and what "
+        "needs approval. Use get_overview or search_entities to discover entities; you only "
+        "see entities in this token's scope.",
+        "- Some actions return status \"pending_approval\". That is normal, not an error: a "
+        "human must approve them. Do not retry. Poll get_approval_status with the approval_id, "
+        "or tell the user it is awaiting approval.",
+        "- Before a risky or bulk service call, preview it with dry_run_service (and whatif to "
+        "see what automations it would trigger).",
+        "- If a tool is not in the tool list, this token cannot use it; ask the operator to "
+        "grant the capability rather than attempting the call.",
+    ]
+    if confirm_gated:
+        lines.append(
+            "- This token's capabilities that require admin approval per call: "
+            + ", ".join(confirm_gated) + "."
+        )
+    if data.store.get_settings().mesa_mode != MESA_MODE_OFF:
+        lines.append(
+            "- A per-entity safety layer (MESA) is active: some entities are read-only or "
+            "require confirmation by nature regardless of capabilities. describe_entity and "
+            "find_available_actions show an entity's control_mode."
+        )
+    lines.append("")
+    lines.append(
+        f"Full ATM and Home Assistant usage guide: {base_url}/api/atm/skill (fetch it before "
+        "complex automation, scene, or configuration work)."
+    )
+    return "\n".join(lines)
+
+
 async def _dispatch_mcp(
     method: str,
     msg_id: Any,
@@ -4169,6 +4213,7 @@ async def _dispatch_mcp(
                 "prompts": {},
             },
             "serverInfo": {"name": "ATM", "version": ATM_VERSION},
+            "instructions": _build_instructions(token, data, base_url),
         })
         _log(data, token, request_id=request_id, method="initialize",
              resource="/api/atm/mcp", outcome="allowed", client_ip=client_ip)
