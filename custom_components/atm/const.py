@@ -244,3 +244,9 @@ MAX_LOG_ENTRIES = 100
 # These block the tool call up to this many seconds waiting for a change/event.
 MAX_SUBSCRIPTION_SECONDS = 30
 
+# Directories (relative to the HA config dir) the cap_filesystem tools may touch.
+# Paths are realpath-resolved and must stay within one of these, blocking traversal.
+FILESYSTEM_ALLOWED_DIRS = ("www", "themes", "custom_templates")
+# Maximum file size (bytes) the filesystem read/write tools will handle inline.
+MAX_FILE_BYTES = 1_048_576
+

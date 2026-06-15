@@ -43,7 +43,9 @@ from .const import (
     CAP_DENY,
     DOMAIN,
     DUAL_GATE_SERVICES,
+    FILESYSTEM_ALLOWED_DIRS,
     HIGH_RISK_DOMAINS,
+    MAX_FILE_BYTES,
     MAX_BATCH_ITEMS,
     MAX_HISTORY_RANGE_DAYS,
     MAX_LOG_ENTRIES,
@@ -1034,6 +1036,51 @@ _SYSTEM_TOOL_DEFS: list[dict] = [
                 "timeout": {"type": "integer", "minimum": 1, "maximum": 30, "default": 30},
             },
             "required": ["event_type"],
+        },
+    },
+    {
+        "name": "list_files",
+        "description": (
+            "List files in an allowed config directory (www/, themes/, custom_templates/). "
+            "With no path, returns the allowed directories. Requires cap_filesystem."
+        ),
+        "cap": "cap_filesystem",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "path": {"type": "string", "description": "A path under www/, themes/, or custom_templates/."},
+            },
+        },
+    },
+    {
+        "name": "read_file",
+        "description": (
+            "Read a UTF-8 text file under www/, themes/, or custom_templates/. Requires cap_filesystem. "
+            "Returns 'not found' if the file does not exist or is outside the allowed directories."
+        ),
+        "cap": "cap_filesystem",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "path": {"type": "string"},
+            },
+            "required": ["path"],
+        },
+    },
+    {
+        "name": "write_file",
+        "description": (
+            "Write a UTF-8 text file under www/, themes/, or custom_templates/ (creates parent dirs). "
+            "Requires cap_filesystem (Confirm-eligible). Paths outside the allowed directories are refused."
+        ),
+        "cap": "cap_filesystem",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "path": {"type": "string"},
+                "content": {"type": "string"},
+            },
+            "required": ["path", "content"],
         },
     },
 ]
@@ -4413,6 +4460,117 @@ async def _tool_subscribe_event(
     return _tool_success(json.dumps(body, default=str)), "allowed", event_type
 
 
+# ---------------------------------------------------------------------------
+# Scoped filesystem (cap_filesystem): www/ themes/ custom_templates/
+# ---------------------------------------------------------------------------
+
+
+def _resolve_fs_path(hass: Any, path: Any) -> str | None:
+    """Resolve a path to a realpath strictly inside an allowed config dir, or None.
+
+    realpath collapses '..' before the containment check, so traversal out of the
+    allowlist is refused (returns None).
+    """
+    if not isinstance(path, str) or not path.strip():
+        return None
+    config_dir = os.path.realpath(hass.config.config_dir)
+    candidate = os.path.realpath(os.path.join(config_dir, path))
+    for allowed in FILESYSTEM_ALLOWED_DIRS:
+        base = os.path.realpath(os.path.join(config_dir, allowed))
+        if candidate == base or candidate.startswith(base + os.sep):
+            return candidate
+    return None
+
+
+def _listdir(target: str) -> list[dict]:
+    return [
+        {"name": name, "is_dir": os.path.isdir(os.path.join(target, name))}
+        for name in sorted(os.listdir(target))
+    ]
+
+
+def _read_text_capped(target: str) -> str:
+    if os.path.getsize(target) > MAX_FILE_BYTES:
+        raise ValueError("file too large")
+    with open(target, "r", encoding="utf-8") as f:
+        return f.read()
+
+
+def _write_text_atomic(target: str, content: str) -> None:
+    os.makedirs(os.path.dirname(target), exist_ok=True)
+    _write_utf8_file_atomic(target, content)
+
+
+async def _tool_list_files(
+    args: dict, token: TokenRecord, hass: Any
+) -> tuple[dict, str, str]:
+    """MCP tool: list files in an allowed config directory."""
+    if effective_cap(token, "cap_filesystem") == CAP_DENY:
+        return _tool_error("Forbidden."), "denied", "list_files"
+    path = args.get("path") or ""
+    if not path:
+        return _tool_success(json.dumps({"directories": list(FILESYSTEM_ALLOWED_DIRS)})), "allowed", "list_files"
+    target = _resolve_fs_path(hass, path)
+    if target is None or not await hass.async_add_executor_job(os.path.isdir, target):
+        return _tool_error("Directory not found."), "not_found", path
+    entries = await hass.async_add_executor_job(_listdir, target)
+    return _tool_success(json.dumps({"path": path, "entries": entries}, default=str)), "allowed", path
+
+
+async def _tool_read_file(
+    args: dict, token: TokenRecord, hass: Any
+) -> tuple[dict, str, str]:
+    """MCP tool: read a UTF-8 text file from an allowed config directory."""
+    if effective_cap(token, "cap_filesystem") == CAP_DENY:
+        return _tool_error("Forbidden."), "denied", "read_file"
+    path = args.get("path", "")
+    target = _resolve_fs_path(hass, path)
+    if target is None or not await hass.async_add_executor_job(os.path.isfile, target):
+        return _tool_error("File not found."), "not_found", path
+    try:
+        content = await hass.async_add_executor_job(_read_text_capped, target)
+    except ValueError:
+        return _tool_error("File exceeds the maximum readable size."), "invalid_request", path
+    except OSError:
+        return _tool_error("Failed to read file."), "denied", path
+    return _tool_success(json.dumps({"path": path, "content": content}, default=str)), "allowed", path
+
+
+async def _tool_write_file(
+    args: dict, token: TokenRecord, hass: Any, data: ATMData,
+    request_id: str = "", client_ip: str | None = None,
+) -> tuple[dict, str, str]:
+    """MCP tool: write a file under an allowed config directory (Confirm-gated)."""
+    blocked = await _gate(
+        "cap_filesystem", token, hass, data,
+        tool_name="write_file", args=args, request_id=request_id,
+        client_ip=client_ip, diff=_build_diff_write_file(args, token, hass),
+    )
+    if blocked is not None:
+        return blocked
+    return await _execute_write_file(args, token, hass, data)
+
+
+async def _execute_write_file(
+    args: dict, token: TokenRecord, hass: Any, data: ATMData
+) -> tuple[dict, str, str]:
+    path = args.get("path", "")
+    content = args.get("content")
+    target = _resolve_fs_path(hass, path)
+    if target is None:
+        return _tool_error("Path is outside the allowed directories (www/, themes/, custom_templates/)."), "denied", "write_file"
+    if not isinstance(content, str):
+        return _tool_error("content must be a string."), "invalid_request", "write_file"
+    if len(content.encode("utf-8")) > MAX_FILE_BYTES:
+        return _tool_error("Content exceeds the maximum file size."), "invalid_request", "write_file"
+    try:
+        await hass.async_add_executor_job(_write_text_atomic, target, content)
+    except OSError as exc:
+        _LOGGER.error("write_file failed: %s", exc)
+        return _tool_error("Failed to write file."), "denied", "write_file"
+    return _tool_success(json.dumps({"path": path, "bytes_written": len(content.encode("utf-8"))})), "allowed", f"file:{path}"
+
+
 async def _call_tool(
     tool_name: str,
     arguments: dict,
@@ -4559,6 +4717,12 @@ async def _call_tool(
         return await _tool_watch_entity(arguments, token, hass)
     if tool_name == "subscribe_event":
         return await _tool_subscribe_event(arguments, token, hass)
+    if tool_name == "list_files":
+        return await _tool_list_files(arguments, token, hass)
+    if tool_name == "read_file":
+        return await _tool_read_file(arguments, token, hass)
+    if tool_name == "write_file":
+        return await _tool_write_file(arguments, token, hass, data, request_id, client_ip)
     return _tool_error(f"Unknown tool: {tool_name}"), "denied", tool_name
 
 
@@ -5583,6 +5747,28 @@ def _build_diff_delete_helper(args: dict, token: TokenRecord, hass: Any) -> dict
     }
 
 
+def _build_diff_write_file(args: dict, token: TokenRecord, hass: Any) -> dict:
+    path = args.get("path", "")
+    content = args.get("content") if isinstance(args.get("content"), str) else ""
+    target = _resolve_fs_path(hass, path)
+    before = None
+    if target is not None:
+        try:
+            if os.path.isfile(target):
+                before = _truncate(_read_text_capped(target))
+        except (OSError, ValueError):
+            before = None
+    return {
+        "kind": "file_write",
+        "summary": f"Write file '{path}'",
+        "target": {"type": "file", "id": path, "label": path},
+        "before": before,
+        "after": _truncate(content),
+        "preview": {"path": path, "outside_allowed_dirs": target is None,
+                    "bytes": len(content.encode("utf-8"))},
+    }
+
+
 def _build_diff_create_script(args: dict, token: TokenRecord, hass: Any) -> dict:
     script_id = (args.get("script_id") or "").strip()
     config = args.get("config") if isinstance(args.get("config"), dict) else {}
@@ -5717,6 +5903,7 @@ _register_executor("delete_scene", _execute_delete_scene)
 _register_executor("create_helper", _execute_create_helper)
 _register_executor("edit_helper", _execute_edit_helper)
 _register_executor("delete_helper", _execute_delete_helper)
+_register_executor("write_file", _execute_write_file)
 _register_executor("HassSetPosition", _execute_hass_set_position)
 _register_executor("HassStopMoving", _execute_hass_stop_moving)
 _register_executor("HassTurnOn", _execute_hass_turn_on)
