@@ -185,6 +185,7 @@ def _yaml_file_has_includes(path: str) -> bool:
 
 
 _SCENE_CONFIG_PATH = "scenes.yaml"
+_SCENE_LOCK_KEY = f"{DOMAIN}_scene_yaml_lock"
 
 
 def _read_scenes_yaml(path: str) -> list:
@@ -192,6 +193,16 @@ def _read_scenes_yaml(path: str) -> list:
         return []
     data = _load_yaml(path)
     return data if isinstance(data, list) else []
+
+
+def _write_scenes_yaml(path: str, data: list) -> None:
+    _write_utf8_file_atomic(path, _yaml_dump(data))
+
+
+def _get_scene_lock(hass: Any) -> asyncio.Lock:
+    if _SCENE_LOCK_KEY not in hass.data:
+        hass.data[_SCENE_LOCK_KEY] = asyncio.Lock()
+    return hass.data[_SCENE_LOCK_KEY]
 
 
 def _collect_entity_id_values(node: Any, found: set[str]) -> None:
@@ -868,6 +879,56 @@ _SYSTEM_TOOL_DEFS: list[dict] = [
                 "config": {"type": "object", "description": "The automation or script config to validate."},
             },
             "required": ["type", "config"],
+        },
+    },
+    {
+        "name": "list_scenes",
+        "description": "List Home Assistant scenes this token can access (entity_id, name, and scene id for editing).",
+        "cap": "cap_registry_read",
+        "inputSchema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "create_scene",
+        "description": (
+            "Create a Home Assistant scene in scenes.yaml. Provide a config with 'name' and 'entities' "
+            "(a map of entity_id to desired state). Every referenced entity must be writable by this token. "
+            "ATM assigns the scene id and returns the saved config."
+        ),
+        "cap": "cap_scene_write",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "config": {"type": "object", "description": "Scene config: name (string) and entities (map)."},
+            },
+            "required": ["config"],
+        },
+    },
+    {
+        "name": "edit_scene",
+        "description": (
+            "Replace the config of an existing scene by its scene id. Every referenced entity must be "
+            "writable by this token."
+        ),
+        "cap": "cap_scene_write",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "scene_id": {"type": "string", "description": "The scene id (from list_scenes)."},
+                "config": {"type": "object"},
+            },
+            "required": ["scene_id", "config"],
+        },
+    },
+    {
+        "name": "delete_scene",
+        "description": "Permanently delete a scene from scenes.yaml by its scene id.",
+        "cap": "cap_scene_write",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "scene_id": {"type": "string"},
+            },
+            "required": ["scene_id"],
         },
     },
 ]
@@ -3836,6 +3897,176 @@ async def _tool_validate_config(
     return _tool_success(json.dumps(body, default=str)), "allowed", "validate_config"
 
 
+# ---------------------------------------------------------------------------
+# Scene CRUD (cap_scene_write) - mirrors the automation/script YAML pattern
+# ---------------------------------------------------------------------------
+
+
+def _scene_member_entities(config: Any) -> list[str]:
+    ents = config.get("entities") if isinstance(config, dict) else None
+    return list(ents.keys()) if isinstance(ents, dict) else []
+
+
+def _unwritable_scene_members(config: Any, token: TokenRecord, hass: Any) -> list[str]:
+    """Scene member entities the token cannot WRITE (the scene will actuate them)."""
+    return sorted(e for e in _scene_member_entities(config) if resolve(e, token, hass) != Permission.WRITE)
+
+
+def _valid_scene_config(config: Any) -> bool:
+    return (
+        isinstance(config, dict)
+        and isinstance(config.get("name"), str) and config["name"].strip() != ""
+        and isinstance(config.get("entities"), dict) and len(config["entities"]) > 0
+    )
+
+
+async def _tool_list_scenes(
+    args: dict, token: TokenRecord, hass: Any
+) -> tuple[dict, str, str]:
+    """MCP tool: list accessible scene.* entities with their editable scene id."""
+    if effective_cap(token, "cap_registry_read") == CAP_DENY:
+        return _tool_error("Forbidden."), "denied", "list_scenes"
+    scenes: list[dict] = []
+    for e in filter_entities_for_token(hass.states.async_all(), token, hass):
+        if not e["entity_id"].startswith("scene."):
+            continue
+        attrs = e.get("attributes", {})
+        scenes.append({
+            "entity_id": e["entity_id"],
+            "name": attrs.get("friendly_name"),
+            "scene_id": attrs.get("id"),
+        })
+    scenes.sort(key=lambda s: s["entity_id"])
+    return _tool_success(json.dumps({"count": len(scenes), "scenes": scenes}, default=str)), "allowed", "list_scenes"
+
+
+async def _scene_write(
+    config: dict, token: TokenRecord, hass: Any, *, tool_name: str, scene_id: str, replace: bool
+) -> tuple[dict, str, str]:
+    """Shared create/edit body: validate, scope-check members, write scenes.yaml, reload."""
+    if not _valid_scene_config(config):
+        return _tool_error("config must include a non-empty 'name' and a non-empty 'entities' map."), "invalid_request", tool_name
+    bad = _unwritable_scene_members(config, token, hass)
+    if bad:
+        return _tool_error("Scene references entities this token cannot write: " + ", ".join(bad)), "denied", tool_name
+
+    config = {k: v for k, v in config.items() if k != "id"}
+    config["id"] = scene_id
+    path = hass.config.path(_SCENE_CONFIG_PATH)
+    lock = _get_scene_lock(hass)
+    try:
+        async with lock:
+            if await hass.async_add_executor_job(_yaml_file_has_includes, path):
+                return _tool_error("scenes.yaml uses !include directives. ATM cannot safely edit it without destroying the include structure."), "denied", tool_name
+            items = await hass.async_add_executor_job(_read_scenes_yaml, path)
+            if replace:
+                idx = next((i for i, s in enumerate(items) if isinstance(s, dict) and str(s.get("id")) == scene_id), None)
+                if idx is None:
+                    return _tool_error(f"No scene found with id '{scene_id}'."), "denied", tool_name
+                items[idx] = config
+            else:
+                items.append(config)
+            await hass.async_add_executor_job(_write_scenes_yaml, path, items)
+        await hass.services.async_call("scene", "reload", blocking=True)
+    except Exception as exc:  # noqa: BLE001
+        _LOGGER.error("%s failed: %s", tool_name, exc)
+        return _tool_error(f"Failed to {tool_name.replace('_', ' ')}. Check HA logs for details."), "denied", tool_name
+    return _tool_success(json.dumps(config, indent=2, default=str)), "allowed", tool_name
+
+
+async def _tool_create_scene(
+    args: dict, token: TokenRecord, hass: Any, data: ATMData,
+    request_id: str = "", client_ip: str | None = None,
+) -> tuple[dict, str, str]:
+    """MCP tool: create a scene (Confirm-gated)."""
+    blocked = await _gate(
+        "cap_scene_write", token, hass, data,
+        tool_name="create_scene", args=args, request_id=request_id,
+        client_ip=client_ip, diff=_build_diff_create_scene(args, token, hass),
+    )
+    if blocked is not None:
+        return blocked
+    return await _execute_create_scene(args, token, hass, data)
+
+
+async def _execute_create_scene(
+    args: dict, token: TokenRecord, hass: Any, data: ATMData
+) -> tuple[dict, str, str]:
+    config = args.get("config")
+    if not isinstance(config, dict):
+        return _tool_error("config must be an object."), "invalid_request", "create_scene"
+    return await _scene_write(
+        config, token, hass, tool_name="create_scene",
+        scene_id="atm_" + uuid.uuid4().hex[:16], replace=False,
+    )
+
+
+async def _tool_edit_scene(
+    args: dict, token: TokenRecord, hass: Any, data: ATMData,
+    request_id: str = "", client_ip: str | None = None,
+) -> tuple[dict, str, str]:
+    """MCP tool: edit a scene (Confirm-gated)."""
+    blocked = await _gate(
+        "cap_scene_write", token, hass, data,
+        tool_name="edit_scene", args=args, request_id=request_id,
+        client_ip=client_ip, diff=_build_diff_edit_scene(args, token, hass),
+    )
+    if blocked is not None:
+        return blocked
+    return await _execute_edit_scene(args, token, hass, data)
+
+
+async def _execute_edit_scene(
+    args: dict, token: TokenRecord, hass: Any, data: ATMData
+) -> tuple[dict, str, str]:
+    scene_id = str(args.get("scene_id") or "").strip()
+    config = args.get("config")
+    if not scene_id:
+        return _tool_error("scene_id is required."), "invalid_request", "edit_scene"
+    if not isinstance(config, dict):
+        return _tool_error("config must be an object."), "invalid_request", "edit_scene"
+    return await _scene_write(config, token, hass, tool_name="edit_scene", scene_id=scene_id, replace=True)
+
+
+async def _tool_delete_scene(
+    args: dict, token: TokenRecord, hass: Any, data: ATMData,
+    request_id: str = "", client_ip: str | None = None,
+) -> tuple[dict, str, str]:
+    """MCP tool: delete a scene (Confirm-gated)."""
+    blocked = await _gate(
+        "cap_scene_write", token, hass, data,
+        tool_name="delete_scene", args=args, request_id=request_id,
+        client_ip=client_ip, diff=_build_diff_delete_scene(args, token, hass),
+    )
+    if blocked is not None:
+        return blocked
+    return await _execute_delete_scene(args, token, hass, data)
+
+
+async def _execute_delete_scene(
+    args: dict, token: TokenRecord, hass: Any, data: ATMData
+) -> tuple[dict, str, str]:
+    scene_id = str(args.get("scene_id") or "").strip()
+    if not scene_id:
+        return _tool_error("scene_id is required."), "invalid_request", "delete_scene"
+    path = hass.config.path(_SCENE_CONFIG_PATH)
+    lock = _get_scene_lock(hass)
+    try:
+        async with lock:
+            if await hass.async_add_executor_job(_yaml_file_has_includes, path):
+                return _tool_error("scenes.yaml uses !include directives. ATM cannot safely edit it without destroying the include structure."), "denied", "delete_scene"
+            items = await hass.async_add_executor_job(_read_scenes_yaml, path)
+            filtered = [s for s in items if not (isinstance(s, dict) and str(s.get("id")) == scene_id)]
+            if len(filtered) == len(items):
+                return _tool_error(f"No scene found with id '{scene_id}'."), "denied", "delete_scene"
+            await hass.async_add_executor_job(_write_scenes_yaml, path, filtered)
+        await hass.services.async_call("scene", "reload", blocking=True)
+    except Exception as exc:  # noqa: BLE001
+        _LOGGER.error("delete_scene failed: %s", exc)
+        return _tool_error("Failed to delete scene. Check HA logs for details."), "denied", "delete_scene"
+    return _tool_success(f"Scene '{scene_id}' deleted successfully."), "allowed", "delete_scene"
+
+
 async def _call_tool(
     tool_name: str,
     arguments: dict,
@@ -3962,6 +4193,14 @@ async def _call_tool(
         return await _tool_dry_run_service(arguments, token, hass, data)
     if tool_name == "validate_config":
         return await _tool_validate_config(arguments, token, hass)
+    if tool_name == "list_scenes":
+        return await _tool_list_scenes(arguments, token, hass)
+    if tool_name == "create_scene":
+        return await _tool_create_scene(arguments, token, hass, data, request_id, client_ip)
+    if tool_name == "edit_scene":
+        return await _tool_edit_scene(arguments, token, hass, data, request_id, client_ip)
+    if tool_name == "delete_scene":
+        return await _tool_delete_scene(arguments, token, hass, data, request_id, client_ip)
     return _tool_error(f"Unknown tool: {tool_name}"), "denied", tool_name
 
 
@@ -4896,6 +5135,57 @@ def _build_diff_delete_automation(args: dict, token: TokenRecord, hass: Any) -> 
     }
 
 
+def _scene_yaml_entry(hass: Any, scene_id: str) -> dict | None:
+    try:
+        path = hass.config.path(_SCENE_CONFIG_PATH)
+        if os.path.exists(path):
+            return next((s for s in _read_scenes_yaml(path) if isinstance(s, dict) and str(s.get("id")) == scene_id), None)
+    except Exception:  # noqa: BLE001 - diagnostic only
+        return None
+    return None
+
+
+def _build_diff_create_scene(args: dict, token: TokenRecord, hass: Any) -> dict:
+    config = args.get("config") if isinstance(args.get("config"), dict) else {}
+    members = _scene_member_entities(config)
+    return {
+        "kind": "config_diff",
+        "summary": f"Create scene '{config.get('name', '<no name>')}'",
+        "target": {"type": "scene", "id": None, "label": config.get("name")},
+        "before": None,
+        "after": _truncate(json.dumps(config, indent=2, default=str)),
+        "preview": {"name": config.get("name"), "entities": members,
+                    "unwritable_entities": _unwritable_scene_members(config, token, hass)},
+    }
+
+
+def _build_diff_edit_scene(args: dict, token: TokenRecord, hass: Any) -> dict:
+    scene_id = str(args.get("scene_id") or "").strip()
+    config = args.get("config") if isinstance(args.get("config"), dict) else {}
+    current = _scene_yaml_entry(hass, scene_id)
+    return {
+        "kind": "yaml_diff",
+        "summary": f"Edit scene '{scene_id}'",
+        "target": {"type": "scene", "id": scene_id, "label": config.get("name")},
+        "before": _truncate(json.dumps(current, indent=2, default=str)) if current is not None else None,
+        "after": _truncate(json.dumps(config, indent=2, default=str)),
+        "preview": {"name": config.get("name"), "entities": _scene_member_entities(config),
+                    "unwritable_entities": _unwritable_scene_members(config, token, hass)},
+    }
+
+
+def _build_diff_delete_scene(args: dict, token: TokenRecord, hass: Any) -> dict:
+    scene_id = str(args.get("scene_id") or "").strip()
+    current = _scene_yaml_entry(hass, scene_id)
+    return {
+        "kind": "system_action",
+        "summary": f"Delete scene '{scene_id}'",
+        "target": {"type": "scene", "id": scene_id, "label": scene_id},
+        "before": _truncate(json.dumps(current, indent=2, default=str)) if current is not None else None,
+        "preview": {"warning": "This scene will be removed permanently."},
+    }
+
+
 def _build_diff_create_script(args: dict, token: TokenRecord, hass: Any) -> dict:
     script_id = (args.get("script_id") or "").strip()
     config = args.get("config") if isinstance(args.get("config"), dict) else {}
@@ -5024,6 +5314,9 @@ _register_executor("delete_automation", _execute_delete_automation)
 _register_executor("create_script", _execute_create_script)
 _register_executor("edit_script", _execute_edit_script)
 _register_executor("delete_script", _execute_delete_script)
+_register_executor("create_scene", _execute_create_scene)
+_register_executor("edit_scene", _execute_edit_scene)
+_register_executor("delete_scene", _execute_delete_scene)
 _register_executor("HassSetPosition", _execute_hass_set_position)
 _register_executor("HassStopMoving", _execute_hass_stop_moving)
 _register_executor("HassTurnOn", _execute_hass_turn_on)
