@@ -182,6 +182,11 @@ ATM implements all 20 native HA MCP tools using the same tool names and response
 | `create_script` / `edit_script` / `delete_script` | `cap_script_write` |
 | `create_scene` / `edit_scene` / `delete_scene` | `cap_scene_write` |
 | `create_helper` / `edit_helper` / `delete_helper` | `cap_helper_write` |
+| `list_files` / `read_file` / `write_file` (www/, themes/, custom_templates/) | `cap_filesystem` |
+| `get_yaml_config` / `set_yaml_config` (configuration.yaml) | `cap_yaml_edit` |
+| `list_integrations` / `set_integration_enabled` | `cap_integration_write` |
+| `list_backups` / `create_backup` (no restore) | `cap_backup` |
+| `list_dashboards` / `create_dashboard` / `edit_dashboard` / `delete_dashboard` | `cap_lovelace_write` |
 
 **MCP Prompts** - same prompt protocol as the native HA MCP server:
 

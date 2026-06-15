@@ -1133,6 +1133,74 @@ _SYSTEM_TOOL_DEFS: list[dict] = [
             "required": ["entry_id", "enabled"],
         },
     },
+    {
+        "name": "list_backups",
+        "description": "List existing Home Assistant backups and the available backup agents. Requires cap_backup.",
+        "cap": "cap_backup",
+        "inputSchema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "create_backup",
+        "description": (
+            "Create a new Home Assistant backup. Requires cap_backup (Confirm-eligible). Defaults to the "
+            "local backup agent. ATM does not support restoring backups (too destructive); restore from the "
+            "Home Assistant UI."
+        ),
+        "cap": "cap_backup",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "Optional backup name."},
+                "agent_ids": {"type": "array", "items": {"type": "string"}, "description": "Backup agents; defaults to [\"backup.local\"]."},
+            },
+        },
+    },
+    {
+        "name": "list_dashboards",
+        "description": "List Lovelace dashboards. Requires cap_lovelace_write.",
+        "cap": "cap_lovelace_write",
+        "inputSchema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "create_dashboard",
+        "description": (
+            "Create a Lovelace dashboard. config must include url_path and title. "
+            "Requires cap_lovelace_write (Confirm-eligible)."
+        ),
+        "cap": "cap_lovelace_write",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "config": {"type": "object", "description": "Dashboard fields: url_path, title, icon, mode, show_in_sidebar."},
+            },
+            "required": ["config"],
+        },
+    },
+    {
+        "name": "edit_dashboard",
+        "description": "Update a Lovelace dashboard by its dashboard_id. Requires cap_lovelace_write (Confirm-eligible).",
+        "cap": "cap_lovelace_write",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "dashboard_id": {"type": "string", "description": "The dashboard id (from list_dashboards)."},
+                "config": {"type": "object"},
+            },
+            "required": ["dashboard_id", "config"],
+        },
+    },
+    {
+        "name": "delete_dashboard",
+        "description": "Delete a Lovelace dashboard by its dashboard_id. Requires cap_lovelace_write (Confirm-eligible).",
+        "cap": "cap_lovelace_write",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "dashboard_id": {"type": "string"},
+            },
+            "required": ["dashboard_id"],
+        },
+    },
 ]
 
 _NATIVE_TOOL_DEFS: list[dict] = [
@@ -4750,6 +4818,161 @@ async def _execute_set_integration_enabled(
     )
 
 
+# ---------------------------------------------------------------------------
+# Backup (cap_backup) - create + list only; restore is intentionally unsupported
+# ---------------------------------------------------------------------------
+
+
+async def _tool_list_backups(
+    args: dict, token: TokenRecord, hass: Any
+) -> tuple[dict, str, str]:
+    """MCP tool: list existing backups and available agents."""
+    if effective_cap(token, "cap_backup") == CAP_DENY:
+        return _tool_error("Forbidden."), "denied", "list_backups"
+    try:
+        result = await async_ws_command(hass, "backup/info", {})
+    except WsDispatchError as exc:
+        return _tool_error(f"Failed to list backups: {exc}"), "invalid_request", "list_backups"
+    return _tool_success(json.dumps(result, default=str)), "allowed", "list_backups"
+
+
+async def _tool_create_backup(
+    args: dict, token: TokenRecord, hass: Any, data: ATMData,
+    request_id: str = "", client_ip: str | None = None,
+) -> tuple[dict, str, str]:
+    """MCP tool: create a backup (Confirm-gated)."""
+    blocked = await _gate(
+        "cap_backup", token, hass, data,
+        tool_name="create_backup", args=args, request_id=request_id,
+        client_ip=client_ip, diff=_build_diff_create_backup(args, token, hass),
+    )
+    if blocked is not None:
+        return blocked
+    return await _execute_create_backup(args, token, hass, data)
+
+
+async def _execute_create_backup(
+    args: dict, token: TokenRecord, hass: Any, data: ATMData
+) -> tuple[dict, str, str]:
+    agent_ids = args.get("agent_ids")
+    if not isinstance(agent_ids, list) or not agent_ids:
+        agent_ids = ["backup.local"]
+    payload: dict = {"agent_ids": agent_ids}
+    name = args.get("name")
+    if isinstance(name, str) and name.strip():
+        payload["name"] = name
+    try:
+        result = await async_ws_command(hass, "backup/generate", payload, timeout=60)
+    except WsDispatchError as exc:
+        return _tool_error(f"Failed to create backup: {exc}"), "invalid_request", "create_backup"
+    return _tool_success(json.dumps({"created": True, "result": result}, default=str)), "allowed", "create_backup"
+
+
+# ---------------------------------------------------------------------------
+# Lovelace dashboard CRUD (cap_lovelace_write) via in-process WS dispatch
+# ---------------------------------------------------------------------------
+
+
+async def _tool_list_dashboards(
+    args: dict, token: TokenRecord, hass: Any
+) -> tuple[dict, str, str]:
+    """MCP tool: list Lovelace dashboards."""
+    if effective_cap(token, "cap_lovelace_write") == CAP_DENY:
+        return _tool_error("Forbidden."), "denied", "list_dashboards"
+    try:
+        result = await async_ws_command(hass, "lovelace/dashboards/list", {})
+    except WsDispatchError as exc:
+        return _tool_error(f"Failed to list dashboards: {exc}"), "invalid_request", "list_dashboards"
+    return _tool_success(json.dumps({"dashboards": result}, default=str)), "allowed", "list_dashboards"
+
+
+async def _tool_create_dashboard(
+    args: dict, token: TokenRecord, hass: Any, data: ATMData,
+    request_id: str = "", client_ip: str | None = None,
+) -> tuple[dict, str, str]:
+    """MCP tool: create a dashboard (Confirm-gated)."""
+    blocked = await _gate(
+        "cap_lovelace_write", token, hass, data,
+        tool_name="create_dashboard", args=args, request_id=request_id,
+        client_ip=client_ip, diff=_build_diff_dashboard("Create", args, hass),
+    )
+    if blocked is not None:
+        return blocked
+    return await _execute_create_dashboard(args, token, hass, data)
+
+
+async def _execute_create_dashboard(
+    args: dict, token: TokenRecord, hass: Any, data: ATMData
+) -> tuple[dict, str, str]:
+    config = args.get("config")
+    if not isinstance(config, dict) or not config:
+        return _tool_error("config must be a non-empty object (at least url_path and title)."), "invalid_request", "create_dashboard"
+    try:
+        item = await async_ws_command(hass, "lovelace/dashboards/create", dict(config))
+    except WsDispatchError as exc:
+        return _tool_error(f"Failed to create dashboard: {exc}"), "invalid_request", "create_dashboard"
+    return _tool_success(json.dumps({"dashboard": item}, default=str)), "allowed", "create_dashboard"
+
+
+async def _tool_edit_dashboard(
+    args: dict, token: TokenRecord, hass: Any, data: ATMData,
+    request_id: str = "", client_ip: str | None = None,
+) -> tuple[dict, str, str]:
+    """MCP tool: edit a dashboard (Confirm-gated)."""
+    blocked = await _gate(
+        "cap_lovelace_write", token, hass, data,
+        tool_name="edit_dashboard", args=args, request_id=request_id,
+        client_ip=client_ip, diff=_build_diff_dashboard("Edit", args, hass),
+    )
+    if blocked is not None:
+        return blocked
+    return await _execute_edit_dashboard(args, token, hass, data)
+
+
+async def _execute_edit_dashboard(
+    args: dict, token: TokenRecord, hass: Any, data: ATMData
+) -> tuple[dict, str, str]:
+    dashboard_id = str(args.get("dashboard_id") or "").strip()
+    config = args.get("config")
+    if not dashboard_id:
+        return _tool_error("dashboard_id is required."), "invalid_request", "edit_dashboard"
+    if not isinstance(config, dict):
+        return _tool_error("config must be an object."), "invalid_request", "edit_dashboard"
+    try:
+        item = await async_ws_command(hass, "lovelace/dashboards/update", {"dashboard_id": dashboard_id, **config})
+    except WsDispatchError as exc:
+        return _tool_error(f"Failed to edit dashboard: {exc}"), "invalid_request", "edit_dashboard"
+    return _tool_success(json.dumps({"dashboard": item}, default=str)), "allowed", f"dashboard:{dashboard_id}"
+
+
+async def _tool_delete_dashboard(
+    args: dict, token: TokenRecord, hass: Any, data: ATMData,
+    request_id: str = "", client_ip: str | None = None,
+) -> tuple[dict, str, str]:
+    """MCP tool: delete a dashboard (Confirm-gated)."""
+    blocked = await _gate(
+        "cap_lovelace_write", token, hass, data,
+        tool_name="delete_dashboard", args=args, request_id=request_id,
+        client_ip=client_ip, diff=_build_diff_dashboard("Delete", args, hass),
+    )
+    if blocked is not None:
+        return blocked
+    return await _execute_delete_dashboard(args, token, hass, data)
+
+
+async def _execute_delete_dashboard(
+    args: dict, token: TokenRecord, hass: Any, data: ATMData
+) -> tuple[dict, str, str]:
+    dashboard_id = str(args.get("dashboard_id") or "").strip()
+    if not dashboard_id:
+        return _tool_error("dashboard_id is required."), "invalid_request", "delete_dashboard"
+    try:
+        await async_ws_command(hass, "lovelace/dashboards/delete", {"dashboard_id": dashboard_id})
+    except WsDispatchError as exc:
+        return _tool_error(f"Failed to delete dashboard: {exc}"), "invalid_request", "delete_dashboard"
+    return _tool_success(f"Dashboard '{dashboard_id}' deleted successfully."), "allowed", f"dashboard:{dashboard_id}"
+
+
 async def _call_tool(
     tool_name: str,
     arguments: dict,
@@ -4910,6 +5133,18 @@ async def _call_tool(
         return await _tool_list_integrations(arguments, token, hass)
     if tool_name == "set_integration_enabled":
         return await _tool_set_integration_enabled(arguments, token, hass, data, request_id, client_ip)
+    if tool_name == "list_backups":
+        return await _tool_list_backups(arguments, token, hass)
+    if tool_name == "create_backup":
+        return await _tool_create_backup(arguments, token, hass, data, request_id, client_ip)
+    if tool_name == "list_dashboards":
+        return await _tool_list_dashboards(arguments, token, hass)
+    if tool_name == "create_dashboard":
+        return await _tool_create_dashboard(arguments, token, hass, data, request_id, client_ip)
+    if tool_name == "edit_dashboard":
+        return await _tool_edit_dashboard(arguments, token, hass, data, request_id, client_ip)
+    if tool_name == "delete_dashboard":
+        return await _tool_delete_dashboard(arguments, token, hass, data, request_id, client_ip)
     return _tool_error(f"Unknown tool: {tool_name}"), "denied", tool_name
 
 
@@ -5992,6 +6227,36 @@ def _build_diff_set_integration_enabled(args: dict, token: TokenRecord, hass: An
     }
 
 
+def _build_diff_create_backup(args: dict, token: TokenRecord, hass: Any) -> dict:
+    name = args.get("name") if isinstance(args.get("name"), str) else None
+    agent_ids = args.get("agent_ids") if isinstance(args.get("agent_ids"), list) else ["backup.local"]
+    return {
+        "kind": "system_action",
+        "summary": f"Create backup{f' \"{name}\"' if name else ''}",
+        "target": {"type": "backup", "id": None, "label": name},
+        "preview": {"name": name, "agent_ids": agent_ids,
+                    "note": "Creates a backup; ATM cannot restore backups."},
+    }
+
+
+def _build_diff_dashboard(verb: str, args: dict, hass: Any) -> dict:
+    dashboard_id = str(args.get("dashboard_id") or "").strip()
+    config = args.get("config") if isinstance(args.get("config"), dict) else {}
+    label = config.get("title") or dashboard_id or config.get("url_path")
+    kind = "config_diff" if verb == "Create" else ("yaml_diff" if verb == "Edit" else "system_action")
+    diff: dict = {
+        "kind": kind,
+        "summary": f"{verb} dashboard '{label}'",
+        "target": {"type": "dashboard", "id": dashboard_id or None, "label": label},
+        "preview": {"url_path": config.get("url_path"), "title": config.get("title")},
+    }
+    if verb != "Delete":
+        diff["after"] = _truncate(json.dumps(config, indent=2, default=str))
+    else:
+        diff["preview"]["warning"] = "This dashboard will be removed permanently."
+    return diff
+
+
 def _build_diff_create_script(args: dict, token: TokenRecord, hass: Any) -> dict:
     script_id = (args.get("script_id") or "").strip()
     config = args.get("config") if isinstance(args.get("config"), dict) else {}
@@ -6129,6 +6394,10 @@ _register_executor("delete_helper", _execute_delete_helper)
 _register_executor("write_file", _execute_write_file)
 _register_executor("set_yaml_config", _execute_set_yaml_config)
 _register_executor("set_integration_enabled", _execute_set_integration_enabled)
+_register_executor("create_backup", _execute_create_backup)
+_register_executor("create_dashboard", _execute_create_dashboard)
+_register_executor("edit_dashboard", _execute_edit_dashboard)
+_register_executor("delete_dashboard", _execute_delete_dashboard)
 _register_executor("HassSetPosition", _execute_hass_set_position)
 _register_executor("HassStopMoving", _execute_hass_stop_moving)
 _register_executor("HassTurnOn", _execute_hass_turn_on)
