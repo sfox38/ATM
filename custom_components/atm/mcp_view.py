@@ -36,6 +36,7 @@ from .const import (
     ANNOUNCE_BIT,
     ATM_VERSION,
     BLOCKED_DOMAINS,
+    CAP_ALLOW,
     CAP_CONFIRM,
     CAP_DENY,
     DOMAIN,
@@ -56,7 +57,12 @@ from .const import (
     TOKEN_PREFIX,
 )
 from .data import ATMData
-from .mesa import apply_mesa_to_call, entity_control_mode, fire_mesa_blocked_event
+from .mesa import (
+    apply_mesa_to_call,
+    entity_control_mode,
+    evaluate_service_entities,
+    fire_mesa_blocked_event,
+)
 from .mesa_core.trigger_validator import entities_by_role
 from .mesa_tools import MESA_TOOL_NAMES, call_mesa_tool, mesa_tool_defs
 from .helpers import (
@@ -380,6 +386,33 @@ _ENTITY_TOOL_DEFS: list[dict] = [
                 "approval_id": {"type": "string"},
             },
             "required": ["approval_id"],
+        },
+    },
+    {
+        "name": "get_capability_summary",
+        "description": (
+            "Introspect this token: its persona, effective capabilities (deny/allow/confirm), which "
+            "capabilities are Confirm-gated (will require admin approval), write scope, and rate limits. "
+            "Call this at session start to orient. No capability required; a token only ever sees itself."
+        ),
+        "inputSchema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "get_audit_summary",
+        "description": (
+            "Return this token's own recent activity from the ATM audit log (request_id, time, method, "
+            "resource, outcome), newest first. Only this token's entries are returned. Useful for "
+            "self-correction (did my last call succeed?). No capability required."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "limit": {"type": "integer", "minimum": 1, "maximum": 200, "default": 50},
+                "outcome": {
+                    "type": "string",
+                    "description": "Optional filter: allowed, denied, not_found, rate_limited, invalid_request, pending_approval.",
+                },
+            },
         },
     },
 ]
@@ -745,6 +778,96 @@ _SYSTEM_TOOL_DEFS: list[dict] = [
                 "entity_id": {"type": "string", "description": "The entity to describe."},
             },
             "required": ["entity_id"],
+        },
+    },
+    {
+        "name": "whatif",
+        "description": (
+            "Predict which automations would fire if an accessible entity changed to a hypothetical "
+            "state, without changing anything. Evaluates state and numeric_state triggers best-effort; "
+            "other trigger types report 'unknown'. Returns 'not found' if the entity is not accessible."
+        ),
+        "cap": "cap_search",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "entity_id": {"type": "string", "description": "The entity to hypothetically change."},
+                "hypothetical_state": {"type": "string", "description": "The state value to assume, e.g. 'on', 'open', '25'."},
+            },
+            "required": ["entity_id", "hypothetical_state"],
+        },
+    },
+    {
+        "name": "compare_state",
+        "description": (
+            "Compare the state of accessible entities between two times (ISO or relative like 24h, 7d). "
+            "Returns each entity's state at each time and whether it changed. Useful for 'what changed while I was away'."
+        ),
+        "cap": "cap_search",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "entity_id": {
+                    "oneOf": [{"type": "string"}, {"type": "array", "items": {"type": "string"}}],
+                    "description": "One entity id or a list.",
+                },
+                "t1": {"type": "string", "description": "Earlier time (ISO or relative: 24h, 7d, 2w, 1m)."},
+                "t2": {"type": "string", "description": "Later time. Defaults to now."},
+            },
+            "required": ["entity_id", "t1"],
+        },
+    },
+    {
+        "name": "recent_activity",
+        "description": (
+            "Summarize which accessible entities changed state in the last N minutes (the 'catch me up' "
+            "primitive), newest first. Scoped to entities this token can read."
+        ),
+        "cap": "cap_search",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "minutes": {"type": "integer", "minimum": 1, "maximum": 1440, "default": 30},
+                "limit": {"type": "integer", "minimum": 1, "maximum": 200, "default": 50},
+            },
+        },
+    },
+    {
+        "name": "dry_run_service",
+        "description": (
+            "Preview a service call without executing it: resolves and flattens the targets to the "
+            "entities this token can write, and reports the MESA verdict (allow/confirm/block) per entity. "
+            "Use before a risky call_service to reason about its effect."
+        ),
+        "cap": "cap_search",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "domain": {"type": "string"},
+                "service": {"type": "string"},
+                "service_data": {"type": "object"},
+                "entity_id": {"oneOf": [{"type": "string"}, {"type": "array", "items": {"type": "string"}}]},
+                "device_id": {"type": "string"},
+                "area_id": {"type": "string"},
+            },
+            "required": ["domain", "service"],
+        },
+    },
+    {
+        "name": "validate_config",
+        "description": (
+            "Validate an automation or script config without saving it. Returns structural validity plus, "
+            "for each referenced entity, whether it exists and is accessible to this token. Decouples the "
+            "schema check from committing the write."
+        ),
+        "cap": "cap_diagnostics",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "type": {"type": "string", "enum": ["automation", "script"]},
+                "config": {"type": "object", "description": "The automation or script config to validate."},
+            },
+            "required": ["type", "config"],
         },
     },
 ]
@@ -3347,6 +3470,372 @@ async def _tool_describe_entity(
     return _tool_success(json.dumps(body, default=str)), "allowed", entity_id
 
 
+async def _tool_get_capability_summary(
+    args: dict, token: TokenRecord, hass: Any
+) -> tuple[dict, str, str]:
+    """MCP tool: the token introspecting its own caps/persona/limits. No cap required."""
+    caps = effective_caps(token)
+    body = {
+        "token_name": token.name,
+        "persona": token.persona,
+        "pass_through": token.pass_through,
+        "write_scope": token_has_write_scope(token),
+        "capabilities": caps,
+        "allowed": sorted(c for c, m in caps.items() if m == CAP_ALLOW),
+        "confirm_gated": sorted(c for c, m in caps.items() if m == CAP_CONFIRM),
+        "denied": sorted(c for c, m in caps.items() if m == CAP_DENY),
+        "rate_limit": (
+            {"requests_per_min": token.rate_limit_requests, "burst_per_sec": token.rate_limit_burst}
+            if token.rate_limit_requests > 0 else "none"
+        ),
+    }
+    return _tool_success(json.dumps(body, default=str)), "allowed", "get_capability_summary"
+
+
+async def _tool_get_audit_summary(
+    args: dict, token: TokenRecord, hass: Any, data: ATMData
+) -> tuple[dict, str, str]:
+    """MCP tool: the token's own recent audit entries. No cap required; own data only."""
+    try:
+        limit = int(args.get("limit", 50))
+    except (TypeError, ValueError):
+        limit = 50
+    limit = max(1, min(limit, 200))
+
+    outcome = args.get("outcome")
+    entries = data.audit.query(token_id=token.id, outcome=outcome, limit=limit)
+    if entries is None:
+        return _tool_error("Invalid outcome filter."), "invalid_request", "get_audit_summary"
+
+    items = [
+        {
+            "request_id": e.request_id,
+            "timestamp": e.timestamp,
+            "method": e.method,
+            "resource": e.resource,
+            "outcome": e.outcome,
+        }
+        for e in entries
+    ]
+    body = {"token_name": token.name, "count": len(items), "entries": items}
+    return _tool_success(json.dumps(body, default=str)), "allowed", "get_audit_summary"
+
+
+# ---------------------------------------------------------------------------
+# Analysis tools (whatif / compare_state / recent_activity / dry_run / validate)
+# ---------------------------------------------------------------------------
+
+
+def _state_matches(constraint: Any, value: Any) -> bool | None:
+    """True/False if value matches a state-trigger constraint, None if no constraint."""
+    if constraint is None:
+        return None
+    if isinstance(constraint, list):
+        return value in [str(c) for c in constraint]
+    return str(constraint) == value
+
+
+def _whatif_trigger(trig: dict, entity_id: str, current_state: str | None, hypothetical: str) -> bool | str:
+    """Best-effort: would this trigger fire if entity_id became `hypothetical`?
+
+    Evaluates state and numeric_state platforms; returns "unknown" for triggers
+    that cannot be judged from a single state change (template, time, event, etc.).
+    """
+    platform = trig.get("platform") or trig.get("trigger")
+    if platform == "state":
+        if _state_matches(trig.get("from"), current_state) is False:
+            return False
+        if _state_matches(trig.get("not_from"), current_state) is True:
+            return False
+        to_match = _state_matches(trig.get("to"), hypothetical)
+        if to_match is False:
+            return False
+        if _state_matches(trig.get("not_to"), hypothetical) is True:
+            return False
+        if to_match is True:
+            return True
+        if trig.get("to") is None and trig.get("not_to") is None:
+            return hypothetical != current_state  # "any change" trigger
+        return True
+    if platform == "numeric_state":
+        try:
+            val = float(hypothetical)
+        except (TypeError, ValueError):
+            return "unknown"
+        try:
+            if trig.get("above") is not None and not val > float(trig["above"]):
+                return False
+            if trig.get("below") is not None and not val < float(trig["below"]):
+                return False
+        except (TypeError, ValueError):
+            return "unknown"
+        return True
+    return "unknown"
+
+
+async def _tool_whatif(
+    args: dict, token: TokenRecord, hass: Any
+) -> tuple[dict, str, str]:
+    """MCP tool: which automations would fire if an entity changed to a hypothetical state."""
+    if effective_cap(token, "cap_search") == CAP_DENY:
+        return _tool_error("Forbidden."), "denied", "whatif"
+
+    entity_id = args.get("entity_id", "")
+    hypothetical = args.get("hypothetical_state")
+    if not entity_id or hypothetical is None:
+        return _tool_error("Missing required arguments: entity_id and hypothetical_state"), "invalid_request", "whatif"
+    hypothetical = str(hypothetical)
+    if resolve(entity_id, token, hass) not in (Permission.READ, Permission.WRITE):
+        return _tool_error("Entity not found."), "not_found", entity_id
+
+    current = hass.states.get(entity_id)
+    current_state = current.state if current is not None else None
+
+    candidates: list[dict] = []
+    for cfg in _read_automations_yaml(os.path.join(hass.config.config_dir, _AUTOMATION_YAML)):
+        if not isinstance(cfg, dict):
+            continue
+        triggers = cfg.get("trigger") or cfg.get("triggers") or []
+        if isinstance(triggers, dict):
+            triggers = [triggers]
+        matched: list[dict] = []
+        for trig in triggers:
+            if not isinstance(trig, dict):
+                continue
+            tents: set[str] = set()
+            _collect_entity_id_values(trig, tents)
+            if entity_id not in tents:
+                continue
+            matched.append({
+                "platform": trig.get("platform") or trig.get("trigger"),
+                "would_fire": _whatif_trigger(trig, entity_id, current_state, hypothetical),
+            })
+        if not matched:
+            continue
+        if any(m["would_fire"] is True for m in matched):
+            verdict: bool | str = True
+        elif any(m["would_fire"] == "unknown" for m in matched):
+            verdict = "unknown"
+        else:
+            verdict = False
+        candidates.append({
+            "automation_id": str(cfg.get("id", "")),
+            "name": cfg.get("alias"),
+            "would_fire": verdict,
+            "triggers": matched,
+        })
+
+    body = {
+        "entity_id": entity_id,
+        "current_state": current_state,
+        "hypothetical_state": hypothetical,
+        "candidates": candidates,
+    }
+    return _tool_success(json.dumps(body, default=str)), "allowed", entity_id
+
+
+async def _history_states(hass: Any, start: Any, end: Any, entity_ids: list[str], *, include_start: bool = True) -> dict:
+    """Recorder significant-states for a set of entities, no attributes."""
+    from homeassistant.components.recorder import get_instance  # noqa: PLC0415
+    from homeassistant.components.recorder import history as rec_history  # noqa: PLC0415
+    fn = functools.partial(
+        rec_history.get_significant_states,
+        hass, start, end, entity_ids, None, include_start, True, False, True,
+    )
+    return await get_instance(hass).async_add_executor_job(fn)
+
+
+async def _tool_compare_state(
+    args: dict, token: TokenRecord, hass: Any
+) -> tuple[dict, str, str]:
+    """MCP tool: compare accessible entity states between two times."""
+    if effective_cap(token, "cap_search") == CAP_DENY:
+        return _tool_error("Forbidden."), "denied", "compare_state"
+
+    raw_ids = args.get("entity_id")
+    ids = [raw_ids] if isinstance(raw_ids, str) else list(raw_ids or [])
+    if not ids:
+        return _tool_error("Missing required argument: entity_id"), "invalid_request", "compare_state"
+    if not args.get("t1"):
+        return _tool_error("Missing required argument: t1"), "invalid_request", "compare_state"
+    try:
+        t1 = _parse_time_param(args["t1"])
+    except ValueError:
+        return _tool_error("Invalid t1 format."), "invalid_request", "compare_state"
+    t2 = utcnow()
+    if args.get("t2"):
+        try:
+            t2 = _parse_time_param(args["t2"])
+        except ValueError:
+            return _tool_error("Invalid t2 format."), "invalid_request", "compare_state"
+
+    accessible = [e for e in ids if resolve(e, token, hass) in (Permission.READ, Permission.WRITE)]
+    comparisons: list[dict] = []
+    if accessible:
+        try:
+            result = await _history_states(hass, t1, t2, accessible)
+        except Exception:  # noqa: BLE001
+            _LOGGER.warning("compare_state history failed", exc_info=True)
+            return _tool_error("History call failed."), "invalid_request", "compare_state"
+        for eid in accessible:
+            dicts = [s.as_dict() if hasattr(s, "as_dict") else s for s in result.get(eid, [])]
+            s1 = dicts[0].get("state") if dicts else None
+            s2 = dicts[-1].get("state") if dicts else None
+            comparisons.append({"entity_id": eid, "state_at_t1": s1, "state_at_t2": s2, "changed": s1 != s2})
+
+    body = {"t1": t1, "t2": t2, "comparisons": comparisons}
+    return _tool_success(json.dumps(body, default=str)), "allowed", "compare_state"
+
+
+async def _tool_recent_activity(
+    args: dict, token: TokenRecord, hass: Any
+) -> tuple[dict, str, str]:
+    """MCP tool: which accessible entities changed in the last N minutes."""
+    if effective_cap(token, "cap_search") == CAP_DENY:
+        return _tool_error("Forbidden."), "denied", "recent_activity"
+
+    try:
+        minutes = int(args.get("minutes", 30))
+    except (TypeError, ValueError):
+        minutes = 30
+    minutes = max(1, min(minutes, 1440))
+    try:
+        limit = int(args.get("limit", 50))
+    except (TypeError, ValueError):
+        limit = 50
+    limit = max(1, min(limit, 200))
+
+    end = utcnow()
+    start = end - timedelta(minutes=minutes)
+    accessible_ids = list(_accessible_entity_ids(token, hass))
+    changes: list[dict] = []
+    if accessible_ids:
+        try:
+            result = await _history_states(hass, start, end, accessible_ids, include_start=False)
+        except Exception:  # noqa: BLE001
+            _LOGGER.warning("recent_activity history failed", exc_info=True)
+            return _tool_error("History call failed."), "invalid_request", "recent_activity"
+        for eid, states in result.items():
+            dicts = [s.as_dict() if hasattr(s, "as_dict") else s for s in states]
+            if not dicts:
+                continue
+            last = dicts[-1]
+            changes.append({
+                "entity_id": eid,
+                "state": last.get("state"),
+                "when": last.get("last_changed") or last.get("last_updated"),
+                "changes_in_window": len(dicts),
+            })
+    changes.sort(key=lambda c: str(c["when"] or ""), reverse=True)
+    body = {
+        "window_minutes": minutes,
+        "count": min(len(changes), limit),
+        "truncated": len(changes) > limit,
+        "changes": changes[:limit],
+    }
+    return _tool_success(json.dumps(body, default=str)), "allowed", "recent_activity"
+
+
+async def _tool_dry_run_service(
+    args: dict, token: TokenRecord, hass: Any, data: ATMData
+) -> tuple[dict, str, str]:
+    """MCP tool: preview a service call (resolved targets + MESA verdict) without executing."""
+    if effective_cap(token, "cap_search") == CAP_DENY:
+        return _tool_error("Forbidden."), "denied", "dry_run_service"
+
+    domain = args.get("domain", "")
+    service = args.get("service", "")
+    if not domain or not service:
+        return _tool_error("Missing required arguments: domain and service"), "invalid_request", "dry_run_service"
+    service_data = args.get("service_data") or {}
+    if not isinstance(service_data, dict):
+        service_data = {}
+    service_key = f"{domain}/{service}"
+
+    if service_key in DUAL_GATE_SERVICES:
+        body = {
+            "domain": domain, "service": service, "system_service": True,
+            "resolved_entities": [], "would_execute": effective_cap(token, "cap_restart") != CAP_DENY,
+        }
+        return _tool_success(json.dumps(body, default=str)), "allowed", "dry_run_service"
+
+    try:
+        permitted, requested = resolve_service_targets(
+            entity_id=args.get("entity_id"), device_id=args.get("device_id"),
+            area_id=args.get("area_id"), service_domain=domain, token=token, hass=hass,
+        )
+    except EntityCreationNotPermitted:
+        permitted, requested = [], 0
+
+    mesa: dict | None = None
+    settings = data.store.get_settings()
+    if data.mesa is not None and settings.mesa_mode != MESA_MODE_OFF and permitted:
+        verdict = evaluate_service_entities(
+            data.mesa, settings.mesa_mode, token, permitted,
+            domain=domain, service=service, service_data=service_data, session_id="dry_run",
+        )
+        mesa = {
+            "allowed": verdict.allowed,
+            "confirm": verdict.confirm,
+            "blocked": [{"entity_id": e, "rule": r, "reason": reason} for e, r, reason in verdict.blocked],
+            "warnings": verdict.warnings,
+        }
+
+    body = {
+        "domain": domain,
+        "service": service,
+        "requested_target_count": requested,
+        "resolved_entities": permitted,
+        "dropped_count": max(requested - len(permitted), 0),
+        "mesa": mesa,
+        "physical_gate": service_key in PHYSICAL_GATE_SERVICES,
+    }
+    return _tool_success(json.dumps(body, default=str)), "allowed", "dry_run_service"
+
+
+async def _tool_validate_config(
+    args: dict, token: TokenRecord, hass: Any
+) -> tuple[dict, str, str]:
+    """MCP tool: validate an automation or script config without saving it."""
+    if effective_cap(token, "cap_diagnostics") == CAP_DENY:
+        return _tool_error("Forbidden."), "denied", "validate_config"
+
+    cfg_type = args.get("type")
+    config = args.get("config")
+    if cfg_type not in ("automation", "script") or not isinstance(config, dict):
+        return _tool_error("Provide type ('automation' or 'script') and a config object."), "invalid_request", "validate_config"
+
+    valid = True
+    errors: list[str] = []
+    referenced: set[str] = set()
+    try:
+        if cfg_type == "automation":
+            result = await _validate_automation_config(hass, "atm_validate", config)
+            for ents in entities_by_role(config).values():
+                referenced.update(ents)
+        else:
+            result = await _validate_script_config(hass, "atm_validate", config)
+            _collect_entity_id_values(config, referenced)
+        if result is None:
+            valid = False
+            errors.append("Config failed schema validation.")
+    except Exception as exc:  # noqa: BLE001 - HA validators raise various types
+        valid = False
+        errors.append(str(exc))
+
+    registry = er.async_get(hass)
+    refs = [
+        {
+            "entity_id": eid,
+            "exists": hass.states.get(eid) is not None or registry.async_get(eid) is not None,
+            "accessible": resolve(eid, token, hass) in (Permission.READ, Permission.WRITE),
+        }
+        for eid in sorted(referenced)
+    ]
+    body = {"type": cfg_type, "valid": valid, "errors": errors, "referenced_entities": refs}
+    return _tool_success(json.dumps(body, default=str)), "allowed", "validate_config"
+
+
 async def _call_tool(
     tool_name: str,
     arguments: dict,
@@ -3381,6 +3870,10 @@ async def _call_tool(
         return await _tool_restart_ha(arguments, token, hass, data, request_id, client_ip)
     if tool_name == "get_approval_status":
         return await _tool_get_approval_status(arguments, token, hass, data)
+    if tool_name == "get_capability_summary":
+        return await _tool_get_capability_summary(arguments, token, hass)
+    if tool_name == "get_audit_summary":
+        return await _tool_get_audit_summary(arguments, token, hass, data)
     if tool_name in MESA_TOOL_NAMES:
         return await call_mesa_tool(tool_name, arguments, token, hass, data, request_id)
     if tool_name == "GetLiveContext":
@@ -3459,6 +3952,16 @@ async def _call_tool(
         return await _tool_get_relationships(arguments, token, hass)
     if tool_name == "describe_entity":
         return await _tool_describe_entity(arguments, token, hass, data)
+    if tool_name == "whatif":
+        return await _tool_whatif(arguments, token, hass)
+    if tool_name == "compare_state":
+        return await _tool_compare_state(arguments, token, hass)
+    if tool_name == "recent_activity":
+        return await _tool_recent_activity(arguments, token, hass)
+    if tool_name == "dry_run_service":
+        return await _tool_dry_run_service(arguments, token, hass, data)
+    if tool_name == "validate_config":
+        return await _tool_validate_config(arguments, token, hass)
     return _tool_error(f"Unknown tool: {tool_name}"), "denied", tool_name
 
 

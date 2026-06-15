@@ -162,9 +162,11 @@ ATM implements all 20 native HA MCP tools using the same tool names and response
 | Tool | Requires capability |
 |---|---|
 | `search_entities` / `get_overview` / `describe_area` / `find_available_actions` / `get_relationships` / `describe_entity` | `cap_search` |
+| `whatif` / `compare_state` / `recent_activity` / `dry_run_service` | `cap_search` |
 | `list_areas` / `list_floors` / `list_zones` / `list_devices` / `get_device` | `cap_registry_read` |
 | `get_automation_traces` | `cap_traces` |
-| `get_system_health` / `check_config` | `cap_diagnostics` |
+| `get_system_health` / `check_config` / `validate_config` | `cap_diagnostics` |
+| `get_capability_summary` / `get_audit_summary` | none (own data only) |
 
 **System tools** - gated by capabilities:
 
@@ -356,6 +358,27 @@ HA version and per-integration system health. Requires `cap_diagnostics`.
 
 #### `check_config`
 Validate the HA configuration files. Requires `cap_diagnostics`. Returns `{valid, errors, warnings}`.
+
+#### `whatif`
+Predict which automations would fire if an accessible entity changed to a hypothetical state, without changing anything. Requires `cap_search`. State and numeric_state triggers are evaluated best-effort; other trigger types report `unknown`. **Parameters:** `entity_id`, `hypothetical_state`.
+
+#### `compare_state`
+Compare accessible entities' states between two times (recorder-backed). Requires `cap_search`. **Parameters:** `entity_id` (string or list), `t1`, optional `t2` (defaults to now).
+
+#### `recent_activity`
+Accessible entities that changed in the last N minutes, newest first. Requires `cap_search`. **Parameters:** `minutes` (default 30), `limit` (default 50).
+
+#### `dry_run_service`
+Preview a service call without executing: resolves and flattens targets to the entities the token can write and reports the MESA verdict per entity. Requires `cap_search`. **Parameters:** same shape as `call_service` (`domain`, `service`, `service_data`, `entity_id`/`device_id`/`area_id`).
+
+#### `validate_config`
+Validate an automation or script config without saving. Requires `cap_diagnostics`. Returns structural validity plus, for each referenced entity, whether it exists and is accessible. **Parameters:** `type` (`automation` or `script`), `config`.
+
+#### `get_capability_summary`
+Introspect this token: persona, effective capabilities, Confirm-gated capabilities, write scope, and rate limits. No capability required.
+
+#### `get_audit_summary`
+This token's own recent audit entries (request_id, time, method, resource, outcome), newest first. No capability required. **Parameters:** `limit` (default 50), optional `outcome` filter.
 
 ---
 
