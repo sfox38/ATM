@@ -29,6 +29,8 @@ from homeassistant.helpers import area_registry as ar
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import floor_registry as fr
+from homeassistant.core import callback
+from homeassistant.helpers.event import async_track_state_change_event
 from homeassistant.util.dt import utcnow
 
 from .audit import generate_request_id
@@ -46,6 +48,7 @@ from .const import (
     MAX_HISTORY_RANGE_DAYS,
     MAX_LOG_ENTRIES,
     MAX_SSE_CONNECTIONS_PER_TOKEN,
+    MAX_SUBSCRIPTION_SECONDS,
     MESA_APPROVED_EXECUTOR,
     MESA_MODE_OFF,
     PHYSICAL_GATE_DOMAINS,
@@ -64,6 +67,7 @@ from .mesa import (
     fire_mesa_blocked_event,
 )
 from .mesa_core.trigger_validator import entities_by_role
+from .ws_dispatch import WsDispatchError, async_ws_command
 from .mesa_tools import MESA_TOOL_NAMES, call_mesa_tool, mesa_tool_defs
 from .helpers import (
     archive_expired_token,
@@ -203,6 +207,15 @@ def _get_scene_lock(hass: Any) -> asyncio.Lock:
     if _SCENE_LOCK_KEY not in hass.data:
         hass.data[_SCENE_LOCK_KEY] = asyncio.Lock()
     return hass.data[_SCENE_LOCK_KEY]
+
+
+# Storage-based helper domains managed via the in-process WS command dispatch
+# ({type}/create|update|delete, item id key = "{type}_id"). Config-entry helper
+# types (template, group, utility_meter, etc.) are out of scope for now.
+HELPER_TYPES = frozenset({
+    "input_boolean", "input_number", "input_text",
+    "input_select", "input_datetime", "counter", "timer",
+})
 
 
 def _collect_entity_id_values(node: Any, found: set[str]) -> None:
@@ -929,6 +942,98 @@ _SYSTEM_TOOL_DEFS: list[dict] = [
                 "scene_id": {"type": "string"},
             },
             "required": ["scene_id"],
+        },
+    },
+    {
+        "name": "list_helpers",
+        "description": (
+            "List Home Assistant helpers this token can access (input_boolean, input_number, "
+            "input_text, input_select, input_datetime, counter, timer), with each helper's id for editing."
+        ),
+        "cap": "cap_registry_read",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "helper_type": {"type": "string", "description": "Optional filter, e.g. input_boolean."},
+            },
+        },
+    },
+    {
+        "name": "create_helper",
+        "description": (
+            "Create a Home Assistant helper. helper_type is one of input_boolean, input_number, "
+            "input_text, input_select, input_datetime, counter, timer. config holds the helper's fields "
+            "(at least 'name'). Returns the created helper including its id."
+        ),
+        "cap": "cap_helper_write",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "helper_type": {"type": "string"},
+                "config": {"type": "object", "description": "Helper fields, e.g. {\"name\": \"Guest mode\"}."},
+            },
+            "required": ["helper_type", "config"],
+        },
+    },
+    {
+        "name": "edit_helper",
+        "description": "Update an existing helper's config by its helper_type and helper_id.",
+        "cap": "cap_helper_write",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "helper_type": {"type": "string"},
+                "helper_id": {"type": "string", "description": "The helper id (from list_helpers)."},
+                "config": {"type": "object"},
+            },
+            "required": ["helper_type", "helper_id", "config"],
+        },
+    },
+    {
+        "name": "delete_helper",
+        "description": "Permanently delete a helper by its helper_type and helper_id.",
+        "cap": "cap_helper_write",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "helper_type": {"type": "string"},
+                "helper_id": {"type": "string"},
+            },
+            "required": ["helper_type", "helper_id"],
+        },
+    },
+    {
+        "name": "watch_entity",
+        "description": (
+            "Wait (up to timeout seconds, max 30) for an accessible entity to change state, then return "
+            "the new state. Use to verify the effect of an action you just took. Returns changed=false if "
+            "nothing changed within the window. Blocks the call until a change or the timeout."
+        ),
+        "cap": "cap_config_read",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "entity_id": {"type": "string"},
+                "timeout": {"type": "integer", "minimum": 1, "maximum": 30, "default": 30},
+            },
+            "required": ["entity_id"],
+        },
+    },
+    {
+        "name": "subscribe_event",
+        "description": (
+            "Wait (up to timeout seconds, max 30) for a Home Assistant bus event of the given type, then "
+            "return it. Entity IDs in the event data that this token cannot access are redacted. "
+            "High-volume/sensitive event types (state_changed, call_service) cannot be subscribed to."
+        ),
+        "cap": "cap_config_read",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "event_type": {"type": "string"},
+                "timeout": {"type": "integer", "minimum": 1, "maximum": 30, "default": 30},
+            },
+            "required": ["event_type"],
         },
     },
 ]
@@ -4067,6 +4172,247 @@ async def _execute_delete_scene(
     return _tool_success(f"Scene '{scene_id}' deleted successfully."), "allowed", "delete_scene"
 
 
+# ---------------------------------------------------------------------------
+# Helper CRUD (cap_helper_write) via in-process WS command dispatch
+# ---------------------------------------------------------------------------
+
+
+def _valid_helper_type(helper_type: Any) -> bool:
+    return isinstance(helper_type, str) and helper_type in HELPER_TYPES
+
+
+async def _tool_list_helpers(
+    args: dict, token: TokenRecord, hass: Any
+) -> tuple[dict, str, str]:
+    """MCP tool: list accessible helper entities with their editable helper id."""
+    if effective_cap(token, "cap_registry_read") == CAP_DENY:
+        return _tool_error("Forbidden."), "denied", "list_helpers"
+    type_filter = args.get("helper_type")
+    registry = er.async_get(hass)
+    helpers: list[dict] = []
+    for e in filter_entities_for_token(hass.states.async_all(), token, hass):
+        domain = e["entity_id"].split(".")[0]
+        if domain not in HELPER_TYPES:
+            continue
+        if type_filter and domain != type_filter:
+            continue
+        entry = registry.async_get(e["entity_id"])
+        helpers.append({
+            "entity_id": e["entity_id"],
+            "helper_type": domain,
+            "name": e.get("attributes", {}).get("friendly_name"),
+            "helper_id": entry.unique_id if entry is not None else None,
+        })
+    helpers.sort(key=lambda h: h["entity_id"])
+    return _tool_success(json.dumps({"count": len(helpers), "helpers": helpers}, default=str)), "allowed", "list_helpers"
+
+
+async def _tool_create_helper(
+    args: dict, token: TokenRecord, hass: Any, data: ATMData,
+    request_id: str = "", client_ip: str | None = None,
+) -> tuple[dict, str, str]:
+    """MCP tool: create a helper (Confirm-gated)."""
+    blocked = await _gate(
+        "cap_helper_write", token, hass, data,
+        tool_name="create_helper", args=args, request_id=request_id,
+        client_ip=client_ip, diff=_build_diff_create_helper(args, token, hass),
+    )
+    if blocked is not None:
+        return blocked
+    return await _execute_create_helper(args, token, hass, data)
+
+
+async def _execute_create_helper(
+    args: dict, token: TokenRecord, hass: Any, data: ATMData
+) -> tuple[dict, str, str]:
+    helper_type = args.get("helper_type")
+    config = args.get("config")
+    if not _valid_helper_type(helper_type):
+        return _tool_error(f"helper_type must be one of: {', '.join(sorted(HELPER_TYPES))}."), "invalid_request", "create_helper"
+    if not isinstance(config, dict) or not config:
+        return _tool_error("config must be a non-empty object (at least 'name')."), "invalid_request", "create_helper"
+    try:
+        item = await async_ws_command(hass, f"{helper_type}/create", dict(config))
+    except WsDispatchError as exc:
+        return _tool_error(f"Failed to create helper: {exc}"), "invalid_request", "create_helper"
+    return _tool_success(json.dumps({"helper_type": helper_type, "helper": item}, default=str)), "allowed", f"helper:{helper_type}"
+
+
+async def _tool_edit_helper(
+    args: dict, token: TokenRecord, hass: Any, data: ATMData,
+    request_id: str = "", client_ip: str | None = None,
+) -> tuple[dict, str, str]:
+    """MCP tool: edit a helper (Confirm-gated)."""
+    blocked = await _gate(
+        "cap_helper_write", token, hass, data,
+        tool_name="edit_helper", args=args, request_id=request_id,
+        client_ip=client_ip, diff=_build_diff_edit_helper(args, token, hass),
+    )
+    if blocked is not None:
+        return blocked
+    return await _execute_edit_helper(args, token, hass, data)
+
+
+async def _execute_edit_helper(
+    args: dict, token: TokenRecord, hass: Any, data: ATMData
+) -> tuple[dict, str, str]:
+    helper_type = args.get("helper_type")
+    helper_id = str(args.get("helper_id") or "").strip()
+    config = args.get("config")
+    if not _valid_helper_type(helper_type):
+        return _tool_error(f"helper_type must be one of: {', '.join(sorted(HELPER_TYPES))}."), "invalid_request", "edit_helper"
+    if not helper_id:
+        return _tool_error("helper_id is required."), "invalid_request", "edit_helper"
+    if not isinstance(config, dict):
+        return _tool_error("config must be an object."), "invalid_request", "edit_helper"
+    payload = {f"{helper_type}_id": helper_id, **config}
+    try:
+        item = await async_ws_command(hass, f"{helper_type}/update", payload)
+    except WsDispatchError as exc:
+        return _tool_error(f"Failed to edit helper: {exc}"), "invalid_request", "edit_helper"
+    return _tool_success(json.dumps({"helper_type": helper_type, "helper": item}, default=str)), "allowed", f"helper:{helper_type}:{helper_id}"
+
+
+async def _tool_delete_helper(
+    args: dict, token: TokenRecord, hass: Any, data: ATMData,
+    request_id: str = "", client_ip: str | None = None,
+) -> tuple[dict, str, str]:
+    """MCP tool: delete a helper (Confirm-gated)."""
+    blocked = await _gate(
+        "cap_helper_write", token, hass, data,
+        tool_name="delete_helper", args=args, request_id=request_id,
+        client_ip=client_ip, diff=_build_diff_delete_helper(args, token, hass),
+    )
+    if blocked is not None:
+        return blocked
+    return await _execute_delete_helper(args, token, hass, data)
+
+
+async def _execute_delete_helper(
+    args: dict, token: TokenRecord, hass: Any, data: ATMData
+) -> tuple[dict, str, str]:
+    helper_type = args.get("helper_type")
+    helper_id = str(args.get("helper_id") or "").strip()
+    if not _valid_helper_type(helper_type):
+        return _tool_error(f"helper_type must be one of: {', '.join(sorted(HELPER_TYPES))}."), "invalid_request", "delete_helper"
+    if not helper_id:
+        return _tool_error("helper_id is required."), "invalid_request", "delete_helper"
+    try:
+        await async_ws_command(hass, f"{helper_type}/delete", {f"{helper_type}_id": helper_id})
+    except WsDispatchError as exc:
+        return _tool_error(f"Failed to delete helper: {exc}"), "invalid_request", "delete_helper"
+    return _tool_success(f"Helper '{helper_id}' deleted successfully."), "allowed", f"helper:{helper_type}:{helper_id}"
+
+
+# ---------------------------------------------------------------------------
+# Bounded subscriptions (cap_config_read): watch_entity / subscribe_event
+# ---------------------------------------------------------------------------
+
+# Event types that are a firehose or carry cross-entity / service data and so
+# must not be subscribable (state_changed would stream every entity's changes;
+# call_service would reveal all service calls regardless of token scope).
+_SUBSCRIBE_EVENT_DENYLIST = frozenset({
+    "state_changed", "call_service", "service_registered", "service_removed",
+    "state_reported", "entity_registry_updated", "device_registry_updated",
+    "area_registry_updated", "core_config_updated", "logbook_entry",
+})
+
+
+def _clamp_timeout(value: Any) -> int:
+    try:
+        seconds = int(value)
+    except (TypeError, ValueError):
+        seconds = MAX_SUBSCRIPTION_SECONDS
+    return max(1, min(seconds, MAX_SUBSCRIPTION_SECONDS))
+
+
+async def _tool_watch_entity(
+    args: dict, token: TokenRecord, hass: Any
+) -> tuple[dict, str, str]:
+    """MCP tool: block until an accessible entity changes state, or until timeout."""
+    if effective_cap(token, "cap_config_read") == CAP_DENY:
+        return _tool_error("Forbidden."), "denied", "watch_entity"
+
+    entity_id = args.get("entity_id", "")
+    if not entity_id:
+        return _tool_error("Missing required argument: entity_id"), "invalid_request", "watch_entity"
+    if resolve(entity_id, token, hass) not in (Permission.READ, Permission.WRITE):
+        return _tool_error("Entity not found."), "not_found", entity_id
+
+    timeout = _clamp_timeout(args.get("timeout", MAX_SUBSCRIPTION_SECONDS))
+    future: asyncio.Future = hass.loop.create_future()
+
+    @callback
+    def _on_change(event: Any) -> None:
+        if not future.done():
+            future.set_result(event.data.get("new_state"))
+
+    unsub = async_track_state_change_event(hass, [entity_id], _on_change)
+    try:
+        new_state = await asyncio.wait_for(future, timeout)
+    except TimeoutError:
+        return (
+            _tool_success(json.dumps({"entity_id": entity_id, "changed": False, "timeout_seconds": timeout})),
+            "allowed", entity_id,
+        )
+    finally:
+        unsub()
+
+    if new_state is None:
+        body = {"entity_id": entity_id, "changed": True, "removed": True}
+    else:
+        scrubbed = scrub_sensitive_attributes(new_state)
+        body = {
+            "entity_id": entity_id,
+            "changed": True,
+            "state": scrubbed.get("state"),
+            "attributes": scrubbed.get("attributes"),
+            "when": getattr(new_state, "last_changed", None),
+        }
+    return _tool_success(json.dumps(body, default=str)), "allowed", entity_id
+
+
+async def _tool_subscribe_event(
+    args: dict, token: TokenRecord, hass: Any
+) -> tuple[dict, str, str]:
+    """MCP tool: block until a bus event of the given type fires, or until timeout.
+
+    Entity IDs in the event data the token cannot access are redacted; firehose
+    and cross-scope event types are refused.
+    """
+    if effective_cap(token, "cap_config_read") == CAP_DENY:
+        return _tool_error("Forbidden."), "denied", "subscribe_event"
+
+    event_type = args.get("event_type", "")
+    if not event_type or not isinstance(event_type, str):
+        return _tool_error("Missing required argument: event_type"), "invalid_request", "subscribe_event"
+    if event_type in _SUBSCRIBE_EVENT_DENYLIST:
+        return _tool_error("This event type cannot be subscribed to."), "denied", event_type
+
+    timeout = _clamp_timeout(args.get("timeout", MAX_SUBSCRIPTION_SECONDS))
+    future: asyncio.Future = hass.loop.create_future()
+
+    @callback
+    def _on_event(event: Any) -> None:
+        if not future.done():
+            future.set_result(event)
+
+    unsub = hass.bus.async_listen(event_type, _on_event)
+    try:
+        event = await asyncio.wait_for(future, timeout)
+    except TimeoutError:
+        return (
+            _tool_success(json.dumps({"event_type": event_type, "fired": False, "timeout_seconds": timeout})),
+            "allowed", event_type,
+        )
+    finally:
+        unsub()
+
+    redacted = filter_service_response(dict(event.data), token, hass)
+    body = {"event_type": event_type, "fired": True, "data": redacted}
+    return _tool_success(json.dumps(body, default=str)), "allowed", event_type
+
+
 async def _call_tool(
     tool_name: str,
     arguments: dict,
@@ -4201,6 +4547,18 @@ async def _call_tool(
         return await _tool_edit_scene(arguments, token, hass, data, request_id, client_ip)
     if tool_name == "delete_scene":
         return await _tool_delete_scene(arguments, token, hass, data, request_id, client_ip)
+    if tool_name == "list_helpers":
+        return await _tool_list_helpers(arguments, token, hass)
+    if tool_name == "create_helper":
+        return await _tool_create_helper(arguments, token, hass, data, request_id, client_ip)
+    if tool_name == "edit_helper":
+        return await _tool_edit_helper(arguments, token, hass, data, request_id, client_ip)
+    if tool_name == "delete_helper":
+        return await _tool_delete_helper(arguments, token, hass, data, request_id, client_ip)
+    if tool_name == "watch_entity":
+        return await _tool_watch_entity(arguments, token, hass)
+    if tool_name == "subscribe_event":
+        return await _tool_subscribe_event(arguments, token, hass)
     return _tool_error(f"Unknown tool: {tool_name}"), "denied", tool_name
 
 
@@ -5186,6 +5544,45 @@ def _build_diff_delete_scene(args: dict, token: TokenRecord, hass: Any) -> dict:
     }
 
 
+def _build_diff_create_helper(args: dict, token: TokenRecord, hass: Any) -> dict:
+    helper_type = args.get("helper_type")
+    config = args.get("config") if isinstance(args.get("config"), dict) else {}
+    return {
+        "kind": "config_diff",
+        "summary": f"Create {helper_type} helper '{config.get('name', '<no name>')}'",
+        "target": {"type": "helper", "id": None, "label": config.get("name")},
+        "before": None,
+        "after": _truncate(json.dumps(config, indent=2, default=str)),
+        "preview": {"helper_type": helper_type},
+    }
+
+
+def _build_diff_edit_helper(args: dict, token: TokenRecord, hass: Any) -> dict:
+    helper_type = args.get("helper_type")
+    helper_id = str(args.get("helper_id") or "").strip()
+    config = args.get("config") if isinstance(args.get("config"), dict) else {}
+    return {
+        "kind": "yaml_diff",
+        "summary": f"Edit {helper_type} helper '{helper_id}'",
+        "target": {"type": "helper", "id": helper_id, "label": config.get("name")},
+        "before": None,
+        "after": _truncate(json.dumps(config, indent=2, default=str)),
+        "preview": {"helper_type": helper_type},
+    }
+
+
+def _build_diff_delete_helper(args: dict, token: TokenRecord, hass: Any) -> dict:
+    helper_type = args.get("helper_type")
+    helper_id = str(args.get("helper_id") or "").strip()
+    return {
+        "kind": "system_action",
+        "summary": f"Delete {helper_type} helper '{helper_id}'",
+        "target": {"type": "helper", "id": helper_id, "label": helper_id},
+        "before": None,
+        "preview": {"helper_type": helper_type, "warning": "This helper will be removed permanently."},
+    }
+
+
 def _build_diff_create_script(args: dict, token: TokenRecord, hass: Any) -> dict:
     script_id = (args.get("script_id") or "").strip()
     config = args.get("config") if isinstance(args.get("config"), dict) else {}
@@ -5317,6 +5714,9 @@ _register_executor("delete_script", _execute_delete_script)
 _register_executor("create_scene", _execute_create_scene)
 _register_executor("edit_scene", _execute_edit_scene)
 _register_executor("delete_scene", _execute_delete_scene)
+_register_executor("create_helper", _execute_create_helper)
+_register_executor("edit_helper", _execute_edit_helper)
+_register_executor("delete_helper", _execute_delete_helper)
 _register_executor("HassSetPosition", _execute_hass_set_position)
 _register_executor("HassStopMoving", _execute_hass_stop_moving)
 _register_executor("HassTurnOn", _execute_hass_turn_on)

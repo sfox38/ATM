@@ -163,9 +163,10 @@ ATM implements all 20 native HA MCP tools using the same tool names and response
 |---|---|
 | `search_entities` / `get_overview` / `describe_area` / `find_available_actions` / `get_relationships` / `describe_entity` | `cap_search` |
 | `whatif` / `compare_state` / `recent_activity` / `dry_run_service` | `cap_search` |
-| `list_areas` / `list_floors` / `list_zones` / `list_devices` / `get_device` | `cap_registry_read` |
+| `list_areas` / `list_floors` / `list_zones` / `list_devices` / `get_device` / `list_scenes` / `list_helpers` | `cap_registry_read` |
 | `get_automation_traces` | `cap_traces` |
 | `get_system_health` / `check_config` / `validate_config` | `cap_diagnostics` |
+| `watch_entity` / `subscribe_event` | `cap_config_read` (bounded blocking, max 30s) |
 | `get_capability_summary` / `get_audit_summary` | none (own data only) |
 
 **System tools** - gated by capabilities:
@@ -179,6 +180,8 @@ ATM implements all 20 native HA MCP tools using the same tool names and response
 | `HassBroadcast` - announce a message via assist satellite devices | `cap_broadcast` |
 | `create_automation` / `edit_automation` / `delete_automation` | `cap_automation_write` |
 | `create_script` / `edit_script` / `delete_script` | `cap_script_write` |
+| `create_scene` / `edit_scene` / `delete_scene` | `cap_scene_write` |
+| `create_helper` / `edit_helper` / `delete_helper` | `cap_helper_write` |
 
 **MCP Prompts** - same prompt protocol as the native HA MCP server:
 

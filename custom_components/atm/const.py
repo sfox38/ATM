@@ -240,3 +240,7 @@ MAX_HISTORY_RANGE_DAYS = 7
 # Maximum number of log entries returned by the logs endpoint/tool.
 MAX_LOG_ENTRIES = 100
 
+# Hard cap (and default) for the bounded watch_entity / subscribe_event tools.
+# These block the tool call up to this many seconds waiting for a change/event.
+MAX_SUBSCRIPTION_SECONDS = 30
+

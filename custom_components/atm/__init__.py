@@ -128,6 +128,18 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         _LOGGER.exception("ATM: MESA runtime setup failed; MESA disabled this session")
         data.mesa = None
 
+    # Surface, once at startup, any HA-internal drift that would break the
+    # in-process WS dispatch used by helper CRUD. Per-call failures still
+    # degrade to a clean error; this just makes the cause visible early.
+    from .ws_dispatch import check_ws_dispatch_compat
+    _ws_incompat = check_ws_dispatch_compat(hass)
+    if _ws_incompat is not None:
+        _LOGGER.warning(
+            "ATM: in-process WebSocket dispatch may be incompatible with this HA "
+            "version (%s); helper CRUD tools may be unavailable.",
+            _ws_incompat,
+        )
+
     from .admin_view import ALL_ADMIN_VIEWS
     for view_cls in ALL_ADMIN_VIEWS:
         view = view_cls()
