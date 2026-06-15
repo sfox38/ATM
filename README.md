@@ -153,21 +153,30 @@ ATM implements all 20 native HA MCP tools using the same tool names and response
 |---|---|
 | `get_state` | Current state of one entity |
 | `get_states` | All accessible entity states |
-| `get_history` | State history (supports `24h`, `7d`, `2w`, `1m`) |
+| `get_history` | State history (`24h`, `7d`, `2w`, `1m`; `mode` defaults to `transitions`, `raw` opt-in) |
 | `get_statistics` | Long-term statistics for numeric entities |
 | `call_service` | Call any HA service by domain and name |
 
-**System tools** - gated by capability flags:
+**Discovery, registry & diagnostics tools** - read-only, scoped to the token's accessible entities:
 
-| Tool | Requires flag |
+| Tool | Requires capability |
 |---|---|
-| `render_template` | `allow_template_render` |
-| `get_config` | `allow_config_read` |
-| `restart_ha` | `allow_restart` |
-| `get_logs` | `allow_log_read` |
-| `HassBroadcast` - announce a message via assist satellite devices | `allow_broadcast` |
-| `create_automation` / `edit_automation` / `delete_automation` | `allow_automation_write` |
-| `create_script` / `edit_script` / `delete_script` | `allow_script_write` |
+| `search_entities` / `get_overview` / `describe_area` / `find_available_actions` / `get_relationships` / `describe_entity` | `cap_search` |
+| `list_areas` / `list_floors` / `list_zones` / `list_devices` / `get_device` | `cap_registry_read` |
+| `get_automation_traces` | `cap_traces` |
+| `get_system_health` / `check_config` | `cap_diagnostics` |
+
+**System tools** - gated by capabilities:
+
+| Tool | Requires capability |
+|---|---|
+| `render_template` | `cap_template_render` |
+| `get_config` | `cap_config_read` |
+| `restart_ha` | `cap_restart` |
+| `get_logs` | `cap_log_read` |
+| `HassBroadcast` - announce a message via assist satellite devices | `cap_broadcast` |
+| `create_automation` / `edit_automation` / `delete_automation` | `cap_automation_write` |
+| `create_script` / `edit_script` / `delete_script` | `cap_script_write` |
 
 **MCP Prompts** - same prompt protocol as the native HA MCP server:
 
@@ -271,8 +280,8 @@ Call any HA service. Requires appropriate permission for the target entities.
 - `device_id` and `area_id` are expanded to explicit entity lists before calling HA. Denied entities are silently excluded.
 - If all entities in the call resolve to denied, returns 403.
 - Service responses are scanned for entity IDs. Any inaccessible ID is replaced with `<redacted>`.
-- Physical control services (lock, alarm, cover mutation) require `allow_physical_control` flag even with WRITE permission.
-- Restart and stop services require `allow_restart` flag.
+- Physical control services (lock, alarm, cover mutation) require `cap_physical_control` flag even with WRITE permission.
+- Restart and stop services require `cap_restart` flag.
 
 **Returns:** Service response data (if the service declares a response schema). Some services return nothing.
 
@@ -281,7 +290,7 @@ Call any HA service. Requires appropriate permission for the target entities.
 ### Configuration and Diagnostics
 
 #### `get_config`
-Read HA configuration data. Requires `allow_config_read` flag.
+Read HA configuration data. Requires `cap_config_read` flag.
 
 **Parameters:** None
 
@@ -290,7 +299,7 @@ Read HA configuration data. Requires `allow_config_read` flag.
 ---
 
 #### `get_logs`
-Read recent HA system log entries. Requires `allow_log_read` flag. ATM's own log entries are always excluded. Token values are scrubbed from messages and tracebacks.
+Read recent HA system log entries. Requires `cap_log_read` flag. ATM's own log entries are always excluded. Token values are scrubbed from messages and tracebacks.
 
 **Parameters:**
 - `limit` (integer, optional) - Number of entries to return. Defaults to 50. Max 100.
@@ -301,7 +310,7 @@ Read recent HA system log entries. Requires `allow_log_read` flag. ATM's own log
 ---
 
 #### `render_template`
-Render a Jinja2 template with access to HA state. Requires `allow_template_render` flag. The template environment is permission-scoped - templates can only access entities the token has READ or WRITE permission for.
+Render a Jinja2 template with access to HA state. Requires `cap_template_render` flag. The template environment is permission-scoped - templates can only access entities the token has READ or WRITE permission for.
 
 **Parameters:**
 - `template` (string, required) - Jinja2 template string
@@ -310,10 +319,50 @@ Render a Jinja2 template with access to HA state. Requires `allow_template_rende
 
 ---
 
+### Discovery, Registry & Diagnostics
+
+All of these are read-only and scoped to the entities the token can access. Per-object lookups (`get_device`, `describe_area`, `describe_entity`, `get_relationships`, `get_automation_traces`) return an identical "not found" for a missing object and one the token cannot access, so they cannot be used to probe for existence.
+
+#### `search_entities`
+Filter accessible entities. Requires `cap_search`. This is state/registry/name search; for semantic/profile search (tags, classification, control mode) use `mesa_query_profiles`.
+
+**Parameters (all optional):** `query` (substring of entity_id or friendly name), `domain` (string or list), `area` (name or area_id), `device_class`, `state`, `unavailable` (boolean), `stale_hours` (number), `limit` (default 100, max 500).
+
+**Returns:** `{count, truncated, entities: [{entity_id, state, friendly_name, domain, area, device_class}]}`.
+
+#### `get_overview`
+Compact home summary. Requires `cap_search`. Returns total accessible entities, counts by domain and by area, and the unavailable count.
+
+#### `describe_area`
+One area, its floor, and accessible entities grouped by domain. Requires `cap_search`. **Parameters:** `area` (name, alias, or area_id).
+
+#### `describe_entity`
+Comprehension summary of one entity: state, area, the services in its domain, what references it, and its MESA `control_mode` when MESA is active. Requires `cap_search`. For the full semantic profile use `mesa_get_profile` (`cap_config_read`). **Parameters:** `entity_id`.
+
+#### `find_available_actions`
+The services in an entity's domain and whether the token can invoke each now (write access, physical/dual gates), plus the entity's MESA `control_mode`. Requires `cap_search`. **Parameters:** `entity_id`.
+
+#### `get_relationships`
+Reverse references (automations/scripts/scenes that reference the entity) and forward references (entities an automation or script references, scoped to what the token can access). Requires `cap_search`. **Parameters:** `entity_id`.
+
+#### `list_areas` / `list_floors` / `list_zones` / `list_devices` / `get_device`
+Registry enumeration restricted to areas/floors/zones/devices that contain at least one accessible entity. Requires `cap_registry_read`. `get_device` takes a `device_id` and returns the device plus its accessible entities.
+
+#### `get_automation_traces`
+Execution traces for an accessible automation. Requires `cap_traces`. **Parameters:** `automation_id` (entity_id or id), optional `run_id`, optional `summary` (boolean, highlights the error and last step).
+
+#### `get_system_health`
+HA version and per-integration system health. Requires `cap_diagnostics`.
+
+#### `check_config`
+Validate the HA configuration files. Requires `cap_diagnostics`. Returns `{valid, errors, warnings}`.
+
+---
+
 ### Automation and Script Management
 
 #### `create_automation`
-Create a new automation in `automations.yaml`. Requires `allow_automation_write` flag. This tool does NOT consult the Permissions Tree - it writes to YAML directly.
+Create a new automation in `automations.yaml`. Requires `cap_automation_write` flag. This tool does NOT consult the Permissions Tree - it writes to YAML directly.
 
 **Parameters:**
 - `alias` (string, required) - Automation friendly name
@@ -329,7 +378,7 @@ Create a new automation in `automations.yaml`. Requires `allow_automation_write`
 ---
 
 #### `edit_automation`
-Edit an existing automation. Requires `allow_automation_write` flag and valid automation ID.
+Edit an existing automation. Requires `cap_automation_write` flag and valid automation ID.
 
 **Parameters:**
 - `automation_id` (string, required) - Automation ID (the slug)
@@ -340,7 +389,7 @@ Edit an existing automation. Requires `allow_automation_write` flag and valid au
 ---
 
 #### `delete_automation`
-Delete an automation. Requires `allow_automation_write` flag.
+Delete an automation. Requires `cap_automation_write` flag.
 
 **Parameters:**
 - `automation_id` (string, required) - Automation ID to delete
@@ -350,7 +399,7 @@ Delete an automation. Requires `allow_automation_write` flag.
 ---
 
 #### `create_script`
-Create a new script in `scripts.yaml`. Requires `allow_script_write` flag. This tool does NOT consult the Permissions Tree.
+Create a new script in `scripts.yaml`. Requires `cap_script_write` flag. This tool does NOT consult the Permissions Tree.
 
 **Parameters:**
 - `script_id` (string, required) - Script slug (lowercase alphanumeric and underscore only)
@@ -367,7 +416,7 @@ Create a new script in `scripts.yaml`. Requires `allow_script_write` flag. This 
 ---
 
 #### `edit_script`
-Edit an existing script. Requires `allow_script_write` flag and valid script ID.
+Edit an existing script. Requires `cap_script_write` flag and valid script ID.
 
 **Parameters:**
 - `script_id` (string, required) - Script ID (the slug)
@@ -378,7 +427,7 @@ Edit an existing script. Requires `allow_script_write` flag and valid script ID.
 ---
 
 #### `delete_script`
-Delete a script. Requires `allow_script_write` flag.
+Delete a script. Requires `cap_script_write` flag.
 
 **Parameters:**
 - `script_id` (string, required) - Script ID to delete
@@ -390,7 +439,7 @@ Delete a script. Requires `allow_script_write` flag.
 ### System and Control
 
 #### `restart_ha`
-Restart Home Assistant. Requires `allow_restart` flag. This is a pass-through-exempt capability - even pass-through tokens must have this flag enabled.
+Restart Home Assistant. Requires `cap_restart` flag. This is a pass-through-exempt capability - even pass-through tokens must have this flag enabled.
 
 **Parameters:** None
 
@@ -539,7 +588,7 @@ Stop a moving cover or similar device.
 ---
 
 #### `HassBroadcast`
-Send an announcement through Assist satellite devices. Requires `allow_broadcast` flag.
+Send an announcement through Assist satellite devices. Requires `cap_broadcast` flag.
 
 **Parameters:**
 - `message` (string, required) - Message to announce
@@ -681,29 +730,40 @@ Some operations require explicit opt-in even for tokens with 🟢 GREEN domain a
 
 | Flag | What it enables | Pass-through exempt |
 |---|---|---|
-| `allow_restart` | `homeassistant.restart` and `homeassistant.stop` | yes |
-| `allow_physical_control` | Lock, alarm, and cover mutation services (e.g. `lock.unlock`, `alarm_control_panel.alarm_disarm`, `cover.open_cover`) | yes |
-| `allow_automation_write` | Creating, editing, and deleting automations via the MCP tools. See security note below. | yes |
-| `allow_script_write` | Creating, editing, and deleting scripts via the MCP tools. See security note below. | yes |
-| `allow_config_read` | Reading HA configuration data and the event bus listener list | no |
-| `allow_template_render` | Rendering Jinja2 templates (permission-scoped environment) | no |
-| `allow_service_response` | Return response data from services that support it (e.g. `conversation.process`). Silently omitted for services that do not declare a response schema. | no |
-| `allow_broadcast` | Sending announcements via the `HassBroadcast` MCP tool through assist satellite devices | no |
-| `allow_log_read` | Reading HA system log entries via the `get_logs` MCP tool and `GET /api/atm/logs`. Logs may contain IP addresses and operational details. ATM's own entries are always excluded and token values are scrubbed from messages and tracebacks. | yes |
+| `cap_restart` | `homeassistant.restart` and `homeassistant.stop` | yes |
+| `cap_physical_control` | Lock, alarm, and cover mutation services (e.g. `lock.unlock`, `alarm_control_panel.alarm_disarm`, `cover.open_cover`) | yes |
+| `cap_automation_write` | Creating, editing, and deleting automations via the MCP tools. See security note below. | yes |
+| `cap_script_write` | Creating, editing, and deleting scripts via the MCP tools. See security note below. | yes |
+| `cap_config_read` | Reading HA configuration data and the event bus listener list | no |
+| `cap_template_render` | Rendering Jinja2 templates (permission-scoped environment) | no |
+| `cap_service_response` | Return response data from services that support it (e.g. `conversation.process`). Silently omitted for services that do not declare a response schema. | no |
+| `cap_broadcast` | Sending announcements via the `HassBroadcast` MCP tool through assist satellite devices | no |
+| `cap_log_read` | Reading HA system log entries via the `get_logs` MCP tool and `GET /api/atm/logs`. Logs may contain IP addresses and operational details. ATM's own entries are always excluded and token values are scrubbed from messages and tracebacks. | yes |
+| `cap_search` | Discovery and comprehension reads: `search_entities`, `get_overview`, `describe_area`, `describe_entity`, `find_available_actions`, `get_relationships` | no |
+| `cap_registry_read` | Registry enumeration: `list_areas`, `list_floors`, `list_zones`, `list_devices`, `get_device` | no |
+| `cap_traces` | Reading automation execution traces via `get_automation_traces` | no |
+| `cap_diagnostics` | `get_system_health`, `check_config` (and `validate_config` when added) | no |
+| `cap_scene_write` | Creating, editing, and deleting scenes (Confirm-eligible) | yes |
+| `cap_helper_write` | Creating, editing, and deleting helpers (Confirm-eligible) | yes |
+| `cap_integration_write` | Enabling and disabling integrations (Confirm-eligible) | yes |
+| `cap_lovelace_write` | Creating, editing, and deleting dashboards (Confirm-eligible) | yes |
+| `cap_backup` | Creating and restoring backups (Confirm-eligible) | yes |
+| `cap_filesystem` | Reading and writing files under `www/`, `themes/`, `custom_templates/` (Confirm-eligible) | yes |
+| `cap_yaml_edit` | Editing `configuration.yaml` directly (Confirm-eligible) | yes |
 
-The five pass-through-exempt flags (`allow_restart`, `allow_physical_control`, `allow_automation_write`, `allow_script_write`, `allow_log_read`) must be explicitly enabled even for pass-through tokens. All other flags are bypassed by pass-through tokens.
+The pass-through-exempt capabilities (the write, system, and irreversible caps plus `cap_log_read`) must be explicitly enabled even for pass-through tokens. The read-tier discovery caps and the other reads are bypassed (granted) by pass-through tokens. A cap set to `confirm` is gated even under pass-through. Capabilities marked Confirm-eligible can be set to `deny` / `allow` / `confirm`; the others are `deny` / `allow` only. Several of these caps gate tools that are still being rolled out; see the changelog in SPEC.md for current tool availability.
 
 ### Automation and script write flags
 
-`allow_automation_write` and `allow_script_write` are elevated-trust capabilities. Enable them only for tokens held by clients you fully trust and control.
+`cap_automation_write` and `cap_script_write` are elevated-trust capabilities. Enable them only for tokens held by clients you fully trust and control.
 
-**These flags are all-or-nothing.** The automation and script write tools (`create_automation`, `edit_automation`, `delete_automation`, `create_script`, `edit_script`, `delete_script`) write directly to `automations.yaml` and `scripts.yaml`. They do not consult the token's Permissions Tree. A client with `allow_automation_write` enabled can write an automation referencing any entity in Home Assistant, regardless of what the token is permitted to access directly via `get_state` or `call_service`.
+**These flags are all-or-nothing.** The automation and script write tools (`create_automation`, `edit_automation`, `delete_automation`, `create_script`, `edit_script`, `delete_script`) write directly to `automations.yaml` and `scripts.yaml`. They do not consult the token's Permissions Tree. A client with `cap_automation_write` enabled can write an automation referencing any entity in Home Assistant, regardless of what the token is permitted to access directly via `get_state` or `call_service`.
 
 **The Permissions Tree cannot restrict automation/script write.** Setting the `automation` or `script` domain to READ or DENY in the Permissions Tree has no effect on these MCP tools. A DENY on `automation.*` only blocks entity-scoped operations (reading automation entity state, calling `automation.trigger`). It does not prevent the write tools from creating or modifying automation YAML.
 
 **Triggered actions run outside ATM.** An automation or script created through ATM is triggered by HA's own automation engine, which runs under HA's own context, not ATM's. Permission checks do not apply to the actions taken when a triggered automation runs.
 
-In practice, a token with a narrow entity scope but `allow_automation_write` enabled could - through a crafted automation - indirectly control entities it cannot access directly. Only enable these flags for clients you would trust with broad HA access.
+In practice, a token with a narrow entity scope but `cap_automation_write` enabled could - through a crafted automation - indirectly control entities it cannot access directly. Only enable these flags for clients you would trust with broad HA access.
 
 ---
 
@@ -716,13 +776,14 @@ Pass-through does NOT bypass:
 - The `atm` domain blocklist
 - Sensitive attribute scrubbing
 - Rate limiting
-- `allow_restart` - calling `homeassistant.restart` or `homeassistant.stop` still requires this flag.
-- `allow_physical_control` - lock, alarm, and cover mutation services still require this flag.
-- `allow_automation_write` - creating, editing, or deleting automations still requires this flag.
-- `allow_script_write` - creating, editing, or deleting scripts still requires this flag.
-- `allow_log_read` - reading HA system log entries still requires this flag.
+- `cap_restart` - calling `homeassistant.restart` or `homeassistant.stop` still requires this flag.
+- `cap_physical_control` - lock, alarm, and cover mutation services still require this flag.
+- `cap_automation_write` - creating, editing, or deleting automations still requires this flag.
+- `cap_script_write` - creating, editing, or deleting scripts still requires this flag.
+- `cap_log_read` - reading HA system log entries still requires this flag.
+- The newer write and risky caps (`cap_scene_write`, `cap_helper_write`, `cap_integration_write`, `cap_lovelace_write`, `cap_backup`, `cap_filesystem`, `cap_yaml_edit`) are likewise always evaluated.
 
-These five flags must always be explicitly enabled regardless of pass-through mode. All other capability flags (`allow_config_read`, `allow_template_render`, `allow_service_response`, `allow_broadcast`) are bypassed.
+These exempt caps must be explicitly enabled regardless of pass-through mode. All other capabilities (e.g. `cap_config_read`, `cap_template_render`, `cap_service_response`, `cap_broadcast`, `cap_search`, `cap_registry_read`, `cap_traces`, `cap_diagnostics`) are bypassed. A cap set to `confirm` is still gated even under pass-through.
 
 The ATM panel shows a confirmation dialog before enabling pass-through on a token. When using the admin API directly, the PATCH request must include `"confirm_pass_through": true` alongside `"pass_through": true`. Omitting it returns a 400 error. Use pass-through only for tools you fully control. For anything externally hosted or shared, use the scoped Permissions Tree instead.
 
@@ -762,7 +823,7 @@ If `notify_on_rate_limit` is enabled in global settings, HA creates a persistent
 - If all entities in a service call resolve to denied, ATM returns 403 rather than calling HA with an empty list.
 - Service response data is scanned for entity IDs. Any entity ID the token cannot access is replaced with `"<redacted>"`.
 - If an entity ID in a service call does not exist in the HA entity registry, ATM returns 403. Entity creation via service calls is not permitted.
-- Physical control services (`lock.unlock`, `alarm_control_panel.alarm_disarm`, `cover.open_cover`, and related services) require `allow_physical_control` in addition to entity-level WRITE permission. This applies even to pass-through tokens.
+- Physical control services (`lock.unlock`, `alarm_control_panel.alarm_disarm`, `cover.open_cover`, and related services) require `cap_physical_control` in addition to entity-level WRITE permission. This applies even to pass-through tokens.
 - Automation and script write MCP tools bypass the Permissions Tree. Setting the `automation` or `script` domain to RED or YELLOW does not prevent these tools from writing YAML. See [Automation and script write flags](#automation-and-script-write-flags).
 
 ### Sensitive attributes stripping
