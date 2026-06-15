@@ -57,6 +57,7 @@ from .const import (
 )
 from .data import ATMData
 from .mesa import apply_mesa_to_call, entity_control_mode, fire_mesa_blocked_event
+from .mesa_core.trigger_validator import entities_by_role
 from .mesa_tools import MESA_TOOL_NAMES, call_mesa_tool, mesa_tool_defs
 from .helpers import (
     archive_expired_token,
@@ -175,6 +176,102 @@ def _yaml_file_has_includes(path: str) -> bool:
             return "!include" in f.read()
     except OSError:
         return False
+
+
+_SCENE_CONFIG_PATH = "scenes.yaml"
+
+
+def _read_scenes_yaml(path: str) -> list:
+    if not os.path.isfile(path):
+        return []
+    data = _load_yaml(path)
+    return data if isinstance(data, list) else []
+
+
+def _collect_entity_id_values(node: Any, found: set[str]) -> None:
+    """Collect entity_id values from a config subtree.
+
+    Identical in shape to mesa-core's private traversal, reused here (with the
+    user's one-time permission) only for scripts, which mesa-core does not model.
+    Automations go through the public entities_by_role instead, so the canonical
+    HA-format knowledge (singular/plural section keys) stays single-sourced.
+    """
+    if isinstance(node, dict):
+        for key, value in node.items():
+            if key == "entity_id":
+                if isinstance(value, str):
+                    found.add(value)
+                elif isinstance(value, list):
+                    found.update(v for v in value if isinstance(v, str))
+            else:
+                _collect_entity_id_values(value, found)
+    elif isinstance(node, list):
+        for item in node:
+            _collect_entity_id_values(item, found)
+
+
+def _references_for_entity(hass: Any, entity_id: str) -> list[dict]:
+    """Scope-agnostic reverse index: automations/scripts/scenes referencing entity_id.
+
+    Automations use mesa-core's canonical entities_by_role (by trigger/condition/
+    action role). Scripts and scenes are extracted by ATM (mesa-core does not
+    model them): scripts via entity_id collection, scenes via the entity keys
+    under their `entities` mapping. Callers apply their own token scoping.
+    """
+    refs: list[dict] = []
+
+    auto_path = os.path.join(hass.config.config_dir, _AUTOMATION_YAML)
+    for cfg in _read_automations_yaml(auto_path):
+        if not isinstance(cfg, dict):
+            continue
+        by_role = entities_by_role(cfg)
+        roles = sorted(role for role, ents in by_role.items() if entity_id in ents)
+        if roles:
+            refs.append({"kind": "automation", "id": str(cfg.get("id", "")), "name": cfg.get("alias"), "roles": roles})
+
+    scripts = _read_scripts_yaml(hass.config.path(_SCRIPT_CONFIG_PATH))
+    for script_id, cfg in scripts.items():
+        if not isinstance(cfg, dict):
+            continue
+        found: set[str] = set()
+        _collect_entity_id_values(cfg, found)
+        if entity_id in found:
+            refs.append({"kind": "script", "id": script_id, "name": cfg.get("alias"), "roles": ["sequence"]})
+
+    for scene in _read_scenes_yaml(hass.config.path(_SCENE_CONFIG_PATH)):
+        if not isinstance(scene, dict):
+            continue
+        members = scene.get("entities")
+        if isinstance(members, dict) and entity_id in members:
+            refs.append({"kind": "scene", "id": str(scene.get("id", "")), "name": scene.get("name"), "roles": ["member"]})
+
+    return refs
+
+
+def _forward_references(hass: Any, token: TokenRecord, entity_id: str) -> list[str]:
+    """Entities referenced by entity_id when it is an automation or script.
+
+    Scoped to entities the token can access, so an automation never reveals
+    targets outside the token's permission tree. Returns [] for other domains.
+    """
+    domain = entity_id.split(".")[0]
+    found: set[str] = set()
+    if domain == "automation":
+        entry = er.async_get(hass).async_get(entity_id)
+        unique_id = entry.unique_id if entry is not None else None
+        if unique_id is not None:
+            auto_path = os.path.join(hass.config.config_dir, _AUTOMATION_YAML)
+            for cfg in _read_automations_yaml(auto_path):
+                if isinstance(cfg, dict) and str(cfg.get("id", "")) == unique_id:
+                    for ents in entities_by_role(cfg).values():
+                        found.update(ents)
+                    break
+    elif domain == "script":
+        script_id = entity_id.split(".", 1)[1] if "." in entity_id else ""
+        cfg = _read_scripts_yaml(hass.config.path(_SCRIPT_CONFIG_PATH)).get(script_id)
+        if isinstance(cfg, dict):
+            _collect_entity_id_values(cfg, found)
+    return sorted(e for e in found if resolve(e, token, hass) in (Permission.READ, Permission.WRITE))
 
 
 _SCRIPT_ID_RE = re.compile(r"^[a-z0-9_]+$")
@@ -617,6 +714,38 @@ _SYSTEM_TOOL_DEFS: list[dict] = [
         "description": "Validate the Home Assistant configuration files and return any errors and warnings.",
         "cap": "cap_diagnostics",
         "inputSchema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "get_relationships",
+        "description": (
+            "Find how an accessible entity relates to automations, scripts, and scenes: which ones "
+            "reference it (referenced_by), and, if it is itself an automation or script, which "
+            "accessible entities it references (references). Returns 'not found' if not accessible."
+        ),
+        "cap": "cap_search",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "entity_id": {"type": "string", "description": "The entity to analyze."},
+            },
+            "required": ["entity_id"],
+        },
+    },
+    {
+        "name": "describe_entity",
+        "description": (
+            "A comprehension summary of one accessible entity: its state, area, the services in its "
+            "domain, what references it, and its MESA control_mode when MESA is active. For full "
+            "semantic profile data use mesa_get_profile (requires cap_config_read). 'not found' if not accessible."
+        ),
+        "cap": "cap_search",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "entity_id": {"type": "string", "description": "The entity to describe."},
+            },
+            "required": ["entity_id"],
+        },
     },
 ]
 
@@ -3154,6 +3283,70 @@ async def _tool_check_config(
     return _tool_success(json.dumps(body, default=str)), "allowed", "check_config"
 
 
+async def _tool_get_relationships(
+    args: dict, token: TokenRecord, hass: Any
+) -> tuple[dict, str, str]:
+    """MCP tool: reverse and forward references for an accessible entity."""
+    if effective_cap(token, "cap_search") == CAP_DENY:
+        return _tool_error("Forbidden."), "denied", "get_relationships"
+
+    entity_id = args.get("entity_id", "")
+    if not entity_id:
+        return _tool_error("Missing required argument: entity_id"), "invalid_request", "get_relationships"
+    if resolve(entity_id, token, hass) not in (Permission.READ, Permission.WRITE):
+        return _tool_error("Entity not found."), "not_found", entity_id
+
+    body = {
+        "entity_id": entity_id,
+        "referenced_by": _references_for_entity(hass, entity_id),
+        "references": _forward_references(hass, token, entity_id),
+    }
+    return _tool_success(json.dumps(body, default=str)), "allowed", entity_id
+
+
+async def _tool_describe_entity(
+    args: dict, token: TokenRecord, hass: Any, data: ATMData
+) -> tuple[dict, str, str]:
+    """MCP tool: comprehension summary of one accessible entity."""
+    if effective_cap(token, "cap_search") == CAP_DENY:
+        return _tool_error("Forbidden."), "denied", "describe_entity"
+
+    entity_id = args.get("entity_id", "")
+    if not entity_id:
+        return _tool_error("Missing required argument: entity_id"), "invalid_request", "describe_entity"
+
+    perm = resolve(entity_id, token, hass)
+    if perm not in (Permission.READ, Permission.WRITE):
+        return _tool_error("Entity not found."), "not_found", entity_id
+    state = hass.states.get(entity_id)
+    if state is None:
+        return _tool_error("Entity not found."), "not_found", entity_id
+
+    domain = entity_id.split(".")[0]
+    scrubbed = scrub_sensitive_attributes(state)
+    body: dict = {
+        "entity_id": entity_id,
+        "domain": domain,
+        "state": scrubbed.get("state"),
+        "attributes": scrubbed.get("attributes"),
+        "area": _area_name_for_entity(entity_id, er.async_get(hass), dr.async_get(hass), ar.async_get(hass)),
+        "writable": token.pass_through or perm == Permission.WRITE,
+        "domain_services": sorted(hass.services.async_services().get(domain, {}).keys()),
+        "referenced_by": _references_for_entity(hass, entity_id),
+    }
+
+    settings = data.store.get_settings()
+    if data.mesa is not None and settings.mesa_mode != MESA_MODE_OFF:
+        control_mode = entity_control_mode(data.mesa, token, entity_id)
+        if control_mode is not None:
+            body["mesa_control_mode"] = control_mode
+            body["mesa_note"] = (
+                "Call mesa_get_profile (requires cap_config_read) for the full semantic profile."
+            )
+
+    return _tool_success(json.dumps(body, default=str)), "allowed", entity_id
+
+
 async def _call_tool(
     tool_name: str,
     arguments: dict,
@@ -3262,6 +3455,10 @@ async def _call_tool(
         return await _tool_get_system_health(arguments, token, hass)
     if tool_name == "check_config":
         return await _tool_check_config(arguments, token, hass)
+    if tool_name == "get_relationships":
+        return await _tool_get_relationships(arguments, token, hass)
+    if tool_name == "describe_entity":
+        return await _tool_describe_entity(arguments, token, hass, data)
     return _tool_error(f"Unknown tool: {tool_name}"), "denied", tool_name
 
 
