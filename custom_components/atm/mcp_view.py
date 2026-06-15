@@ -29,6 +29,7 @@ from homeassistant.helpers import area_registry as ar
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import floor_registry as fr
+from homeassistant.config_entries import ConfigEntryDisabler
 from homeassistant.core import callback
 from homeassistant.helpers.event import async_track_state_change_event
 from homeassistant.util.dt import utcnow
@@ -112,6 +113,8 @@ _AUTOMATION_YAML = "automations.yaml"
 _AUTOMATION_LOCK_KEY = f"{DOMAIN}_automation_lock"
 _SCRIPT_CONFIG_PATH = "scripts.yaml"
 _SCRIPT_LOCK_KEY = f"{DOMAIN}_script_lock"
+_CONFIG_YAML = "configuration.yaml"
+_CONFIG_YAML_LOCK_KEY = f"{DOMAIN}_config_yaml_lock"
 
 
 def _get_automation_lock(hass: Any) -> asyncio.Lock:
@@ -1081,6 +1084,53 @@ _SYSTEM_TOOL_DEFS: list[dict] = [
                 "content": {"type": "string"},
             },
             "required": ["path", "content"],
+        },
+    },
+    {
+        "name": "get_yaml_config",
+        "description": "Read the raw contents of configuration.yaml. Requires cap_yaml_edit.",
+        "cap": "cap_yaml_edit",
+        "inputSchema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "set_yaml_config",
+        "description": (
+            "Replace the entire contents of configuration.yaml. Requires cap_yaml_edit (Confirm-eligible). "
+            "High blast radius: a broken file prevents Home Assistant from starting. Run check_config and "
+            "restart HA afterwards to apply."
+        ),
+        "cap": "cap_yaml_edit",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "content": {"type": "string", "description": "The full new configuration.yaml contents."},
+            },
+            "required": ["content"],
+        },
+    },
+    {
+        "name": "list_integrations",
+        "description": (
+            "List Home Assistant config entries (integrations): entry_id, domain, title, state, and whether "
+            "disabled. Use the entry_id with set_integration_enabled. Requires cap_integration_write."
+        ),
+        "cap": "cap_integration_write",
+        "inputSchema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "set_integration_enabled",
+        "description": (
+            "Enable or disable an integration (config entry) by its entry_id. Requires cap_integration_write "
+            "(Confirm-eligible). Disabling unloads the integration and its entities."
+        ),
+        "cap": "cap_integration_write",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "entry_id": {"type": "string", "description": "The config entry id (from list_integrations)."},
+                "enabled": {"type": "boolean"},
+            },
+            "required": ["entry_id", "enabled"],
         },
     },
 ]
@@ -4571,6 +4621,135 @@ async def _execute_write_file(
     return _tool_success(json.dumps({"path": path, "bytes_written": len(content.encode("utf-8"))})), "allowed", f"file:{path}"
 
 
+# ---------------------------------------------------------------------------
+# Raw configuration.yaml edit (cap_yaml_edit)
+# ---------------------------------------------------------------------------
+
+
+async def _tool_get_yaml_config(
+    args: dict, token: TokenRecord, hass: Any
+) -> tuple[dict, str, str]:
+    """MCP tool: read the raw configuration.yaml."""
+    if effective_cap(token, "cap_yaml_edit") == CAP_DENY:
+        return _tool_error("Forbidden."), "denied", "get_yaml_config"
+    path = hass.config.path(_CONFIG_YAML)
+    if not await hass.async_add_executor_job(os.path.isfile, path):
+        return _tool_success(json.dumps({"path": _CONFIG_YAML, "exists": False, "content": ""})), "allowed", "get_yaml_config"
+    try:
+        content = await hass.async_add_executor_job(_read_text_capped, path)
+    except ValueError:
+        return _tool_error("configuration.yaml exceeds the maximum readable size."), "invalid_request", "get_yaml_config"
+    except OSError:
+        return _tool_error("Failed to read configuration.yaml."), "denied", "get_yaml_config"
+    return _tool_success(json.dumps({"path": _CONFIG_YAML, "exists": True, "content": content}, default=str)), "allowed", "get_yaml_config"
+
+
+async def _tool_set_yaml_config(
+    args: dict, token: TokenRecord, hass: Any, data: ATMData,
+    request_id: str = "", client_ip: str | None = None,
+) -> tuple[dict, str, str]:
+    """MCP tool: replace configuration.yaml (Confirm-gated)."""
+    blocked = await _gate(
+        "cap_yaml_edit", token, hass, data,
+        tool_name="set_yaml_config", args=args, request_id=request_id,
+        client_ip=client_ip, diff=_build_diff_set_yaml_config(args, token, hass),
+    )
+    if blocked is not None:
+        return blocked
+    return await _execute_set_yaml_config(args, token, hass, data)
+
+
+async def _execute_set_yaml_config(
+    args: dict, token: TokenRecord, hass: Any, data: ATMData
+) -> tuple[dict, str, str]:
+    content = args.get("content")
+    if not isinstance(content, str):
+        return _tool_error("content must be a string."), "invalid_request", "set_yaml_config"
+    if len(content.encode("utf-8")) > MAX_FILE_BYTES:
+        return _tool_error("Content exceeds the maximum file size."), "invalid_request", "set_yaml_config"
+    path = hass.config.path(_CONFIG_YAML)
+    try:
+        await hass.async_add_executor_job(_write_utf8_file_atomic, path, content)
+    except OSError as exc:
+        _LOGGER.error("set_yaml_config failed: %s", exc)
+        return _tool_error("Failed to write configuration.yaml."), "denied", "set_yaml_config"
+    return (
+        _tool_success(json.dumps({
+            "path": _CONFIG_YAML,
+            "bytes_written": len(content.encode("utf-8")),
+            "note": "Run check_config and restart Home Assistant to apply.",
+        })),
+        "allowed", "set_yaml_config",
+    )
+
+
+# ---------------------------------------------------------------------------
+# Integration enable/disable (cap_integration_write)
+# ---------------------------------------------------------------------------
+
+
+async def _tool_list_integrations(
+    args: dict, token: TokenRecord, hass: Any
+) -> tuple[dict, str, str]:
+    """MCP tool: list config entries (integrations)."""
+    if effective_cap(token, "cap_integration_write") == CAP_DENY:
+        return _tool_error("Forbidden."), "denied", "list_integrations"
+    integrations = [
+        {
+            "entry_id": entry.entry_id,
+            "domain": entry.domain,
+            "title": entry.title,
+            "state": str(entry.state),
+            "disabled_by": str(entry.disabled_by) if entry.disabled_by else None,
+        }
+        for entry in hass.config_entries.async_entries()
+        if entry.domain != DOMAIN  # never expose ATM's own entry as a target
+    ]
+    integrations.sort(key=lambda e: (e["domain"], e["title"] or ""))
+    return _tool_success(json.dumps({"count": len(integrations), "integrations": integrations}, default=str)), "allowed", "list_integrations"
+
+
+async def _tool_set_integration_enabled(
+    args: dict, token: TokenRecord, hass: Any, data: ATMData,
+    request_id: str = "", client_ip: str | None = None,
+) -> tuple[dict, str, str]:
+    """MCP tool: enable/disable an integration (Confirm-gated)."""
+    blocked = await _gate(
+        "cap_integration_write", token, hass, data,
+        tool_name="set_integration_enabled", args=args, request_id=request_id,
+        client_ip=client_ip, diff=_build_diff_set_integration_enabled(args, token, hass),
+    )
+    if blocked is not None:
+        return blocked
+    return await _execute_set_integration_enabled(args, token, hass, data)
+
+
+async def _execute_set_integration_enabled(
+    args: dict, token: TokenRecord, hass: Any, data: ATMData
+) -> tuple[dict, str, str]:
+    entry_id = str(args.get("entry_id") or "").strip()
+    enabled = args.get("enabled")
+    if not entry_id:
+        return _tool_error("entry_id is required."), "invalid_request", "set_integration_enabled"
+    if not isinstance(enabled, bool):
+        return _tool_error("enabled must be a boolean."), "invalid_request", "set_integration_enabled"
+    entry = hass.config_entries.async_get_entry(entry_id)
+    # ATM's own entry is never a valid target (no self-lockout); treat as not found.
+    if entry is None or entry.domain == DOMAIN:
+        return _tool_error("Integration not found."), "not_found", entry_id
+    try:
+        await hass.config_entries.async_set_disabled_by(
+            entry_id, None if enabled else ConfigEntryDisabler.USER
+        )
+    except Exception as exc:  # noqa: BLE001 - OperationNotAllowed etc. -> clean error
+        _LOGGER.error("set_integration_enabled failed: %s", exc)
+        return _tool_error("Failed to change integration state."), "denied", entry_id
+    return (
+        _tool_success(json.dumps({"entry_id": entry_id, "domain": entry.domain, "enabled": enabled})),
+        "allowed", f"integration:{entry_id}",
+    )
+
+
 async def _call_tool(
     tool_name: str,
     arguments: dict,
@@ -4723,6 +4902,14 @@ async def _call_tool(
         return await _tool_read_file(arguments, token, hass)
     if tool_name == "write_file":
         return await _tool_write_file(arguments, token, hass, data, request_id, client_ip)
+    if tool_name == "get_yaml_config":
+        return await _tool_get_yaml_config(arguments, token, hass)
+    if tool_name == "set_yaml_config":
+        return await _tool_set_yaml_config(arguments, token, hass, data, request_id, client_ip)
+    if tool_name == "list_integrations":
+        return await _tool_list_integrations(arguments, token, hass)
+    if tool_name == "set_integration_enabled":
+        return await _tool_set_integration_enabled(arguments, token, hass, data, request_id, client_ip)
     return _tool_error(f"Unknown tool: {tool_name}"), "denied", tool_name
 
 
@@ -5769,6 +5956,42 @@ def _build_diff_write_file(args: dict, token: TokenRecord, hass: Any) -> dict:
     }
 
 
+def _build_diff_set_yaml_config(args: dict, token: TokenRecord, hass: Any) -> dict:
+    content = args.get("content") if isinstance(args.get("content"), str) else ""
+    before = None
+    try:
+        path = hass.config.path(_CONFIG_YAML)
+        if os.path.isfile(path):
+            before = _truncate(_read_text_capped(path))
+    except (OSError, ValueError):
+        before = None
+    return {
+        "kind": "yaml_diff",
+        "summary": "Replace configuration.yaml",
+        "target": {"type": "file", "id": _CONFIG_YAML, "label": _CONFIG_YAML},
+        "before": before,
+        "after": _truncate(content),
+        "preview": {"warning": "Replaces the entire configuration.yaml; a broken file blocks HA startup."},
+    }
+
+
+def _build_diff_set_integration_enabled(args: dict, token: TokenRecord, hass: Any) -> dict:
+    entry_id = str(args.get("entry_id") or "").strip()
+    enabled = bool(args.get("enabled"))
+    entry = hass.config_entries.async_get_entry(entry_id)
+    label = f"{entry.domain} ({entry.title})" if entry is not None else entry_id
+    return {
+        "kind": "system_action",
+        "summary": f"{'Enable' if enabled else 'Disable'} integration {label}",
+        "target": {"type": "integration", "id": entry_id, "label": label},
+        "preview": {
+            "domain": entry.domain if entry is not None else None,
+            "enabled": enabled,
+            "warning": None if enabled else "Disabling unloads the integration and its entities.",
+        },
+    }
+
+
 def _build_diff_create_script(args: dict, token: TokenRecord, hass: Any) -> dict:
     script_id = (args.get("script_id") or "").strip()
     config = args.get("config") if isinstance(args.get("config"), dict) else {}
@@ -5904,6 +6127,8 @@ _register_executor("create_helper", _execute_create_helper)
 _register_executor("edit_helper", _execute_edit_helper)
 _register_executor("delete_helper", _execute_delete_helper)
 _register_executor("write_file", _execute_write_file)
+_register_executor("set_yaml_config", _execute_set_yaml_config)
+_register_executor("set_integration_enabled", _execute_set_integration_enabled)
 _register_executor("HassSetPosition", _execute_hass_set_position)
 _register_executor("HassStopMoving", _execute_hass_stop_moving)
 _register_executor("HassTurnOn", _execute_hass_turn_on)
