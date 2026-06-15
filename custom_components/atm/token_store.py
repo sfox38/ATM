@@ -129,6 +129,17 @@ class TokenRecord:
     cap_service_response: str = CAP_DENY
     cap_broadcast: str = CAP_DENY
     cap_log_read: str = CAP_DENY
+    cap_search: str = CAP_DENY
+    cap_registry_read: str = CAP_DENY
+    cap_traces: str = CAP_DENY
+    cap_diagnostics: str = CAP_DENY
+    cap_scene_write: str = CAP_DENY
+    cap_helper_write: str = CAP_DENY
+    cap_integration_write: str = CAP_DENY
+    cap_lovelace_write: str = CAP_DENY
+    cap_backup: str = CAP_DENY
+    cap_filesystem: str = CAP_DENY
+    cap_yaml_edit: str = CAP_DENY
     persona: str = PERSONA_CUSTOM
     permissions: PermissionTree = field(default_factory=PermissionTree)
 

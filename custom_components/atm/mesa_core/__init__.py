@@ -26,7 +26,11 @@ from custom_components.atm.mesa_core.profile import (
 )
 from custom_components.atm.mesa_core.store import DeploymentDefaults, ProfileQueryResult, ProfileStore
 from custom_components.atm.mesa_core.temporal import TemporalEvaluator, TemporalResult
-from custom_components.atm.mesa_core.trigger_validator import TriggerValidator, ValidationIssue
+from custom_components.atm.mesa_core.trigger_validator import (
+    TriggerValidator,
+    ValidationIssue,
+    entities_by_role,
+)
 from custom_components.atm.mesa_core.validation import ValidationReport, validate_document, validate_or_raise
 
 __version__ = "1.0.0"
@@ -63,6 +67,7 @@ __all__ = [
     "TriggersAutomations",
     "ValidationIssue",
     "ValidationReport",
+    "entities_by_role",
     "import_from_integration",
     "migrate_profile",
     "validate_document",

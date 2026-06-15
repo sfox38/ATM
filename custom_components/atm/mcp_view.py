@@ -28,6 +28,7 @@ from homeassistant.exceptions import HomeAssistantError, ServiceNotFound
 from homeassistant.helpers import area_registry as ar
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers import floor_registry as fr
 from homeassistant.util.dt import utcnow
 
 from .audit import generate_request_id
@@ -458,6 +459,56 @@ _SYSTEM_TOOL_DEFS: list[dict] = [
                 "message": {"type": "string"},
             },
             "required": ["message"],
+        },
+    },
+    {
+        "name": "list_areas",
+        "description": (
+            "List Home Assistant areas that contain at least one entity this token can access. "
+            "Each area includes its floor and a count of accessible entities. "
+            "Areas with no accessible entities are not returned."
+        ),
+        "cap": "cap_registry_read",
+        "inputSchema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "list_floors",
+        "description": (
+            "List Home Assistant floors that contain at least one entity this token can access, "
+            "with a count of accessible areas and entities on each floor."
+        ),
+        "cap": "cap_registry_read",
+        "inputSchema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "list_zones",
+        "description": "List Home Assistant zones (zone.* entities) this token can access.",
+        "cap": "cap_registry_read",
+        "inputSchema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "list_devices",
+        "description": (
+            "List Home Assistant devices that have at least one entity this token can access. "
+            "Each device includes manufacturer, model, area, and a count of accessible entities. "
+            "Devices with no accessible entities are not returned."
+        ),
+        "cap": "cap_registry_read",
+        "inputSchema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "get_device",
+        "description": (
+            "Get details for a single device, including the list of its entities this token can access. "
+            "Returns 'not found' if the device does not exist or has no accessible entities."
+        ),
+        "cap": "cap_registry_read",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "device_id": {"type": "string", "description": "The device registry id."},
+            },
+            "required": ["device_id"],
         },
     },
 ]
@@ -2463,6 +2514,184 @@ async def _tool_hass_broadcast(
     return _tool_success(json.dumps({"success": True})), "allowed", "HassBroadcast"
 
 
+# ---------------------------------------------------------------------------
+# Discovery and registry read tools (cap_registry_read)
+# ---------------------------------------------------------------------------
+
+
+def _accessible_entity_ids(token: TokenRecord, hass: Any) -> set[str]:
+    """Return the set of entity IDs the token can read.
+
+    Uses the same scoping/scrubbing path as get_states so registry views never
+    reveal entities, areas, or devices outside the token's permission tree.
+    """
+    accessible = filter_entities_for_token(hass.states.async_all(), token, hass)
+    return {e["entity_id"] for e in accessible}
+
+
+async def _tool_list_areas(
+    args: dict, token: TokenRecord, hass: Any
+) -> tuple[dict, str, str]:
+    """MCP tool: list areas containing at least one accessible entity."""
+    if effective_cap(token, "cap_registry_read") == CAP_DENY:
+        return _tool_error("Forbidden."), "denied", "list_areas"
+
+    registry = er.async_get(hass)
+    dev_reg = dr.async_get(hass)
+    area_reg = ar.async_get(hass)
+    counts: dict[str, int] = {}
+    for eid in _accessible_entity_ids(token, hass):
+        area_id = _resolve_area_id(registry.async_get(eid), dev_reg)
+        if area_id:
+            counts[area_id] = counts.get(area_id, 0) + 1
+
+    areas: list[dict] = []
+    for area_id, count in counts.items():
+        area = area_reg.async_get_area(area_id)
+        if area is None:
+            continue
+        areas.append({
+            "area_id": area.id,
+            "name": area.name,
+            "floor_id": area.floor_id,
+            "aliases": sorted(area.aliases) if area.aliases else [],
+            "accessible_entity_count": count,
+        })
+    areas.sort(key=lambda a: (a["name"] or a["area_id"]).lower())
+    return _tool_success(json.dumps({"count": len(areas), "areas": areas}, default=str)), "allowed", "list_areas"
+
+
+async def _tool_list_floors(
+    args: dict, token: TokenRecord, hass: Any
+) -> tuple[dict, str, str]:
+    """MCP tool: list floors containing at least one accessible entity."""
+    if effective_cap(token, "cap_registry_read") == CAP_DENY:
+        return _tool_error("Forbidden."), "denied", "list_floors"
+
+    registry = er.async_get(hass)
+    dev_reg = dr.async_get(hass)
+    area_reg = ar.async_get(hass)
+    floor_reg = fr.async_get(hass)
+    floor_entity_counts: dict[str, int] = {}
+    floor_area_ids: dict[str, set[str]] = {}
+    for eid in _accessible_entity_ids(token, hass):
+        area_id = _resolve_area_id(registry.async_get(eid), dev_reg)
+        if not area_id:
+            continue
+        area = area_reg.async_get_area(area_id)
+        if area is None or not area.floor_id:
+            continue
+        floor_entity_counts[area.floor_id] = floor_entity_counts.get(area.floor_id, 0) + 1
+        floor_area_ids.setdefault(area.floor_id, set()).add(area_id)
+
+    floors: list[dict] = []
+    for floor_id, count in floor_entity_counts.items():
+        floor = floor_reg.async_get_floor(floor_id)
+        if floor is None:
+            continue
+        floors.append({
+            "floor_id": floor.floor_id,
+            "name": floor.name,
+            "level": floor.level,
+            "accessible_area_count": len(floor_area_ids[floor_id]),
+            "accessible_entity_count": count,
+        })
+    floors.sort(key=lambda f: (f["level"] if f["level"] is not None else 0, (f["name"] or f["floor_id"]).lower()))
+    return _tool_success(json.dumps({"count": len(floors), "floors": floors}, default=str)), "allowed", "list_floors"
+
+
+async def _tool_list_zones(
+    args: dict, token: TokenRecord, hass: Any
+) -> tuple[dict, str, str]:
+    """MCP tool: list accessible zone.* entities."""
+    if effective_cap(token, "cap_registry_read") == CAP_DENY:
+        return _tool_error("Forbidden."), "denied", "list_zones"
+
+    accessible = filter_entities_for_token(hass.states.async_all(), token, hass)
+    zones: list[dict] = []
+    for e in accessible:
+        if not e["entity_id"].startswith("zone."):
+            continue
+        attrs = e.get("attributes", {})
+        zones.append({
+            "entity_id": e["entity_id"],
+            "name": attrs.get("friendly_name"),
+            "latitude": attrs.get("latitude"),
+            "longitude": attrs.get("longitude"),
+            "radius": attrs.get("radius"),
+        })
+    zones.sort(key=lambda z: z["entity_id"])
+    return _tool_success(json.dumps({"count": len(zones), "zones": zones}, default=str)), "allowed", "list_zones"
+
+
+async def _tool_list_devices(
+    args: dict, token: TokenRecord, hass: Any
+) -> tuple[dict, str, str]:
+    """MCP tool: list devices with at least one accessible entity."""
+    if effective_cap(token, "cap_registry_read") == CAP_DENY:
+        return _tool_error("Forbidden."), "denied", "list_devices"
+
+    registry = er.async_get(hass)
+    dev_reg = dr.async_get(hass)
+    counts: dict[str, int] = {}
+    for eid in _accessible_entity_ids(token, hass):
+        entry = registry.async_get(eid)
+        if entry is not None and entry.device_id:
+            counts[entry.device_id] = counts.get(entry.device_id, 0) + 1
+
+    devices: list[dict] = []
+    for device_id, count in counts.items():
+        device = dev_reg.async_get(device_id)
+        if device is None:
+            continue
+        devices.append({
+            "device_id": device.id,
+            "name": device.name_by_user or device.name,
+            "manufacturer": device.manufacturer,
+            "model": device.model,
+            "area_id": device.area_id,
+            "accessible_entity_count": count,
+        })
+    devices.sort(key=lambda d: ((d["name"] or d["device_id"]).lower()))
+    return _tool_success(json.dumps({"count": len(devices), "devices": devices}, default=str)), "allowed", "list_devices"
+
+
+async def _tool_get_device(
+    args: dict, token: TokenRecord, hass: Any
+) -> tuple[dict, str, str]:
+    """MCP tool: return one device plus its accessible entities.
+
+    Returns not_found for both a nonexistent device and a device with no
+    accessible entities, so there is no existence oracle across the device set.
+    """
+    if effective_cap(token, "cap_registry_read") == CAP_DENY:
+        return _tool_error("Forbidden."), "denied", "get_device"
+
+    device_id = args.get("device_id", "")
+    if not device_id:
+        return _tool_error("Missing required argument: device_id"), "invalid_request", "get_device"
+
+    registry = er.async_get(hass)
+    dev_reg = dr.async_get(hass)
+    device = dev_reg.async_get(device_id)
+    device_entities = sorted(
+        eid for eid in _accessible_entity_ids(token, hass)
+        if (entry := registry.async_get(eid)) is not None and entry.device_id == device_id
+    )
+    if device is None or not device_entities:
+        return _tool_error("Device not found."), "not_found", device_id
+
+    return _tool_success(json.dumps({
+        "device_id": device.id,
+        "name": device.name_by_user or device.name,
+        "manufacturer": device.manufacturer,
+        "model": device.model,
+        "sw_version": device.sw_version,
+        "area_id": device.area_id,
+        "entities": device_entities,
+    }, default=str)), "allowed", device_id
+
+
 async def _call_tool(
     tool_name: str,
     arguments: dict,
@@ -2547,6 +2776,16 @@ async def _call_tool(
         return await _tool_edit_script(arguments, token, hass, data, request_id, client_ip)
     if tool_name == "delete_script":
         return await _tool_delete_script(arguments, token, hass, data, request_id, client_ip)
+    if tool_name == "list_areas":
+        return await _tool_list_areas(arguments, token, hass)
+    if tool_name == "list_floors":
+        return await _tool_list_floors(arguments, token, hass)
+    if tool_name == "list_zones":
+        return await _tool_list_zones(arguments, token, hass)
+    if tool_name == "list_devices":
+        return await _tool_list_devices(arguments, token, hass)
+    if tool_name == "get_device":
+        return await _tool_get_device(arguments, token, hass)
     return _tool_error(f"Unknown tool: {tool_name}"), "denied", tool_name
 
 

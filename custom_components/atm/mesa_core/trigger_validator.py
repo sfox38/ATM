@@ -52,7 +52,15 @@ def _collect_entity_ids(node: Any, found: set[str]) -> None:
             _collect_entity_ids(item, found)
 
 
-def _entities_by_role(config: dict[str, Any]) -> dict[str, set[str]]:
+def entities_by_role(config: dict[str, Any]) -> dict[str, set[str]]:
+    """Entities referenced in an automation config, keyed by role.
+
+    Returns a dict with keys ``"trigger"``, ``"condition"``, and ``"action"``,
+    each mapping to the set of entity IDs referenced in that block. Handles the
+    singular/plural HA section keys transparently. This is the canonical
+    automation-config traversal; hosts building reverse-reference indexes
+    should call this rather than reimplementing the entity-ID walk.
+    """
     result: dict[str, set[str]] = {}
     for role, keys in _SECTION_KEYS.items():
         found: set[str] = set()
@@ -61,6 +69,10 @@ def _entities_by_role(config: dict[str, Any]) -> dict[str, set[str]]:
                 _collect_entity_ids(config[key], found)
         result[role] = found
     return result
+
+
+# Back-compat alias for internal callers predating the public name.
+_entities_by_role = entities_by_role
 
 
 class TriggerValidator:
@@ -86,7 +98,7 @@ class TriggerValidator:
         issues: list[ValidationIssue] = []
         for config in configs:
             automation_id = str(config.get("id", "<unknown>"))
-            by_role = _entities_by_role(config)
+            by_role = entities_by_role(config)
             # Only trigger and condition references invalidate a none declaration
             # (Spec 5.5): an entity written by an action does not trigger automations.
             for role, severity in (("trigger", "error"), ("condition", "warning")):

@@ -498,6 +498,11 @@ async def apply_mesa_to_call(
             decision="deny", blocked=verdict.blocked, warnings=verdict.warnings
         )
 
+    # NOTE (deferred, low severity): warnings flow to the token via mesa_advisory /
+    # native speech regardless of cap_config_read, so an advisory warning reveals an
+    # in-scope entity's control_mode even to a token that lacks profile-read access.
+    # Not an enumeration oracle (the token targeted an entity it already has WRITE on).
+    # If we ever want to hide it, gate warnings on cap_config_read at the surfacing sites.
     return MesaGateOutcome(
         decision="allow",
         entities=verdict.allowed,

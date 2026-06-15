@@ -16,6 +16,7 @@ export type Persona =
   | "voice_assistant"
   | "automation_builder"
   | "power_user"
+  | "home_admin"
   | "custom";
 
 export type CapTier = "read" | "everyday" | "config_write" | "system" | "irreversible";
@@ -24,12 +25,23 @@ export interface CapabilityFlagsMap {
   cap_config_read: CapMode;
   cap_template_render: CapMode;
   cap_log_read: CapMode;
+  cap_search: CapMode;
+  cap_registry_read: CapMode;
+  cap_traces: CapMode;
+  cap_diagnostics: CapMode;
   cap_broadcast: CapMode;
   cap_service_response: CapMode;
   cap_automation_write: CapMode;
   cap_script_write: CapMode;
+  cap_scene_write: CapMode;
+  cap_helper_write: CapMode;
   cap_physical_control: CapMode;
   cap_restart: CapMode;
+  cap_integration_write: CapMode;
+  cap_lovelace_write: CapMode;
+  cap_backup: CapMode;
+  cap_filesystem: CapMode;
+  cap_yaml_edit: CapMode;
 }
 
 export type CapName = keyof CapabilityFlagsMap;
@@ -251,6 +263,17 @@ export interface PatchTokenBody {
   cap_physical_control?: CapMode;
   cap_service_response?: CapMode;
   cap_broadcast?: CapMode;
+  cap_search?: CapMode;
+  cap_registry_read?: CapMode;
+  cap_traces?: CapMode;
+  cap_diagnostics?: CapMode;
+  cap_scene_write?: CapMode;
+  cap_helper_write?: CapMode;
+  cap_integration_write?: CapMode;
+  cap_lovelace_write?: CapMode;
+  cap_backup?: CapMode;
+  cap_filesystem?: CapMode;
+  cap_yaml_edit?: CapMode;
   use_assist_exposure?: boolean;
   announce_all_tools?: boolean;
 }

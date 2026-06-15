@@ -38,6 +38,34 @@ const CAPS: CapDef[] = [
     confirmAvailable: false,
   },
   {
+    key: "cap_search",
+    label: "Search & discovery",
+    description: "Search entities, get overviews, describe entities/areas, and inspect relationships within the token's scope.",
+    tier: "read",
+    confirmAvailable: false,
+  },
+  {
+    key: "cap_registry_read",
+    label: "Registry read",
+    description: "List areas, floors, zones, and devices that contain accessible entities.",
+    tier: "read",
+    confirmAvailable: false,
+  },
+  {
+    key: "cap_traces",
+    label: "Automation traces",
+    description: "Read automation execution traces to debug why an automation did or did not run.",
+    tier: "read",
+    confirmAvailable: false,
+  },
+  {
+    key: "cap_diagnostics",
+    label: "Diagnostics",
+    description: "Read system health, check configuration, and validate automation/script/scene YAML.",
+    tier: "read",
+    confirmAvailable: false,
+  },
+  {
     key: "cap_broadcast",
     label: "Broadcast",
     description: "Announce messages through assist satellite devices.",
@@ -66,6 +94,20 @@ const CAPS: CapDef[] = [
     confirmAvailable: true,
   },
   {
+    key: "cap_scene_write",
+    label: "Scene write",
+    description: "Create, edit, and delete scenes. Referenced entities are still subject to MESA and entity access.",
+    tier: "config_write",
+    confirmAvailable: true,
+  },
+  {
+    key: "cap_helper_write",
+    label: "Helper write",
+    description: "Create, edit, and delete helpers (input_*, counter, timer).",
+    tier: "config_write",
+    confirmAvailable: true,
+  },
+  {
     key: "cap_physical_control",
     label: "Physical control",
     description: "Lock, alarm, and cover mutation services (lock.unlock, alarm.disarm, cover.open_cover, etc).",
@@ -77,6 +119,41 @@ const CAPS: CapDef[] = [
     label: "HA restart / stop",
     description: "Permits homeassistant.restart and homeassistant.stop service calls.",
     tier: "system",
+    confirmAvailable: true,
+  },
+  {
+    key: "cap_integration_write",
+    label: "Integration management",
+    description: "Enable or disable Home Assistant integrations.",
+    tier: "system",
+    confirmAvailable: true,
+  },
+  {
+    key: "cap_lovelace_write",
+    label: "Dashboard write",
+    description: "Create, edit, and delete Lovelace dashboards.",
+    tier: "system",
+    confirmAvailable: true,
+  },
+  {
+    key: "cap_backup",
+    label: "Backup / restore",
+    description: "Create and restore Home Assistant backups. Restore overwrites all current state.",
+    tier: "irreversible",
+    confirmAvailable: true,
+  },
+  {
+    key: "cap_filesystem",
+    label: "Filesystem access",
+    description: "Read and write files under www/, themes/, and custom_templates/.",
+    tier: "irreversible",
+    confirmAvailable: true,
+  },
+  {
+    key: "cap_yaml_edit",
+    label: "Raw YAML edit",
+    description: "Edit configuration.yaml directly. High blast radius; Confirm strongly recommended.",
+    tier: "irreversible",
     confirmAvailable: true,
   },
 ];
@@ -138,7 +215,7 @@ export function CapabilityMatrix({ token, onUpdate }: Props) {
       {token.pass_through && (
         <div className="amber-block mb-8">
           <p>
-            <strong>Pass-through is enabled.</strong> Most caps below are bypassed (treated as Allow), except the five exempt caps: restart, physical control, automation write, script write, and log read. Caps set to <em>Confirm</em> are still gated even under pass-through.
+            <strong>Pass-through is enabled.</strong> Reads and everyday actions below are bypassed (treated as Allow). All write, system, and irreversible caps, plus log read, remain enforced as set. Caps set to <em>Confirm</em> are still gated even under pass-through.
           </p>
         </div>
       )}

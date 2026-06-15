@@ -115,12 +115,23 @@ CAPABILITY_NAMES = (
     "cap_config_read",
     "cap_template_render",
     "cap_log_read",
+    "cap_search",
+    "cap_registry_read",
+    "cap_traces",
+    "cap_diagnostics",
     "cap_broadcast",
     "cap_service_response",
     "cap_automation_write",
     "cap_script_write",
+    "cap_scene_write",
+    "cap_helper_write",
     "cap_physical_control",
     "cap_restart",
+    "cap_integration_write",
+    "cap_lovelace_write",
+    "cap_backup",
+    "cap_filesystem",
+    "cap_yaml_edit",
 )
 
 # Tiers drive UI grouping and which capabilities offer Confirm.
@@ -129,12 +140,23 @@ CAPABILITY_TIERS: dict[str, str] = {
     "cap_config_read": "read",
     "cap_template_render": "read",
     "cap_log_read": "read",
+    "cap_search": "read",
+    "cap_registry_read": "read",
+    "cap_traces": "read",
+    "cap_diagnostics": "read",
     "cap_broadcast": "everyday",
     "cap_service_response": "everyday",
     "cap_automation_write": "config_write",
     "cap_script_write": "config_write",
+    "cap_scene_write": "config_write",
+    "cap_helper_write": "config_write",
     "cap_physical_control": "system",
     "cap_restart": "system",
+    "cap_integration_write": "system",
+    "cap_lovelace_write": "system",
+    "cap_backup": "irreversible",
+    "cap_filesystem": "irreversible",
+    "cap_yaml_edit": "irreversible",
 }
 
 CAPABILITY_TIER_ORDER = ("read", "everyday", "config_write", "system", "irreversible")
@@ -144,8 +166,15 @@ CAPABILITY_TIER_ORDER = ("read", "everyday", "config_write", "system", "irrevers
 CONFIRM_AVAILABLE_CAPS = frozenset({
     "cap_automation_write",
     "cap_script_write",
+    "cap_scene_write",
+    "cap_helper_write",
     "cap_physical_control",
     "cap_restart",
+    "cap_integration_write",
+    "cap_lovelace_write",
+    "cap_backup",
+    "cap_filesystem",
+    "cap_yaml_edit",
 })
 
 # Capabilities ALWAYS evaluated regardless of pass_through state.
@@ -158,6 +187,13 @@ PASS_THROUGH_EXEMPT_CAPS = frozenset({
     "cap_automation_write",
     "cap_script_write",
     "cap_log_read",
+    "cap_scene_write",
+    "cap_helper_write",
+    "cap_integration_write",
+    "cap_lovelace_write",
+    "cap_backup",
+    "cap_filesystem",
+    "cap_yaml_edit",
 })
 
 # Pending-approval queue limits.
@@ -176,6 +212,7 @@ PERSONA_READ_ONLY = "read_only"
 PERSONA_VOICE_ASSISTANT = "voice_assistant"
 PERSONA_AUTOMATION_BUILDER = "automation_builder"
 PERSONA_POWER_USER = "power_user"
+PERSONA_HOME_ADMIN = "home_admin"
 PERSONA_CUSTOM = "custom"
 # Gentle starter persona seeded by the onboarding wizard. Hidden from the normal
 # persona picker; reads plus service calls, physical control gated to confirm.
@@ -185,6 +222,7 @@ PERSONA_NAMES = frozenset({
     PERSONA_VOICE_ASSISTANT,
     PERSONA_AUTOMATION_BUILDER,
     PERSONA_POWER_USER,
+    PERSONA_HOME_ADMIN,
     PERSONA_NEW_USER,
     PERSONA_CUSTOM,
 })
