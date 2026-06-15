@@ -2,7 +2,7 @@
 
 ``import_from_integration`` reads ``mesa_profile.json`` from an integration
 directory. Profiles that omit ``metadata_origin`` are stamped
-``source: developer`` — the location-based provenance default of Spec 5.3: the
+``source: developer``, the location-based provenance default of Spec 5.3: the
 file ships inside the integration directory and is under the developer's
 control. An explicit ``metadata_origin`` in the file always wins.
 

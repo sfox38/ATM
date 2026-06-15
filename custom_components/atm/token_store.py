@@ -279,6 +279,7 @@ class GlobalSettings:
     log_entity_names: bool = True
     log_client_ip: bool = True
     notify_on_rate_limit: bool = False
+    notify_on_approval: bool = True
     audit_flush_interval: int = 15
     audit_log_maxlen: int = 10000
     mesa_mode: str = MESA_MODE_ADVISORY
@@ -293,6 +294,7 @@ class GlobalSettings:
             "log_entity_names": self.log_entity_names,
             "log_client_ip": self.log_client_ip,
             "notify_on_rate_limit": self.notify_on_rate_limit,
+            "notify_on_approval": self.notify_on_approval,
             "audit_flush_interval": self.audit_flush_interval,
             "audit_log_maxlen": self.audit_log_maxlen,
             "mesa_mode": self.mesa_mode,
@@ -310,6 +312,7 @@ class GlobalSettings:
             log_entity_names=bool(data.get("log_entity_names", True)),
             log_client_ip=bool(data.get("log_client_ip", True)),
             notify_on_rate_limit=bool(data.get("notify_on_rate_limit", False)),
+            notify_on_approval=bool(data.get("notify_on_approval", True)),
             audit_flush_interval=_clamp_int(data.get("audit_flush_interval"), {0, 5, 10, 15, 30, 60}, 15),
             audit_log_maxlen=_clamp_int(data.get("audit_log_maxlen"), {100, 1000, 5000, 10000}, 10000),
             mesa_mode=mesa_mode if mesa_mode in MESA_MODES else MESA_MODE_ADVISORY,

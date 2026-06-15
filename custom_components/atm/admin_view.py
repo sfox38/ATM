@@ -1043,6 +1043,7 @@ class ATMAdminSettingsView(HomeAssistantView):
         _BOOL_SETTINGS = frozenset({
             "kill_switch", "disable_all_logging", "log_allowed", "log_denied",
             "log_rate_limited", "log_entity_names", "log_client_ip", "notify_on_rate_limit",
+            "notify_on_approval",
         })
         patchable = {
             k: v for k, v in body.items()
@@ -1661,6 +1662,48 @@ class ATMAdminMesaProfileView(HomeAssistantView):
         return _ok({"entity_id": entity_id, "deleted": True}, request_id=rid)
 
 
+class ATMAdminMesaDomainsView(HomeAssistantView):
+    """GET /api/atm/admin/mesa/domains - list all stored domain-level profiles."""
+
+    url = "/api/atm/admin/mesa/domains"
+    name = "api:atm:admin:mesa:domains"
+    requires_auth = True
+
+    @require_admin
+    async def get(self, request: web.Request) -> web.Response:
+        rid = request["atm_rid"]
+        runtime, err = _mesa_runtime(self.hass, rid)
+        if err is not None:
+            return err
+        domains = []
+        for domain in sorted(runtime.store.domain_keys()):
+            stored = runtime.store.get_domain_profile(domain)
+            if stored is not None:
+                domains.append({"domain": domain, "document": stored.to_dict()})
+        return _ok({"domains": domains}, request_id=rid)
+
+
+class ATMAdminMesaAreasView(HomeAssistantView):
+    """GET /api/atm/admin/mesa/areas - list all stored area-level profiles."""
+
+    url = "/api/atm/admin/mesa/areas"
+    name = "api:atm:admin:mesa:areas"
+    requires_auth = True
+
+    @require_admin
+    async def get(self, request: web.Request) -> web.Response:
+        rid = request["atm_rid"]
+        runtime, err = _mesa_runtime(self.hass, rid)
+        if err is not None:
+            return err
+        areas = []
+        for area_id in sorted(runtime.store.area_keys()):
+            stored = runtime.store.get_area_profile(area_id)
+            if stored is not None:
+                areas.append({"area_id": area_id, "document": stored.to_dict()})
+        return _ok({"areas": areas}, request_id=rid)
+
+
 class ATMAdminMesaDomainView(HomeAssistantView):
     """GET/PUT/DELETE /api/atm/admin/mesa/domains/{domain} - one domain-level profile."""
 
@@ -1778,6 +1821,30 @@ class ATMAdminMesaAreaView(HomeAssistantView):
         return _ok({"area_id": area_id, "deleted": True}, request_id=rid)
 
 
+class ATMAdminMesaVocabularyView(HomeAssistantView):
+    """GET /api/atm/admin/mesa/vocabulary - the canonical MESA tag registry.
+
+    Lets the admin UI source tag autocomplete from mesa-core directly, so the
+    frontend never duplicates (and never drifts from) the canonical vocabulary.
+    """
+
+    url = "/api/atm/admin/mesa/vocabulary"
+    name = "api:atm:admin:mesa:vocabulary"
+    requires_auth = True
+
+    @require_admin
+    async def get(self, request: web.Request) -> web.Response:
+        rid = request["atm_rid"]
+        from .mesa_core import vocabulary  # noqa: PLC0415
+        return _ok(
+            {
+                "canonical_tags": sorted(vocabulary.CANONICAL_TAGS),
+                "canonical_roots": sorted(vocabulary.CANONICAL_ROOTS),
+            },
+            request_id=rid,
+        )
+
+
 class ATMAdminMesaDefaultsView(HomeAssistantView):
     """GET/PUT /api/atm/admin/mesa/defaults - deployment defaults for unprofiled entities."""
 
@@ -1880,8 +1947,11 @@ ALL_ADMIN_VIEWS: list[type[HomeAssistantView]] = [
     ATMAdminApprovalRejectView,
     ATMAdminMesaProfilesView,
     ATMAdminMesaProfileView,
+    ATMAdminMesaDomainsView,
     ATMAdminMesaDomainView,
+    ATMAdminMesaAreasView,
     ATMAdminMesaAreaView,
+    ATMAdminMesaVocabularyView,
     ATMAdminMesaDefaultsView,
     ATMAdminMesaIssuesView,
 ]

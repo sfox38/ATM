@@ -336,16 +336,24 @@ def notification_id_for_approval(approval_id: str) -> str:
 
 
 def create_approval_notification(hass: HomeAssistant, approval: PendingApproval) -> None:
-    """Fire an HA persistent notification for a new pending approval."""
+    """Fire an HA persistent notification for a new pending approval.
+
+    Suppressed when the admin has turned off approval notifications
+    (settings.notify_on_approval). The in-panel Approvals badge still updates.
+    """
+    data = hass.data.get(DOMAIN)
+    if data is not None and not data.store.get_settings().notify_on_approval:
+        return
+
     from homeassistant.components import persistent_notification  # noqa: PLC0415
 
     persistent_notification.async_create(
         hass,
         message=(
-            f"Token '{approval.token_name}' requested {approval.tool_name}. "
-            f"Review at /atm#approvals/{approval.id}."
+            f"Token '{approval.token_name}' requested approval.\n\n"
+            f"[Review in ATM](/atm#approvals/{approval.id})"
         ),
-        title="ATM: approval required",
+        title="ATM",
         notification_id=notification_id_for_approval(approval.id),
     )
 

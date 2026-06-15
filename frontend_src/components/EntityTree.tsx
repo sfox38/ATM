@@ -1,6 +1,7 @@
 import React, { useState, useCallback, useEffect } from "react";
 import type { EntityTree, DomainTree, PermissionTree, NodeState } from "../types";
 import { PermissionSelector } from "./PermissionSelector";
+import { MesaProfileLink } from "./MesaProfileLink";
 import { api } from "../api";
 import { HIGH_RISK_DOMAINS } from "../utils";
 
@@ -17,6 +18,13 @@ interface Props {
   // When set, only these domains render. Used by the onboarding wizard to show
   // a single, less-daunting domain (e.g. ["light"]).
   domainAllowlist?: string[];
+  // When set, the tree expands the path to this entity and scrolls it into view
+  // (e.g. after selecting it in the Permission Summary card).
+  revealEntity?: string;
+  // Entities that have a MESA profile, and the handler to open one. When given,
+  // each entity row shows a "MESA"/"+" jump to its profile.
+  mesaProfileEntities?: Set<string>;
+  onOpenMesa?: (entityId: string) => void;
 }
 
 function effectivePermission(
@@ -133,15 +141,27 @@ interface EntityRowProps {
   isGhost: boolean;
   onPermChange: (tree: PermissionTree) => void;
   onEntityClick?: (entityId: string, depth?: "entity" | "device" | "domain") => void;
+  revealEntity?: string;
+  mesaProfileEntities?: Set<string>;
+  onOpenMesa?: (entityId: string) => void;
 }
 
 function EntityRow({
   entityId, friendlyName, deviceId, domainKey, permissions,
-  tokenId, indent, filterText, isGhost, onPermChange, onEntityClick,
+  tokenId, indent, filterText, isGhost, onPermChange, onEntityClick, revealEntity, mesaProfileEntities, onOpenMesa,
 }: EntityRowProps) {
   const entityNode = permissions.entities[entityId];
   const state: NodeState = entityNode?.state ?? "GREY";
   const effective = effectivePermission(entityId, domainKey, deviceId, permissions);
+  const rowRef = React.useRef<HTMLDivElement>(null);
+  const isRevealed = revealEntity === entityId;
+
+  // When this row becomes the reveal target, scroll it into view and flash it.
+  useEffect(() => {
+    if (isRevealed && rowRef.current) {
+      rowRef.current.scrollIntoView({ block: "center", behavior: "smooth" });
+    }
+  }, [isRevealed]);
 
   if (filterText) {
     const q = filterText.toLowerCase();
@@ -163,8 +183,11 @@ function EntityRow({
   }
 
   return (
-    <div className="tree-node" role="treeitem" aria-label={friendlyName ?? entityId} style={{ paddingLeft: `${indent * 20 + 6}px` }}>
+    <div ref={rowRef} className={`tree-node${isRevealed ? " tree-node-revealed" : ""}`} role="treeitem" aria-label={friendlyName ?? entityId} style={{ paddingLeft: `${indent * 20 + 6}px` }}>
       <span className="tree-spacer" />
+      {onOpenMesa && !isGhost && (
+        <MesaProfileLink entityId={entityId} exists={!!mesaProfileEntities?.has(entityId)} onOpen={onOpenMesa} />
+      )}
       <div
         className={`tree-name${onEntityClick ? " tree-cursor-pointer" : ""}`}
         onClick={() => onEntityClick?.(entityId, "entity")}
@@ -204,11 +227,14 @@ interface DeviceGroupProps {
   onPermChange: (tree: PermissionTree) => void;
   onEntityClick?: (entityId: string, depth?: "entity" | "device" | "domain") => void;
   collapseKey?: number;
+  revealEntity?: string;
+  mesaProfileEntities?: Set<string>;
+  onOpenMesa?: (entityId: string) => void;
 }
 
 function DeviceGroup({
   deviceId, deviceName, domainKey, entityIds, domainData,
-  permissions, tokenId, filterText, allEntityIds, onPermChange, onEntityClick, collapseKey,
+  permissions, tokenId, filterText, allEntityIds, onPermChange, onEntityClick, collapseKey, revealEntity, mesaProfileEntities, onOpenMesa,
 }: DeviceGroupProps) {
   const [expanded, setExpanded] = useState(false);
   const deviceNode = permissions.devices[deviceId];
@@ -216,10 +242,22 @@ function DeviceGroup({
   const effective = effectiveForNode("device", deviceId, domainKey, permissions);
   const isDynamic = state !== "GREY";
 
+  // Entities sorted by friendly name (falling back to entity id).
+  const sortedEntityIds = [...entityIds].sort((a, b) => {
+    const an = domainData.entity_details[a]?.friendly_name ?? a;
+    const bn = domainData.entity_details[b]?.friendly_name ?? b;
+    return an.localeCompare(bn);
+  });
+
   // Expand if filter matches
   useEffect(() => {
     if (filterText) setExpanded(true);
   }, [filterText]);
+
+  // Expand when an entity inside this device is the reveal target.
+  useEffect(() => {
+    if (revealEntity && entityIds.includes(revealEntity)) setExpanded(true);
+  }, [revealEntity, entityIds]);
 
   // Collapse when collapseKey changes
   useEffect(() => {
@@ -264,7 +302,7 @@ function DeviceGroup({
       </div>
       {expanded && (
         <div className="tree-children" role="group">
-          {entityIds.map((eid) => {
+          {sortedEntityIds.map((eid) => {
             const detail = domainData.entity_details[eid];
             return (
               <EntityRow
@@ -280,6 +318,9 @@ function DeviceGroup({
                 isGhost={!allEntityIds.has(eid)}
                 onPermChange={onPermChange}
                 onEntityClick={onEntityClick}
+                revealEntity={revealEntity}
+                mesaProfileEntities={mesaProfileEntities}
+                onOpenMesa={onOpenMesa}
               />
             );
           })}
@@ -299,10 +340,13 @@ interface DomainGroupProps {
   onPermChange: (tree: PermissionTree) => void;
   onEntityClick?: (entityId: string, depth?: "entity" | "device" | "domain") => void;
   collapseKey?: number;
+  revealEntity?: string;
+  mesaProfileEntities?: Set<string>;
+  onOpenMesa?: (entityId: string) => void;
 }
 
 function DomainGroup({
-  domainKey, domainData, permissions, tokenId, filterText, allEntityIds, onPermChange, onEntityClick, collapseKey,
+  domainKey, domainData, permissions, tokenId, filterText, allEntityIds, onPermChange, onEntityClick, collapseKey, revealEntity, mesaProfileEntities, onOpenMesa,
 }: DomainGroupProps) {
   const [expanded, setExpanded] = useState(false);
   const domainNode = permissions.domains[domainKey];
@@ -315,6 +359,11 @@ function DomainGroup({
   useEffect(() => {
     if (filterText) setExpanded(true);
   }, [filterText]);
+
+  // Expand when the reveal target lives in this domain.
+  useEffect(() => {
+    if (revealEntity && revealEntity.split(".")[0] === domainKey) setExpanded(true);
+  }, [revealEntity, domainKey]);
 
   // Collapse when collapseKey changes
   useEffect(() => {
@@ -370,23 +419,6 @@ function DomainGroup({
       </div>
       {expanded && (
         <div className="tree-children" role="group">
-          {Object.entries(domainData.devices).map(([deviceId, device]) => (
-            <DeviceGroup
-              key={deviceId}
-              deviceId={deviceId}
-              deviceName={device.name}
-              domainKey={domainKey}
-              entityIds={device.entities}
-              domainData={domainData}
-              permissions={permissions}
-              tokenId={tokenId}
-              filterText={filterText}
-              allEntityIds={allEntityIds}
-              onPermChange={onPermChange}
-              onEntityClick={onEntityClick}
-              collapseKey={collapseKey}
-            />
-          ))}
           {domainData.deviceless_entities.length > 0 && (
             <div>
               {Object.keys(domainData.devices).length > 0 && (
@@ -397,28 +429,55 @@ function DomainGroup({
                   </span>
                 </div>
               )}
-              {domainData.deviceless_entities.map((eid) => {
-                const detail = domainData.entity_details[eid];
-                return (
-                  <EntityRow
-                    key={eid}
-                    entityId={eid}
-                    friendlyName={detail?.friendly_name ?? null}
-                    deviceId={null}
-                    domainKey={domainKey}
-                    permissions={permissions}
-                    tokenId={tokenId}
-                    indent={1}
-                    filterText={filterText}
-                    isGhost={!allEntityIds.has(eid)}
-                    onPermChange={onPermChange}
-                    onEntityClick={onEntityClick}
-                  />
-                );
-              })}
+              {[...domainData.deviceless_entities]
+                .sort((a, b) => (domainData.entity_details[a]?.friendly_name ?? a).localeCompare(domainData.entity_details[b]?.friendly_name ?? b))
+                .map((eid) => {
+                  const detail = domainData.entity_details[eid];
+                  return (
+                    <EntityRow
+                      key={eid}
+                      entityId={eid}
+                      friendlyName={detail?.friendly_name ?? null}
+                      deviceId={null}
+                      domainKey={domainKey}
+                      permissions={permissions}
+                      tokenId={tokenId}
+                      indent={1}
+                      filterText={filterText}
+                      isGhost={!allEntityIds.has(eid)}
+                      onPermChange={onPermChange}
+                      onEntityClick={onEntityClick}
+                      revealEntity={revealEntity}
+                      mesaProfileEntities={mesaProfileEntities}
+                      onOpenMesa={onOpenMesa}
+                    />
+                  );
+                })}
             </div>
           )}
-          {ghostEntityIds.map((eid) => (
+          {Object.entries(domainData.devices)
+            .sort(([, a], [, b]) => a.name.localeCompare(b.name))
+            .map(([deviceId, device]) => (
+              <DeviceGroup
+                key={deviceId}
+                deviceId={deviceId}
+                deviceName={device.name}
+                domainKey={domainKey}
+                entityIds={device.entities}
+                domainData={domainData}
+                permissions={permissions}
+                tokenId={tokenId}
+                filterText={filterText}
+                allEntityIds={allEntityIds}
+                onPermChange={onPermChange}
+                onEntityClick={onEntityClick}
+                collapseKey={collapseKey}
+                revealEntity={revealEntity}
+                mesaProfileEntities={mesaProfileEntities}
+                onOpenMesa={onOpenMesa}
+              />
+            ))}
+          {[...ghostEntityIds].sort().map((eid) => (
             <EntityRow
               key={eid}
               entityId={eid}
@@ -432,6 +491,9 @@ function DomainGroup({
               isGhost={true}
               onPermChange={onPermChange}
               onEntityClick={onEntityClick}
+              revealEntity={revealEntity}
+              mesaProfileEntities={mesaProfileEntities}
+              onOpenMesa={onOpenMesa}
             />
           ))}
         </div>
@@ -440,7 +502,7 @@ function DomainGroup({
   );
 }
 
-export function EntityTree({ tokenId, permissions, onPermissionsChange, onEntityClick, collapseKey, domainAllowlist }: Props) {
+export function EntityTree({ tokenId, permissions, onPermissionsChange, onEntityClick, collapseKey, domainAllowlist, revealEntity, mesaProfileEntities, onOpenMesa }: Props) {
   const [tree, setTree] = useState<EntityTree | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -505,6 +567,9 @@ export function EntityTree({ tokenId, permissions, onPermissionsChange, onEntity
             onPermChange={onPermissionsChange}
             onEntityClick={onEntityClick}
             collapseKey={collapseKey}
+            revealEntity={revealEntity}
+            mesaProfileEntities={mesaProfileEntities}
+            onOpenMesa={onOpenMesa}
           />
         ))}
       </div>

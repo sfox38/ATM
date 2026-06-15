@@ -800,7 +800,11 @@ def _tool_pending(approval: Any) -> dict:
         "approval_id": approval.id,
         "expires_at": approval.expires_at.isoformat() if approval.expires_at else None,
         "review_url": f"/atm#approvals/{approval.id}",
-        "message": "This action requires admin approval. The admin has been notified.",
+        "message": (
+            "This action requires admin approval. The admin has been notified. "
+            "The result is not returned here; call the get_approval_status tool with "
+            "this approval_id to learn whether it was approved or rejected (and any reason)."
+        ),
     })
     return {"content": [{"type": "text", "text": body}]}
 
@@ -1188,6 +1192,8 @@ async def _execute_call_service(
     body: dict[str, Any] = {"success": True}
     if filtered_response is not None:
         body["service_response"] = filtered_response
+    if mesa_outcome.warnings:
+        body["mesa_advisory"] = mesa_outcome.warnings
 
     return _tool_success(json.dumps(body, default=str)), "allowed", resource
 
@@ -1923,6 +1929,7 @@ async def _tool_intent_action(
     if not entities:
         return _tool_error("No accessible entities matched your request."), "denied", tool_name
 
+    mesa_warnings: list[str] = []
     data = hass.data.get(DOMAIN)
     if data is not None and getattr(data, "mesa", None) is not None:
         request_id = generate_request_id()
@@ -1943,6 +1950,7 @@ async def _tool_intent_action(
         if mesa_outcome.decision == "deny":
             return _tool_error("No accessible entities matched your request."), "denied", tool_name
         entities = mesa_outcome.entities
+        mesa_warnings = mesa_outcome.warnings
 
     call_data = dict(service_data)
     call_data["entity_id"] = entities
@@ -1972,8 +1980,12 @@ async def _tool_intent_action(
         name = state.attributes.get("friendly_name", entity_id) if state else entity_id
         success.append({"name": name, "type": "entity", "id": entity_id})
 
+    speech: dict = {}
+    if mesa_warnings:
+        speech = {"plain": {"speech": " ".join(mesa_warnings), "extra_data": None}}
+
     return _tool_success(json.dumps({
-        "speech": {},
+        "speech": speech,
         "response_type": "action_done",
         "data": {"success": success, "failed": []},
     })), "allowed", tool_name

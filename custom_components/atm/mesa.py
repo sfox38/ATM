@@ -359,6 +359,14 @@ def evaluate_service_entities(
         if rule == "control_mode:confirm_no_channel":
             if confirm_approved or not _host_enforced(settings_mode, result):
                 verdict.allowed.append(entity_id)
+                # Advisory mode lets a confirm entity through; tell the agent why,
+                # since otherwise the call looks identical to an unrestricted one.
+                if not confirm_approved:
+                    verdict.warnings.append(
+                        f"{entity_id}: this action is marked 'confirm' in its MESA profile; "
+                        "proceeding because MESA is in advisory mode (it would require admin "
+                        "approval under enforced mode)."
+                    )
             else:
                 verdict.confirm.append(entity_id)
         else:

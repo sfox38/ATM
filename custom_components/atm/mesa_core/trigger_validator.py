@@ -2,8 +2,8 @@
 
 Cross-references profiles declaring ``triggers_automations: none`` against the
 actual HA automation configurations supplied by the host. An entity declared
-``none`` that appears in an automation trigger or condition block is a stale —
-and unsafe — declaration: agents will skip cascade caution for it.
+``none`` that appears in an automation trigger or condition block is a stale
+and unsafe declaration: agents will skip cascade caution for it.
 
 mesa-core never calls HA: the host provides automation configs through the
 ``get_automation_configs`` callback, from any source (REST API, YAML parse, or

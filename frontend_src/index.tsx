@@ -59,7 +59,32 @@ function ATMApp({ hass, narrow, theme, onThemeChange }: { hass: unknown; narrow:
   const [tokensError, setTokensError] = useState<string | null>(null);
   const [showCreate, setShowCreate] = useState(false);
   const [pendingCount, setPendingCount] = useState<number>(0);
+  const [deepApprovalId, setDeepApprovalId] = useState<string | null>(null);
+  const [mesaProfileTarget, setMesaProfileTarget] = useState<string | null>(null);
   const menuRef = useRef<HTMLElement | null>(null);
+
+  // Jump from a token card to an entity's MESA profile (the MESA tab opens it,
+  // creating a prefilled draft if none exists).
+  const openMesaProfile = useCallback((entityId: string) => {
+    setTab("mesa");
+    setView({ name: "list" });
+    setMesaProfileTarget(entityId);
+  }, []);
+
+  // Deep-link from a notification: /atm#approvals or /atm#approvals/{id} opens
+  // the Approvals tab (and that specific approval's popup).
+  useEffect(() => {
+    function handleHash() {
+      const m = window.location.hash.replace(/^#/, "").match(/^approvals(?:\/(.+))?$/);
+      if (!m) return;
+      setTab("approvals");
+      setView({ name: "list" });
+      if (m[1]) setDeepApprovalId(decodeURIComponent(m[1]));
+    }
+    handleHash();
+    window.addEventListener("hashchange", handleHash);
+    return () => window.removeEventListener("hashchange", handleHash);
+  }, []);
 
   useEffect(() => {
     if (menuRef.current) {
@@ -97,7 +122,9 @@ function ATMApp({ hass, narrow, theme, onThemeChange }: { hass: unknown; narrow:
 
   useEffect(() => {
     refreshPendingCount();
-    const id = setInterval(refreshPendingCount, 30_000);
+    // Poll briskly so the count appears within a few seconds of a request and
+    // clears promptly after the admin resolves it.
+    const id = setInterval(refreshPendingCount, 5_000);
     return () => clearInterval(id);
   }, [refreshPendingCount]);
 
@@ -205,10 +232,22 @@ function ATMApp({ hass, narrow, theme, onThemeChange }: { hass: unknown; narrow:
             tokenId={view.tokenId}
             onBack={goBack}
             onRefresh={refreshTokens}
+            onOpenMesaProfile={openMesaProfile}
           />
         )}
-        {tab === "approvals" && <ApprovalsView onCountChange={refreshPendingCount} />}
-        {tab === "mesa" && <MesaView />}
+        {tab === "approvals" && (
+          <ApprovalsView
+            onCountChange={refreshPendingCount}
+            openApprovalId={deepApprovalId}
+            onConsumedDeepLink={() => setDeepApprovalId(null)}
+          />
+        )}
+        {tab === "mesa" && (
+          <MesaView
+            openProfileEntityId={mesaProfileTarget}
+            onProfileOpened={() => setMesaProfileTarget(null)}
+          />
+        )}
         {tab === "audit" && <AuditView tokens={tokens} />}
         {tab === "settings" && (
           <SettingsView

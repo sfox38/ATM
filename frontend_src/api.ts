@@ -160,6 +160,8 @@ export const api = {
   deleteMesaProfile: (entityId: string) =>
     req<{ entity_id: string; deleted: boolean }>("DELETE", `/mesa/profiles/${encodeURIComponent(entityId)}`),
 
+  listMesaDomains: () =>
+    req<{ domains: { domain: string; document: MesaProfileDocument }[] }>("GET", "/mesa/domains"),
   getMesaDomain: (domain: string) =>
     req<{ domain: string; stored: MesaProfileDocument | null }>("GET", `/mesa/domains/${encodeURIComponent(domain)}`),
   putMesaDomain: (domain: string, doc: MesaProfileDocument) =>
@@ -167,12 +169,17 @@ export const api = {
   deleteMesaDomain: (domain: string) =>
     req<{ domain: string; deleted: boolean }>("DELETE", `/mesa/domains/${encodeURIComponent(domain)}`),
 
+  listMesaAreas: () =>
+    req<{ areas: { area_id: string; document: MesaProfileDocument }[] }>("GET", "/mesa/areas"),
   getMesaArea: (areaId: string) =>
     req<{ area_id: string; stored: MesaProfileDocument | null }>("GET", `/mesa/areas/${encodeURIComponent(areaId)}`),
   putMesaArea: (areaId: string, doc: MesaProfileDocument) =>
     req<{ area_id: string; stored: MesaProfileDocument }>("PUT", `/mesa/areas/${encodeURIComponent(areaId)}`, doc),
   deleteMesaArea: (areaId: string) =>
     req<{ area_id: string; deleted: boolean }>("DELETE", `/mesa/areas/${encodeURIComponent(areaId)}`),
+
+  getMesaVocabulary: () =>
+    req<{ canonical_tags: string[]; canonical_roots: string[] }>("GET", "/mesa/vocabulary"),
 
   getMesaIssues: (refresh = false) =>
     req<MesaIssuesResponse>("GET", `/mesa/issues${refresh ? "?refresh=1" : ""}`),

@@ -8,52 +8,113 @@ import { formatDateTime } from "../utils";
 interface Props {
   /** Called when an approval resolves so the parent can refresh the badge count. */
   onCountChange?: () => void;
+  /** Deep-link target from a notification (/atm#approvals/{id}); opens that approval. */
+  openApprovalId?: string | null;
+  /** Called once the deep-link has been consumed so the parent can clear it. */
+  onConsumedDeepLink?: () => void;
 }
 
 const POLL_INTERVAL_MS = 10_000;
+const HISTORY_PAGE = 50;
+const HISTORY_FILTERS: (ApprovalStatus | "all")[] = ["all", "approved", "rejected", "expired", "cancelled"];
+const FILTER_LABEL: Record<string, string> = {
+  all: "All", approved: "Approved", rejected: "Rejected", expired: "Expired", cancelled: "Cancelled",
+};
 
-export function ApprovalsView({ onCountChange }: Props) {
+export function ApprovalsView({ onCountChange, openApprovalId, onConsumedDeepLink }: Props) {
   const [tab, setTab] = useState<"pending" | "history">("pending");
   const [records, setRecords] = useState<ApprovalRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<ApprovalRecord | null>(null);
+  const [histFilter, setHistFilter] = useState<ApprovalStatus | "all">("all");
+  const [search, setSearch] = useState("");
+  const [hasMore, setHasMore] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [rawOffset, setRawOffset] = useState(0);  // raw records fetched (drives pagination)
 
-  const load = useCallback(async () => {
+  const loadPending = useCallback(async () => {
     setError(null);
     try {
-      const status: ApprovalStatus | undefined = tab === "pending" ? "pending" : undefined;
-      const resp = await api.listApprovals(status ? { status } : {});
-      const list = tab === "pending"
-        ? resp.approvals
-        : resp.approvals.filter((r) => r.status !== "pending");
-      setRecords(list);
+      const resp = await api.listApprovals({ status: "pending" });
+      setRecords(resp.approvals);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Failed to load approvals.");
     } finally {
       setLoading(false);
     }
-  }, [tab]);
+  }, []);
 
+  const loadHistory = useCallback(async (offset: number) => {
+    setError(null);
+    try {
+      const resp = await api.listApprovals({
+        status: histFilter === "all" ? undefined : histFilter,
+        limit: HISTORY_PAGE,
+        offset,
+      });
+      const page = histFilter === "all"
+        ? resp.approvals.filter((r) => r.status !== "pending")
+        : resp.approvals;
+      setRecords((prev) => {
+        if (offset === 0) return page;
+        const seen = new Set(prev.map((r) => r.id));
+        return [...prev, ...page.filter((r) => !seen.has(r.id))];
+      });
+      setRawOffset(offset + resp.approvals.length);
+      setHasMore(offset + resp.approvals.length < resp.total);
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Failed to load approvals.");
+    } finally {
+      setLoading(false);
+      setLoadingMore(false);
+    }
+  }, [histFilter]);
+
+  // (Re)load when the tab or the history filter changes.
   useEffect(() => {
     setLoading(true);
-    load();
-  }, [load]);
+    setRecords([]);
+    if (tab === "pending") loadPending();
+    else loadHistory(0);
+  }, [tab, histFilter, loadPending, loadHistory]);
 
-  // Poll while pending tab is open.
+  // Poll while the pending tab is open.
   useEffect(() => {
     if (tab !== "pending") return;
-    const id = setInterval(load, POLL_INTERVAL_MS);
+    const id = setInterval(loadPending, POLL_INTERVAL_MS);
     return () => clearInterval(id);
-  }, [tab, load]);
+  }, [tab, loadPending]);
+
+  // Consume a notification deep-link: fetch the approval and open it.
+  useEffect(() => {
+    if (!openApprovalId) return;
+    let cancelled = false;
+    api.getApproval(openApprovalId)
+      .then((rec) => {
+        if (cancelled) return;
+        setTab(rec.status === "pending" ? "pending" : "history");
+        setSelected(rec);
+      })
+      .catch(() => { /* stale/unknown id: ignore */ })
+      .finally(() => onConsumedDeepLink?.());
+    return () => { cancelled = true; };
+  }, [openApprovalId, onConsumedDeepLink]);
 
   function handleResolved(updated: ApprovalRecord) {
     setSelected(null);
     setRecords((prev) => prev.filter((r) => r.id !== updated.id));
-    // Refresh in case the resolution affects history view.
-    load();
+    if (tab === "pending") loadPending();
     onCountChange?.();
   }
+
+  const shown = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q || tab === "pending") return records;
+    return records.filter((r) =>
+      `${r.token_name} ${r.tool_name} ${r.diff?.summary ?? ""} ${r.rejected_reason ?? ""}`.toLowerCase().includes(q),
+    );
+  }, [records, search, tab]);
 
   if (loading) return <Loading />;
 
@@ -78,25 +139,56 @@ export function ApprovalsView({ onCountChange }: Props) {
         </button>
       </div>
 
-      {error && <ErrorMsg msg={error} />}
-
-      {records.length === 0 && !error && (
-        <div className="approvals-empty">
-          {tab === "pending"
-            ? "No pending approvals. Tokens with Confirm-mode capabilities will create requests here."
-            : "No resolved approvals yet."}
+      {tab === "history" && (
+        <div className="mesa-controls">
+          <div className="mesa-summary" role="group" aria-label="Filter by status">
+            {HISTORY_FILTERS.map((f) => (
+              <button key={f}
+                className={`mesa-chip${histFilter === f ? " mesa-chip-active" : ""}`}
+                onClick={() => setHistFilter(f)}>
+                {FILTER_LABEL[f]}
+              </button>
+            ))}
+          </div>
+          <input className="input mesa-search" placeholder="Search token, tool, or reason..."
+            value={search} onChange={(e) => setSearch(e.target.value)} aria-label="Search approvals" />
         </div>
       )}
 
-      <div className="approvals-list">
-        {records.map((r) => (
-          <ApprovalCard
-            key={r.id}
-            record={r}
-            onClick={() => setSelected(r)}
-          />
-        ))}
-      </div>
+      {error && <ErrorMsg msg={error} />}
+
+      {shown.length === 0 && !error && (
+        <div className="approvals-empty">
+          {tab === "pending"
+            ? "No pending approvals. Tokens with Confirm-mode capabilities will create requests here."
+            : search.trim() ? "No approvals match your search." : "No resolved approvals yet."}
+        </div>
+      )}
+
+      {tab === "pending" ? (
+        <div className="approvals-list">
+          {shown.map((r) => (
+            <ApprovalCard key={r.id} record={r} onClick={() => setSelected(r)} />
+          ))}
+        </div>
+      ) : (
+        shown.length > 0 && (
+          <div className="card approval-history">
+            {shown.map((r) => (
+              <HistoryRow key={r.id} record={r} onClick={() => setSelected(r)} />
+            ))}
+          </div>
+        )
+      )}
+
+      {tab === "history" && hasMore && !search.trim() && (
+        <div className="approval-history-more">
+          <button className="btn btn-ghost btn-sm" disabled={loadingMore}
+            onClick={() => { setLoadingMore(true); loadHistory(rawOffset); }}>
+            {loadingMore ? "Loading..." : "Load more"}
+          </button>
+        </div>
+      )}
 
       {selected && (
         <ApprovalDetailModal
@@ -106,6 +198,19 @@ export function ApprovalsView({ onCountChange }: Props) {
         />
       )}
     </div>
+  );
+}
+
+function HistoryRow({ record, onClick }: { record: ApprovalRecord; onClick: () => void }) {
+  const note = record.diff?.summary || (record.rejected_reason ? `Reason: ${record.rejected_reason}` : record.tool_name);
+  return (
+    <button type="button" className="approval-history-row" onClick={onClick}>
+      <StatusBadge status={record.status} />
+      <code className="approval-history-tool">{record.tool_name}</code>
+      <span className="approval-history-token">{record.token_name}</span>
+      <span className="approval-history-note">{note}</span>
+      <span className="approval-history-time">{formatDateTime(record.resolved_at || record.created_at)}</span>
+    </button>
   );
 }
 
@@ -230,11 +335,16 @@ function ApprovalDetailModal({ record, onClose, onResolved }: DetailProps) {
         <span>{formatDateTime(record.expires_at)}</span>
         <span className="stat-label">Status</span>
         <span><StatusBadge status={record.status} /></span>
-        {record.rejected_reason && (<>
-          <span className="stat-label">Reason</span>
-          <span>{record.rejected_reason}</span>
-        </>)}
       </div>
+
+      {!isPending && record.rejected_reason && (
+        <div className="banner banner-error">
+          <strong>
+            {record.status === "rejected" ? "Rejected" : record.status === "cancelled" ? "Cancelled" : "Reason"}:
+          </strong>{" "}
+          {record.rejected_reason}
+        </div>
+      )}
 
       <div className="approval-detail-tabs" role="tablist">
         <button
@@ -271,7 +381,15 @@ function ApprovalDetailModal({ record, onClose, onResolved }: DetailProps) {
           <pre className="approval-pre">{JSON.stringify(record.args, null, 2)}</pre>
         )}
         {activeTab === "result" && (
-          <pre className="approval-pre">{JSON.stringify(record.result, null, 2)}</pre>
+          record.result == null ? (
+            <p className="approvals-empty">
+              {record.rejected_reason
+                ? `No result. ${record.status === "rejected" ? "Rejected" : "Cancelled"}: ${record.rejected_reason}`
+                : `No result recorded (status: ${record.status}).`}
+            </p>
+          ) : (
+            <pre className="approval-pre">{JSON.stringify(record.result, null, 2)}</pre>
+          )
         )}
       </div>
 
@@ -354,6 +472,21 @@ function BeforeAfter({ before, after }: { before: string | null; after: string |
   );
 }
 
+// Render a preview value for the review UI. Nested objects (e.g. service_data)
+// are flattened to "key: value" pairs so they never show as "[object Object]".
+function renderPreviewValue(v: unknown): string {
+  if (v == null) return "(none)";
+  if (Array.isArray(v)) return v.length ? v.join(", ") : "(none)";
+  if (typeof v === "object") {
+    const entries = Object.entries(v as Record<string, unknown>);
+    if (entries.length === 0) return "(none)";
+    return entries
+      .map(([k, val]) => `${k}: ${val !== null && typeof val === "object" ? JSON.stringify(val) : String(val)}`)
+      .join(", ");
+  }
+  return String(v);
+}
+
 function ServicePreview({ preview }: { preview: Record<string, unknown> }) {
   const mesa = preview.mesa as Record<string, unknown> | undefined;
   return (
@@ -362,7 +495,7 @@ function ServicePreview({ preview }: { preview: Record<string, unknown> }) {
         {Object.entries(preview).filter(([k]) => k !== "mesa").map(([k, v]) => (
           <React.Fragment key={k}>
             <span className="stat-label">{k}</span>
-            <span><code>{Array.isArray(v) ? v.join(", ") : v == null ? "(none)" : String(v)}</code></span>
+            <span><code>{renderPreviewValue(v)}</code></span>
           </React.Fragment>
         ))}
       </div>

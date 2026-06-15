@@ -201,6 +201,14 @@ class ProfileStore:
     def entity_keys(self) -> list[str]:
         return [k for k in self.backend.list_keys() if not k.startswith("__")]
 
+    def domain_keys(self) -> list[str]:
+        """Domain names that have a domain-level profile stored."""
+        return [k[len(_DOMAIN_PREFIX) :] for k in self.backend.list_keys(_DOMAIN_PREFIX)]
+
+    def area_keys(self) -> list[str]:
+        """Area IDs that have an area-level profile stored."""
+        return [k[len(_AREA_PREFIX) :] for k in self.backend.list_keys(_AREA_PREFIX)]
+
     def find_orphans(self, known_entity_ids: Iterable[str]) -> list[str]:
         """Stored entity profile keys absent from the deployment's entity registry.
 

@@ -20,6 +20,7 @@ interface Props {
   tokenId: string;
   onBack: () => void;
   onRefresh?: () => void;
+  onOpenMesaProfile?: (entityId: string) => void;
 }
 
 
@@ -136,8 +137,9 @@ function ToolAnnouncementToggle({ token, onUpdate }: { token: TokenRecord; onUpd
   );
 }
 
-export function TokenDetailView({ tokenId, onBack, onRefresh }: Props) {
+export function TokenDetailView({ tokenId, onBack, onRefresh, onOpenMesaProfile }: Props) {
   const [token, setToken] = useState<TokenRecord | null>(null);
+  const [mesaProfileEntities, setMesaProfileEntities] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [revoking, setRevoking] = useState(false);
@@ -173,6 +175,14 @@ export function TokenDetailView({ tokenId, onBack, onRefresh }: Props) {
 
   useEffect(() => {
     api.getEntityTree().then(setEntityTree).catch(() => null);
+  }, []);
+
+  // Which entities already have a MESA profile, so the cards can show
+  // "view" vs "create". Re-fetched on mount (i.e. when returning from MESA tab).
+  useEffect(() => {
+    api.listMesaProfiles({ limit: 500 })
+      .then((r) => setMesaProfileEntities(new Set(r.profiles.map((p) => p.entity_id))))
+      .catch(() => null);
   }, []);
 
   async function revoke() {
@@ -370,6 +380,8 @@ export function TokenDetailView({ tokenId, onBack, onRefresh }: Props) {
                 externalEntityId={selectedEntityId || undefined}
                 resolveDepth={selectedDepth}
                 triggerVersion={permissionsVersion}
+                mesaProfileEntities={mesaProfileEntities}
+                onOpenMesa={onOpenMesaProfile}
               />
             )}
           </div>
@@ -403,6 +415,8 @@ export function TokenDetailView({ tokenId, onBack, onRefresh }: Props) {
                   permissions={token.permissions}
                   entityTree={entityTree}
                   onEntityClick={(eid, depth = "entity") => { setSelectedEntityId(eid); setSelectedDepth(depth); }}
+                  mesaProfileEntities={mesaProfileEntities}
+                  onOpenMesa={onOpenMesaProfile}
                 />
               </div>
             )}
@@ -441,6 +455,9 @@ export function TokenDetailView({ tokenId, onBack, onRefresh }: Props) {
                   }}
                   onEntityClick={(eid, depth = "entity") => { setSelectedEntityId(eid); setSelectedDepth(depth); }}
                   collapseKey={collapseTreeKey}
+                  revealEntity={selectedEntityId || undefined}
+                  mesaProfileEntities={mesaProfileEntities}
+                  onOpenMesa={onOpenMesaProfile}
                 />
               </div>
             )}

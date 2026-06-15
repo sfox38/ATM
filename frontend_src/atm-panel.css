@@ -204,7 +204,7 @@
 .atm-tab-badge {
   display: inline-flex; align-items: center; justify-content: center;
   margin-left: 8px; padding: 0 6px; min-width: 18px; height: 18px;
-  border-radius: 9px; background: var(--atm-warning, #ef6c00); color: #fff;
+  border-radius: 9px; background: var(--atm-error, #d32f2f); color: #fff;
   font-size: 10px; font-weight: 700; letter-spacing: 0;
   line-height: 1;
 }
@@ -660,6 +660,8 @@ select.input {
 .tree-filter { margin-bottom: 12px; display: flex; gap: 8px; }
 .tree-node { display: flex; align-items: center; gap: 8px; padding: 4px 6px; border-radius: var(--atm-radius-xs); transition: background 0.12s; }
 .tree-node:hover { background: var(--atm-accent-lt); }
+.tree-node-revealed { background: var(--atm-accent-lt); box-shadow: inset 3px 0 0 var(--atm-accent); animation: tree-reveal-flash 1.2s ease-out; }
+@keyframes tree-reveal-flash { 0% { background: var(--atm-accent); } 100% { background: var(--atm-accent-lt); } }
 .tree-expand {
   width: 20px; height: 20px; border: none; background: none; cursor: pointer;
   color: var(--atm-text-2); font-size: 10px; flex-shrink: 0;
@@ -1098,6 +1100,23 @@ select.input {
 .approval-card-reason { font-size: 11px; color: var(--atm-text-2); margin-top: 4px; font-style: italic; }
 .approval-card-time { font-size: 11px; }
 
+/* Compact history rows (resolved approvals are read-only records) */
+.approval-history { padding: 0; overflow: hidden; }
+.approval-history-row {
+  display: flex; align-items: center; gap: 10px; width: 100%;
+  padding: 8px 12px; background: none; border: none;
+  border-bottom: 1px solid var(--atm-border); cursor: pointer; text-align: left;
+  font-size: 13px; color: var(--atm-text);
+}
+.approval-history-row:last-child { border-bottom: none; }
+.approval-history-row:hover { background: var(--atm-surface-2); }
+.approval-history-tool { font-size: 12px; color: var(--atm-text-2); flex: 0 0 auto; }
+.approval-history-token { font-weight: 600; flex: 0 0 auto; }
+.approval-history-note { color: var(--atm-text-2); flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.approval-history-time { font-size: 11px; color: var(--atm-text-2); flex: 0 0 auto; }
+.approval-history-more { display: flex; justify-content: center; margin-top: 10px; }
+@media (max-width: 600px) { .approval-history-token, .approval-history-tool { display: none; } }
+
 .approval-detail-meta {
   display: grid; grid-template-columns: max-content 1fr; gap: 4px 12px;
   margin: 12px 0; font-size: 12px;
@@ -1196,3 +1215,159 @@ select.input {
 .mesa-preview-block { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--atm-border); }
 .mesa-preview-warnings { margin: 6px 0 0 0; padding-left: 18px; font-size: 12px; color: var(--atm-text-2); }
 .mesa-scope-note { font-size: 12px; color: var(--atm-text-2); margin: 0 0 10px 0; }
+
+/* MESA profile editor: tidy two-column form, fuzzy key search, inline help */
+.mesa-editor-body .field { margin-bottom: 14px; }
+.mesa-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 16px; }
+.mesa-field-label {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 11px; font-weight: 700; color: var(--atm-text-2);
+  text-transform: uppercase; letter-spacing: 0.07em;
+}
+.help-tip {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 14px; height: 14px; border-radius: 50%; flex: 0 0 auto;
+  background: var(--atm-border); color: var(--atm-text-2);
+  font-size: 10px; font-weight: 700; line-height: 1; cursor: help;
+  text-transform: none; letter-spacing: 0;
+}
+.help-tip:hover, .help-tip:focus-visible { background: var(--atm-accent); color: #fff; outline: none; }
+.combo { position: relative; }
+.combo-list {
+  position: absolute; z-index: 30; top: calc(100% + 2px); left: 0; right: 0;
+  margin: 0; padding: 4px; list-style: none;
+  background: var(--atm-surface); border: 1.5px solid var(--atm-border);
+  border-radius: var(--atm-radius-sm); box-shadow: 0 6px 18px rgba(0,0,0,0.12);
+  max-height: 240px; overflow-y: auto;
+}
+.combo-option {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 8px;
+  padding: 7px 9px; border-radius: var(--atm-radius-xs); cursor: pointer; font-size: 13px;
+}
+.combo-option:hover, .combo-option[aria-selected="true"] { background: var(--atm-accent-lt); }
+.combo-option-label { color: var(--atm-text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.combo-option-sub { color: var(--atm-text-2); font-size: 11px; flex: 0 0 auto; }
+@media (max-width: 600px) { .mesa-grid { grid-template-columns: 1fr; } }
+
+/* MESA semantic-tag input (GitHub-topics style, canonical-only) */
+.tag-input-wrap { position: relative; }
+.tag-input {
+  position: relative;
+  display: flex; flex-wrap: wrap; gap: 6px; align-items: center;
+  padding: 6px 8px; min-height: 40px; cursor: text;
+  border: 1.5px solid var(--atm-border); border-radius: var(--atm-radius-sm);
+  background: var(--atm-surface);
+}
+.tag-input:focus-within { border-color: var(--atm-accent); box-shadow: 0 0 0 3px var(--atm-accent-lt); }
+.tag-chip {
+  display: inline-flex; align-items: center; gap: 5px; padding: 2px 4px 2px 8px;
+  border-radius: 12px; background: var(--atm-accent-lt); font-size: 12px; max-width: 100%;
+}
+.tag-chip-ns { color: var(--atm-text-2); font-size: 11px; }
+.tag-chip-ns::after { content: "\203a"; margin-left: 4px; opacity: 0.6; }
+.tag-chip-qual { color: var(--atm-text); font-weight: 600; overflow: hidden; text-overflow: ellipsis; }
+.tag-chip-x {
+  border: none; background: none; cursor: pointer; color: var(--atm-text-2);
+  font-size: 15px; line-height: 1; padding: 0 2px; border-radius: 50%;
+}
+.tag-chip-x:hover { color: var(--atm-error); }
+.tag-input-field {
+  flex: 1 1 120px; min-width: 80px; border: none; outline: none; background: none;
+  color: var(--atm-text); font-size: 14px; font-family: inherit; padding: 4px 2px;
+}
+.tag-suggest {
+  position: absolute; z-index: 30; top: 100%; left: 0; right: 0; margin: 2px 0 0 0;
+  padding: 4px; list-style: none; max-height: 240px; overflow-y: auto;
+  background: var(--atm-surface); border: 1.5px solid var(--atm-border);
+  border-radius: var(--atm-radius-sm); box-shadow: 0 6px 18px rgba(0,0,0,0.12);
+}
+.tag-suggest-item {
+  display: flex; align-items: baseline; gap: 6px; padding: 7px 9px;
+  border-radius: var(--atm-radius-xs); cursor: pointer; font-size: 13px;
+}
+.tag-suggest-item.active, .tag-suggest-item:hover { background: var(--atm-accent-lt); }
+.tag-suggest-ns { color: var(--atm-text-2); font-size: 12px; }
+.tag-suggest-ns::after { content: "\203a"; margin-left: 6px; opacity: 0.6; }
+.tag-suggest-qual { color: var(--atm-text); font-weight: 600; }
+.tag-input-note { font-size: 12px; color: var(--atm-text-2); margin-top: 5px; }
+.mesa-taglabel-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.link-btn {
+  border: none; background: none; cursor: pointer; padding: 0;
+  color: var(--atm-accent); font-size: 12px; font-weight: 600; font-family: inherit;
+}
+.link-btn:hover { text-decoration: underline; }
+.tag-reco { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 0 0 8px 0; }
+
+/* Inline "jump to MESA profile" affordance (token cards) */
+.mesa-link {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 18px; height: 18px; padding: 0 5px; flex: 0 0 auto;
+  border: 1px solid var(--atm-border); border-radius: 9px; background: var(--atm-surface);
+  color: var(--atm-text-2); font-size: 10px; font-weight: 700; line-height: 1; cursor: pointer;
+  text-transform: uppercase; letter-spacing: 0.04em;
+}
+.mesa-link:hover { border-color: var(--atm-accent); color: var(--atm-accent); background: var(--atm-accent-lt); }
+.mesa-link-exists { border-color: var(--atm-accent); color: var(--atm-accent); }
+.perm-summary-td-name { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.perm-summary-name-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.sim-mesa-row { display: flex; align-items: center; gap: 6px; margin-top: 8px; font-size: 12px; color: var(--atm-text-2); }
+.tag-reco-chip {
+  display: inline-flex; align-items: center; gap: 5px; padding: 3px 9px;
+  border: 1px dashed var(--atm-border); border-radius: 12px; background: none;
+  cursor: pointer; font-size: 12px;
+}
+.tag-reco-chip:hover { border-color: var(--atm-accent); border-style: solid; background: var(--atm-accent-lt); }
+
+/* MESA list: summary filter chips, search, and domain groups */
+.mesa-controls { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+.mesa-summary { display: flex; flex-wrap: wrap; gap: 6px; }
+.mesa-chip {
+  display: inline-flex; align-items: center; gap: 6px; padding: 4px 11px;
+  border-radius: 14px; border: 1.5px solid var(--atm-border); background: var(--atm-surface);
+  color: var(--atm-text); font-size: 12px; font-weight: 600; cursor: pointer;
+  transition: border-color 0.12s, background 0.12s;
+}
+.mesa-chip:hover { border-color: var(--atm-accent); }
+.mesa-chip-active { border-color: var(--atm-accent); background: var(--atm-accent-lt); }
+.mesa-chip-count { font-size: 11px; color: var(--atm-text-2); background: var(--atm-surface-2); padding: 0 6px; border-radius: 8px; }
+.mesa-chip-active .mesa-chip-count { color: var(--atm-accent); }
+.mesa-search { max-width: 260px; flex: 1 1 180px; }
+.mesa-groups { display: flex; flex-direction: column; gap: 10px; }
+.mesa-group { padding: 0; overflow: hidden; }
+.mesa-group-header {
+  display: flex; align-items: center; gap: 8px; width: 100%;
+  padding: 9px 14px; background: var(--atm-surface-2); border: none;
+  border-bottom: 1px solid var(--atm-border); cursor: pointer;
+  font-size: 13px; color: var(--atm-text); text-align: left;
+}
+.mesa-group-header:hover { background: var(--atm-accent-lt); }
+.mesa-group-caret { display: inline-block; transition: transform 0.15s; font-size: 11px; color: var(--atm-text-2); }
+.mesa-group-caret.collapsed { transform: rotate(-90deg); }
+.mesa-group-count { margin-left: auto; font-size: 11px; color: var(--atm-text-2); background: var(--atm-surface); padding: 1px 8px; border-radius: 8px; }
+/* Fixed layout + shared widths so every domain group's columns line up, and a
+   long tag list truncates instead of squeezing the mode badges. */
+.mesa-group .data-table { table-layout: fixed; }
+.mesa-group .data-table td { vertical-align: middle; overflow: hidden; }
+.mesa-group .data-table td:nth-child(2) { width: 185px; }
+.mesa-group .data-table td:nth-child(3) { width: 22%; }
+.mesa-row-name { font-size: 13px; color: var(--atm-text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mesa-row-id { font-size: 11px; color: var(--atm-text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mesa-row-modes { display: flex; gap: 6px; flex-wrap: wrap; }
+.mesa-row-tags { font-size: 12px; color: var(--atm-text-2); white-space: normal; overflow-wrap: anywhere; }
+@media (max-width: 600px) { .mesa-search { max-width: none; } }
+
+/* MESA list: domain & area (scope) profiles */
+.mesa-scope-card { margin-bottom: 12px; }
+.mesa-scope-card-title { font-size: 13px; font-weight: 700; color: var(--atm-text); }
+.mesa-scope-card-sub { font-size: 12px; color: var(--atm-text-2); margin: 4px 0 10px 0; }
+.mesa-scope-list { display: flex; flex-wrap: wrap; gap: 8px; }
+.mesa-scope-pill {
+  display: inline-flex; align-items: center; gap: 8px; padding: 6px 10px;
+  border: 1.5px solid var(--atm-border); border-radius: var(--atm-radius-sm);
+  background: var(--atm-surface); color: var(--atm-text); cursor: pointer; font-size: 13px;
+}
+.mesa-scope-pill:hover { border-color: var(--atm-accent); background: var(--atm-accent-lt); }
+.mesa-scope-kind {
+  font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em;
+  color: var(--atm-text-2); background: var(--atm-surface-2); padding: 1px 6px; border-radius: 6px;
+}

@@ -359,6 +359,8 @@ class ATMServiceView(HomeAssistantView):
         resp_body: dict[str, Any] = {"success": True}
         if filtered_response is not None:
             resp_body["service_response"] = filtered_response
+        if mesa_outcome.warnings:
+            resp_body["mesa_advisory"] = mesa_outcome.warnings
 
         return _json_response(resp_body, 200, request_id, rl_result, extra_headers=extra)
 

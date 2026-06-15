@@ -1,10 +1,13 @@
 import React, { useState, useMemo } from "react";
 import type { PermissionTree, NodeState, EntityTree } from "../types";
+import { MesaProfileLink } from "./MesaProfileLink";
 
 interface Props {
   permissions: PermissionTree;
   entityTree?: EntityTree | null;
   onEntityClick?: (entityId: string, depth?: "entity" | "device" | "domain") => void;
+  mesaProfileEntities?: Set<string>;
+  onOpenMesa?: (entityId: string) => void;
 }
 
 const STATE_LABEL: Record<NodeState, string> = {
@@ -131,7 +134,7 @@ function EffectiveCell({ permissions, item, entityToDevice, deviceDomain }: {
   return <td className="perm-summary-td"><span className={STATE_CLASS[eff]}>{STATE_LABEL[eff]}</span></td>;
 }
 
-export function PermissionSummary({ permissions, entityTree, onEntityClick }: Props) {
+export function PermissionSummary({ permissions, entityTree, onEntityClick, mesaProfileEntities, onOpenMesa }: Props) {
   const [sortCol, setSortCol] = useState<SortCol>("type");
   const [sortDir, setSortDir] = useState<SortDir>("asc");
 
@@ -227,12 +230,21 @@ export function PermissionSummary({ permissions, entityTree, onEntityClick }: Pr
                   {TYPE_LABEL[item.type]}
                 </span>
               </td>
-              <td
-                className={`perm-summary-td-name${isClickable ? " clickable" : ""}`}
-                onClick={handleClick}
-                title={title}
-              >
-                {item.friendlyName !== item.id ? item.friendlyName : <span className="state-GREY">-</span>}
+              <td className="perm-summary-td-name">
+                {item.type === "entity" && onOpenMesa && (
+                  <MesaProfileLink
+                    entityId={item.id}
+                    exists={!!mesaProfileEntities?.has(item.id)}
+                    onOpen={onOpenMesa}
+                  />
+                )}
+                <span
+                  className={`perm-summary-name-text${isClickable ? " clickable" : ""}`}
+                  onClick={handleClick}
+                  title={title}
+                >
+                  {item.friendlyName !== item.id ? item.friendlyName : <span className="state-GREY">-</span>}
+                </span>
               </td>
               <td
                 className={`perm-summary-td-id${isClickable ? " clickable" : ""}`}
