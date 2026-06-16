@@ -797,7 +797,7 @@ Some operations require explicit opt-in even for tokens with 🟢 GREEN domain a
 | `cap_helper_write` | Creating, editing, and deleting helpers (Confirm-eligible) | yes |
 | `cap_integration_write` | Enabling and disabling integrations (Confirm-eligible) | yes |
 | `cap_lovelace_write` | Creating, editing, and deleting dashboards (Confirm-eligible) | yes |
-| `cap_backup` | Creating and restoring backups (Confirm-eligible) | yes |
+| `cap_backup` | Creating and listing backups (Confirm-eligible); restore is not exposed | yes |
 | `cap_filesystem` | Reading and writing files under `www/`, `themes/`, `custom_templates/` (Confirm-eligible) | yes |
 | `cap_yaml_edit` | Editing `configuration.yaml` directly (Confirm-eligible) | yes |
 

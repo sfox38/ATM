@@ -214,9 +214,15 @@ PERSONA_AUTOMATION_BUILDER = "automation_builder"
 PERSONA_POWER_USER = "power_user"
 PERSONA_HOME_ADMIN = "home_admin"
 PERSONA_CUSTOM = "custom"
-# Gentle starter persona seeded by the onboarding wizard. Hidden from the normal
-# persona picker; reads plus service calls, physical control gated to confirm.
+# Gentle starter persona: reads plus service calls, physical control gated to
+# confirm. Seeded by the onboarding wizard and also offered in the normal picker.
 PERSONA_NEW_USER = "new_user"
+# Dashboard/UI work: reads + registry + dashboard write; filesystem confirm for
+# theme and custom-card assets. No device control.
+PERSONA_DASHBOARD_DESIGNER = "dashboard_designer"
+# Routine upkeep: full reads + diagnostics + backups; restart gated to confirm.
+# No config authoring or device control.
+PERSONA_MAINTENANCE = "maintenance"
 PERSONA_NAMES = frozenset({
     PERSONA_READ_ONLY,
     PERSONA_VOICE_ASSISTANT,
@@ -224,6 +230,8 @@ PERSONA_NAMES = frozenset({
     PERSONA_POWER_USER,
     PERSONA_HOME_ADMIN,
     PERSONA_NEW_USER,
+    PERSONA_DASHBOARD_DESIGNER,
+    PERSONA_MAINTENANCE,
     PERSONA_CUSTOM,
 })
 

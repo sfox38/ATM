@@ -7,9 +7,11 @@ import { formatDateTime, tokenStatus } from "../utils";
 import { Modal } from "../components/Modal";
 import { RawTokenDisplay } from "../components/TokenCreateModal";
 import { ConnectInstructions } from "../components/ConnectInstructions";
-import { CapabilityMatrix } from "../components/CapabilityMatrix";
+import { CapabilityMatrix, CAP_NAMES } from "../components/CapabilityMatrix";
 import { PersonaPicker } from "../components/PersonaPicker";
+import { PERSONAS } from "../personas";
 import { RateLimitConfig } from "../components/RateLimitConfig";
+import { CollapsibleCard } from "../components/CollapsibleCard";
 import { PassThroughNotice } from "../components/PassThroughNotice";
 import { EntityTree } from "../components/EntityTree";
 import { PermissionSummary } from "../components/PermissionSummary";
@@ -254,6 +256,18 @@ export function TokenDetailView({ tokenId, onBack, onRefresh, onOpenMesaProfile 
   const status = tokenStatus(token);
   const statusClass = status === "Active" ? "badge-green" : status === "Expired" ? "badge-grey" : "badge-red";
 
+  // One-line summaries shown on the collapsed Advanced cards.
+  const personaLabel = PERSONAS.find((p) => p.key === token.persona)?.label ?? "Custom";
+  const capCounts = CAP_NAMES.reduce(
+    (acc, k) => { acc[token[k]] = (acc[token[k]] ?? 0) + 1; return acc; },
+    { allow: 0, confirm: 0, deny: 0 } as Record<string, number>,
+  );
+  const capsSummary = `${personaLabel} · ${capCounts.allow} allow / ${capCounts.confirm} confirm / ${capCounts.deny} deny`;
+  const announceSummary = token.announce_all_tools ? "All tools announced" : "Scoped to capabilities";
+  const rateSummary = token.rate_limit_requests > 0
+    ? `${token.rate_limit_requests}/min · burst ${token.rate_limit_burst}`
+    : "No limit";
+
   return (
     <div className="token-detail-wrap">
 
@@ -316,7 +330,7 @@ export function TokenDetailView({ tokenId, onBack, onRefresh, onOpenMesaProfile 
         {token.pass_through && (
           <div className="pass-through-header-banner">
             <p>
-              <strong className="text-warning">This is a Pass Through token.</strong> It bypasses the permission tree and has unrestricted access to Home Assistant entities and services. Sensitive attributes are still scrubbed, and the five exempt flags below still apply. The ATM domain is always blocked regardless of token configuration.
+              <strong className="text-warning">This is a Pass Through token.</strong> It bypasses the permission tree and has unrestricted access to Home Assistant entities and services. Sensitive attributes are still scrubbed, and the exempt capabilities still apply (write, system, and irreversible caps, plus log reading, stay enforced as set). The ATM domain is always blocked regardless of token configuration.
             </p>
           </div>
         )}
@@ -396,18 +410,18 @@ export function TokenDetailView({ tokenId, onBack, onRefresh, onOpenMesaProfile 
               <div className="card-header">Persona</div>
               <PersonaPicker token={token} onUpdate={setToken} />
             </div>
-            <div className="card">
-              <div className="card-header">Capabilities</div>
+
+            <div className="advanced-section-label">Advanced</div>
+            <CollapsibleCard title="Capabilities" summary={capsSummary} defaultOpen={token.persona === "custom"}>
               <CapabilityMatrix token={token} onUpdate={setToken} />
-            </div>
-            <div className="card">
-              <div className="card-header">Tool Announcement</div>
+            </CollapsibleCard>
+            <CollapsibleCard title="Tool Announcement" summary={announceSummary}>
               <ToolAnnouncementToggle token={token} onUpdate={setToken} />
-            </div>
-            <div className="card">
-              <div className="card-header">Rate Limiting</div>
+            </CollapsibleCard>
+            <CollapsibleCard title="Rate Limiting" summary={rateSummary}>
               <RateLimitConfig token={token} onUpdate={setToken} />
-            </div>
+            </CollapsibleCard>
+
             {!token.pass_through && (
               <div className="card">
                 <div className="card-header">Permission Summary</div>

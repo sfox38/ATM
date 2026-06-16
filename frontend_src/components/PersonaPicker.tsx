@@ -57,7 +57,7 @@ export function PersonaPicker(props: Props) {
       {error && <div className="banner banner-error mb-8">{error}</div>}
       {!isSelectMode && (
         <p className="persona-helper">
-          A persona seeds the capability matrix below. After applying, you may override individual capabilities; the persona label will show "(modified)" if any value diverges from the preset.
+          A persona seeds the capabilities below. After applying, you may override individual capabilities in Advanced; once they diverge from a preset the persona switches to "Custom" (or to another preset it now matches).
         </p>
       )}
       <div className="persona-grid">

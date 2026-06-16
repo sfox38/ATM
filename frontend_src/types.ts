@@ -14,6 +14,8 @@ export type Persona =
   | "new_user"
   | "read_only"
   | "voice_assistant"
+  | "dashboard_designer"
+  | "maintenance"
   | "automation_builder"
   | "power_user"
   | "home_admin"

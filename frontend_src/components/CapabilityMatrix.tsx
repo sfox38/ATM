@@ -137,8 +137,8 @@ const CAPS: CapDef[] = [
   },
   {
     key: "cap_backup",
-    label: "Backup / restore",
-    description: "Create and restore Home Assistant backups. Restore overwrites all current state.",
+    label: "Backup",
+    description: "Create and list Home Assistant backups. Restoring is not exposed through ATM; restore from the Home Assistant UI.",
     tier: "irreversible",
     confirmAvailable: true,
   },
@@ -157,6 +157,10 @@ const CAPS: CapDef[] = [
     confirmAvailable: true,
   },
 ];
+
+// All capability keys, in matrix order. Exported so other views (e.g. the
+// Token Detail summary) can tally allow/confirm/deny without re-listing caps.
+export const CAP_NAMES: CapName[] = CAPS.map((c) => c.key);
 
 const TIER_LABELS: Record<CapTier, string> = {
   read: "Reads",
