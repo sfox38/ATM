@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Operations &amp; API &middot; ATM docs</title>
+  <meta name="description" content="Run ATM day to day: rate limiting, per-token sensors, global settings, the audit log, HA events, and the full route reference." />
+  <link rel="icon" href="assets/favicon.svg" type="image/svg+xml" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400..800&family=Hanken+Grotesk:wght@400..700&family=Roboto+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="assets/atm-docs.css" />
+</head>
+<body data-page="operations" data-toc>
+  <a class="skip-link" href="#main">Skip to content</a>
+  <header class="site-header" id="site-header"></header>
+  <div class="sidebar-backdrop" data-close-nav></div>
+
+  <div class="layout" id="layout">
+    <aside class="sidebar" id="sidebar"></aside>
+    <main class="main" id="main">
+      <div class="content prose">
+
+        <header class="page-head">
+          <p class="breadcrumb"><a href="index.html">Docs</a> / Reference / Operations &amp; API</p>
+          <h1>Operations &amp; API</h1>
+          <p class="lede">What ATM exposes once it is running: per-token rate limits and sensors, global settings, the audit log, the events it fires, and the full set of routes.</p>
+        </header>
+
+        <h2>Rate limiting</h2>
+        <p>Every token has a sliding-window rate limit. The defaults are 60 requests per minute with a burst of 10 per second, both configurable per token. Setting <code>rate_limit_requests</code> to 0 disables rate limiting for that token.</p>
+        <p>A rate-limited request returns HTTP 429 with a <code>Retry-After</code> header. Successful responses carry the current limit state.</p>
+        <pre class="code" data-lang="http" data-label="Response headers"><code>X-RateLimit-Limit: 60
+X-RateLimit-Remaining: 47
+X-RateLimit-Reset: 1712345678</code></pre>
+        <p>If <strong>Notify on rate limit</strong> is enabled in global settings, Home Assistant raises a persistent notification when a token hits its limit, throttled to once per token per minute.</p>
+
+        <h2>Telemetry &amp; sensors</h2>
+        <p>ATM creates six Home Assistant sensors for each active token. For a token named <code>claude-code</code>:</p>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th scope="col">Entity</th><th scope="col">Reports</th></tr></thead>
+            <tbody>
+              <tr><td><code>sensor.atm_claude_code_status</code></td><td><code>active</code>, <code>expired</code>, or <code>revoked</code></td></tr>
+              <tr><td><code>sensor.atm_claude_code_request_count</code></td><td>Total requests made with this token</td></tr>
+              <tr><td><code>sensor.atm_claude_code_denied_count</code></td><td>Requests blocked by permission rules</td></tr>
+              <tr><td><code>sensor.atm_claude_code_rate_limit_hits</code></td><td>Times this token has been rate limited</td></tr>
+              <tr><td><code>sensor.atm_claude_code_last_access</code></td><td>Timestamp of the most recent request</td></tr>
+              <tr><td><code>sensor.atm_claude_code_expires_in</code></td><td>Days until expiry, or <code>No expiry</code></td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>Sensors are removed automatically when a token is revoked. ATM's own sensors are blocked from all token access, so an external tool cannot read its telemetry through ATM.</p>
+
+        <h2>Global settings</h2>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th scope="col">Setting</th><th scope="col">Default</th><th scope="col">Effect</th></tr></thead>
+            <tbody>
+              <tr><td>Kill switch</td><td>Off</td><td>When on, proxy and MCP routes are unregistered entirely</td></tr>
+              <tr><td>Disable all logging</td><td>Off</td><td>Suppresses all auditing</td></tr>
+              <tr><td>Log allowed requests</td><td>On</td><td>Record successful requests</td></tr>
+              <tr><td>Log denied requests</td><td>On</td><td>Record blocked requests and unsupported MCP methods</td></tr>
+              <tr><td>Log rate-limited requests</td><td>On</td><td>Record rate-limited requests</td></tr>
+              <tr><td>Log entity names</td><td>On</td><td>Include entity IDs in audit entries</td></tr>
+              <tr><td>Log client IP</td><td>On</td><td>Include caller IP in audit entries</td></tr>
+              <tr><td>Notify on rate limit</td><td>Off</td><td>Raise an HA notification when a token is rate limited</td></tr>
+              <tr><td>Audit log flush interval</td><td>15 min</td><td>How often the in-memory log is snapshotted to disk; set to "Never" to disable persistence</td></tr>
+              <tr><td>Maximum log entries</td><td>10,000</td><td>Capacity of the buffer and on-disk snapshot; reducing it trims the oldest entries immediately</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h2>Audit log</h2>
+        <p>ATM keeps a circular buffer of requests, viewable in the panel's audit tab or through the admin API. Each entry records a request ID (matching <code>X-ATM-Request-ID</code>), timestamp, token ID and name, method, resource path, outcome, and client IP.</p>
+
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th scope="col">Outcome</th><th scope="col">Meaning</th></tr></thead>
+            <tbody>
+              <tr><td><span class="badge badge-success">allowed</span></td><td>The request succeeded.</td></tr>
+              <tr><td><span class="badge badge-error">denied</span></td><td>Blocked by permission rules, the blocklist, or a RED / NO_ACCESS result. Includes permission-based 404s.</td></tr>
+              <tr><td><span class="badge badge-neutral">not_found</span></td><td>The entity is genuinely absent from both HA state and the registry. Identical to <code>denied</code> for the caller, but distinguished here so you can tell a missing entity from a permission wall.</td></tr>
+              <tr><td><span class="badge badge-cap">rate_limited</span></td><td>The token exceeded its rate limit.</td></tr>
+              <tr><td><span class="badge badge-info">not_implemented</span></td><td>The client called an MCP method ATM does not support. A protocol gap, not a permission block; does not increment the denied counter.</td></tr>
+              <tr><td><span class="badge badge-info">invalid_request</span></td><td>The request was structurally malformed and rejected before permission checks, for example a template with a syntax error.</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <p>The log is stored in <code>.storage/atm_audit.json</code> and survives restarts. It is included in HA full backups and in partial backups of <code>.storage</code>. ATM flushes on the configured interval and also on HA stop, reload, and unload. Set the interval to "Never" to keep the log in memory only.</p>
+
+        <h2>HA events</h2>
+        <p>Event data includes <code>token_id</code>, <code>token_name</code>, and <code>timestamp</code>. Revocation and rotation events also include the HA user ID of the admin who acted.</p>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th scope="col">Event</th><th scope="col">Fired when</th></tr></thead>
+            <tbody>
+              <tr><td><code>atm_token_revoked</code></td><td>A token is revoked</td></tr>
+              <tr><td><code>atm_token_expired</code></td><td>A token's expiry passes and it is first accessed</td></tr>
+              <tr><td><code>atm_token_rotated</code></td><td>A token's raw value is rotated</td></tr>
+              <tr><td><code>atm_rate_limited</code></td><td>A token exceeds its rate limit (once per token per minute)</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h2>Route reference</h2>
+        <h3>Admin API</h3>
+        <p>Requires a Home Assistant session and the admin role.</p>
+        <pre class="code" data-lang="http" data-label="Admin API"><code>GET/POST   /api/atm/admin/tokens                       List or create tokens
+GET/PATCH  /api/atm/admin/tokens/{id}                  Get or update a token
+DELETE     /api/atm/admin/tokens/{id}                  Revoke a token
+GET/PUT    /api/atm/admin/tokens/{id}/permissions      Read or replace the tree
+PATCH      /api/atm/admin/tokens/{id}/permissions/domains/{node}
+PATCH      /api/atm/admin/tokens/{id}/permissions/devices/{node}
+PATCH      /api/atm/admin/tokens/{id}/permissions/entities/{node}
+GET        /api/atm/admin/tokens/{id}/resolve/{entity}  Explain effective permission
+POST       /api/atm/admin/tokens/{id}/rotate           Generate a new raw value
+GET        /api/atm/admin/tokens/{id}/scope            Readable / writable entities
+GET        /api/atm/admin/tokens/{id}/stats            Request counters
+GET        /api/atm/admin/tokens/{id}/audit            Audit log for one token
+GET        /api/atm/admin/tokens/archived              List archived tokens
+DELETE     /api/atm/admin/tokens/archived/{id}         Delete an archived record
+GET        /api/atm/admin/entities                     Entity tree
+GET        /api/atm/admin/info                         Integration version info
+GET        /api/atm/admin/audit                        Global audit log
+GET/PATCH  /api/atm/admin/settings                     Global settings
+DELETE     /api/atm/admin/wipe                         Wipe all tokens and settings</code></pre>
+
+        <h3>Proxy API</h3>
+        <p>Requires an ATM token in the <code>Authorization: Bearer</code> header.</p>
+        <pre class="code" data-lang="http" data-label="Proxy API"><code>GET        /api/atm/states                             All accessible entity states
+GET        /api/atm/states/{entity_id}                 One entity state
+POST       /api/atm/services/{domain}/{service}        Call a service
+GET        /api/atm/history/period/{timestamp}         State history (max 7-day range)
+GET        /api/atm/statistics                         Long-term statistics
+POST       /api/atm/template                           Render a Jinja2 template
+GET        /api/atm/config                             HA configuration
+GET        /api/atm/events                             HA event-bus listeners
+GET        /api/atm/services                           Accessible service list
+GET        /api/atm/logs                               Recent HA system log entries
+GET        /api/atm/mcp                                MCP SSE endpoint
+POST       /api/atm/mcp                                MCP Streamable HTTP endpoint
+POST       /api/atm/mcp/messages?session_id={id}       MCP SSE message endpoint
+GET        /api/atm/mcp/context                        Token context summary</code></pre>
+
+        <div class="callout tip">
+          <svg class="callout-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18h6M10 21h4M12 3a6 6 0 0 0-3.5 10.9c.5.4.9 1 1 1.6h5c.1-.6.5-1.2 1-1.6A6 6 0 0 0 12 3z"/></svg>
+          <div class="callout-body"><p class="callout-title">There is also an unauthenticated skill route</p><p><code>GET /api/atm/skill</code> serves the agent skill guide with no token. It is generic and contains no token or entity data. See <a href="connect.html#agent-skill">the agent skill</a>.</p></div>
+        </div>
+
+        <nav class="pager" id="pager" aria-label="Page navigation"></nav>
+      </div>
+    </main>
+    <aside class="toc" id="toc"></aside>
+  </div>
+
+  <footer class="site-footer" id="site-footer"></footer>
+  <script src="assets/site.js"></script>
+</body>
+</html>

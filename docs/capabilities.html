@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Capabilities &amp; pass-through &middot; ATM docs</title>
+  <meta name="description" content="Capability flags gate ATM's powerful operations. Pass-through mode trades the permission tree for broad access, with MESA still on top." />
+  <link rel="icon" href="assets/favicon.svg" type="image/svg+xml" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400..800&family=Hanken+Grotesk:wght@400..700&family=Roboto+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="assets/atm-docs.css" />
+</head>
+<body data-page="capabilities" data-toc>
+  <a class="skip-link" href="#main">Skip to content</a>
+  <header class="site-header" id="site-header"></header>
+  <div class="sidebar-backdrop" data-close-nav></div>
+
+  <div class="layout" id="layout">
+    <aside class="sidebar" id="sidebar"></aside>
+    <main class="main" id="main">
+      <div class="content prose">
+
+        <header class="page-head">
+          <p class="breadcrumb"><a href="index.html">Docs</a> / Concepts / Capabilities &amp; pass-through</p>
+          <h1>Capabilities &amp; pass-through</h1>
+          <p class="lede">The permission tree decides which entities a token can touch. Capability flags decide whether it can do the powerful, cross-cutting things at all: restart Home Assistant, control a lock, write an automation, read the logs. They are off by default.</p>
+        </header>
+
+        <h2>How the modes work</h2>
+        <p>Every capability holds one of three modes. Reading a mode in any code path goes through a single helper, so the pass-through interaction is always consistent.</p>
+        <div class="grid-3">
+          <div class="card"><h3><span class="badge badge-error">deny</span></h3><p>The operation is refused. This is the default for the riskier tiers.</p></div>
+          <div class="card"><h3><span class="badge badge-success">allow</span></h3><p>The operation runs, subject to the permission tree and MESA.</p></div>
+          <div class="card"><h3><span class="badge badge-cap">confirm</span></h3><p>The operation is held as a pending approval until a human approves it in the panel. Honored even under pass-through.</p></div>
+        </div>
+        <p><code>confirm</code> is only meaningful for the write, system, and irreversible capabilities; the read-tier capabilities are <code>deny</code> or <code>allow</code> only.</p>
+
+        <h2>The capability flags</h2>
+        <p>The <strong>pass-through</strong> column shows what happens under a pass-through token: <em>granted</em> means pass-through turns it on for you, <em>must enable</em> means it stays off until you set it explicitly, even for pass-through tokens.</p>
+
+        <h3>Read and discovery</h3>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th scope="col">Capability</th><th scope="col">Enables</th><th scope="col">Pass-through</th></tr></thead>
+            <tbody>
+              <tr><td><span class="badge badge-cap">cap_search</span></td><td>Discovery and comprehension reads: <code>search_entities</code>, <code>get_overview</code>, <code>describe_area</code>, <code>describe_entity</code>, <code>find_available_actions</code>, <code>get_relationships</code></td><td><span class="yes">granted</span></td></tr>
+              <tr><td><span class="badge badge-cap">cap_registry_read</span></td><td>Registry enumeration: <code>list_areas</code>, <code>list_floors</code>, <code>list_zones</code>, <code>list_devices</code>, <code>get_device</code></td><td><span class="yes">granted</span></td></tr>
+              <tr><td><span class="badge badge-cap">cap_traces</span></td><td>Automation execution traces via <code>get_automation_traces</code></td><td><span class="yes">granted</span></td></tr>
+              <tr><td><span class="badge badge-cap">cap_diagnostics</span></td><td><code>get_system_health</code>, <code>check_config</code>, <code>validate_config</code></td><td><span class="yes">granted</span></td></tr>
+              <tr><td><span class="badge badge-cap">cap_config_read</span></td><td>Read HA configuration data and the event-bus listener list</td><td><span class="yes">granted</span></td></tr>
+              <tr><td><span class="badge badge-cap">cap_template_render</span></td><td>Render Jinja2 templates in a permission-scoped environment</td><td><span class="yes">granted</span></td></tr>
+              <tr><td><span class="badge badge-cap">cap_service_response</span></td><td>Return response data from services that declare a response schema</td><td><span class="yes">granted</span></td></tr>
+              <tr><td><span class="badge badge-cap">cap_broadcast</span></td><td>Announcements via <code>HassBroadcast</code> through assist satellite devices</td><td><span class="yes">granted</span></td></tr>
+              <tr><td><span class="badge badge-cap">cap_log_read</span></td><td>Read HA system log entries (<code>get_logs</code>). ATM's own entries are excluded and token values scrubbed.</td><td><span class="no">must enable</span></td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h3>Write, system, and irreversible</h3>
+        <p>Every capability in this group must be explicitly enabled, pass-through never grants them, and every one can be set to <code>confirm</code>.</p>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th scope="col">Capability</th><th scope="col">Enables</th><th scope="col">Modes</th></tr></thead>
+            <tbody>
+              <tr><td><span class="badge badge-cap">cap_physical_control</span></td><td>Lock, alarm, and cover mutation services (<code>lock.unlock</code>, <code>alarm_control_panel.alarm_disarm</code>, <code>cover.open_cover</code>, and related)</td><td>deny / allow / confirm</td></tr>
+              <tr><td><span class="badge badge-cap">cap_restart</span></td><td><code>homeassistant.restart</code> and <code>homeassistant.stop</code></td><td>deny / allow / confirm</td></tr>
+              <tr><td><span class="badge badge-cap">cap_automation_write</span></td><td>Create, edit, and delete automations. See the warning below.</td><td>deny / allow / confirm</td></tr>
+              <tr><td><span class="badge badge-cap">cap_script_write</span></td><td>Create, edit, and delete scripts. See the warning below.</td><td>deny / allow / confirm</td></tr>
+              <tr><td><span class="badge badge-cap">cap_scene_write</span></td><td>Create, edit, and delete scenes</td><td>deny / allow / confirm</td></tr>
+              <tr><td><span class="badge badge-cap">cap_helper_write</span></td><td>Create, edit, and delete helpers</td><td>deny / allow / confirm</td></tr>
+              <tr><td><span class="badge badge-cap">cap_integration_write</span></td><td>Enable and disable integrations</td><td>deny / allow / confirm</td></tr>
+              <tr><td><span class="badge badge-cap">cap_lovelace_write</span></td><td>Create, edit, and delete dashboards</td><td>deny / allow / confirm</td></tr>
+              <tr><td><span class="badge badge-cap">cap_backup</span></td><td>Create and list backups; restore is never exposed</td><td>deny / allow / confirm</td></tr>
+              <tr><td><span class="badge badge-cap">cap_filesystem</span></td><td>Read and write files under <code>www/</code>, <code>themes/</code>, <code>custom_templates/</code></td><td>deny / allow / confirm</td></tr>
+              <tr><td><span class="badge badge-cap">cap_yaml_edit</span></td><td>Edit <code>configuration.yaml</code> directly</td><td>deny / allow / confirm</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h2 id="automation-write">Automation and script write</h2>
+        <p><code>cap_automation_write</code> and <code>cap_script_write</code> are elevated-trust capabilities. Enable them only for clients you fully control.</p>
+
+        <div class="callout danger">
+          <svg class="callout-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.3 3.8 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.8a2 2 0 0 0-3.4 0z"/><path d="M12 9v4"/><circle cx="12" cy="17" r="0.4" fill="currentColor"/></svg>
+          <div class="callout-body">
+            <p class="callout-title">These flags do not consult the permission tree</p>
+            <p>The write tools edit <code>automations.yaml</code> and <code>scripts.yaml</code> directly. A client with the flag can write an automation referencing <em>any</em> entity in Home Assistant, regardless of what its tree permits. Setting the <code>automation</code> or <code>script</code> domain to RED or YELLOW does not stop them.</p>
+          </div>
+        </div>
+
+        <ul>
+          <li><strong>All or nothing.</strong> There is no per-entity scoping for these tools. The flag is on or off.</li>
+          <li><strong>Triggered actions run outside ATM.</strong> An automation created through ATM is run by Home Assistant's own engine, under its own context. ATM's permission checks do not apply to what a triggered automation does.</li>
+          <li><strong>Net effect.</strong> A token with a narrow entity scope but this flag enabled could, through a crafted automation, indirectly control entities it cannot reach directly. Treat the flag as broad HA access.</li>
+        </ul>
+
+        <h2>Pass-through mode</h2>
+        <p>Pass-through tokens skip the three-level permission check and have <span class="state green"><span class="swatch"></span>GREEN</span> access to every entity. They are for trusted tools where maintaining a full tree is impractical.</p>
+
+        <div class="callout warn">
+          <svg class="callout-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h4l2 6 4-14 2 8h6"/></svg>
+          <div class="callout-body">
+            <p class="callout-title">The tree is a cost control, not only an access control</p>
+            <p>Because pass-through skips the tree, every context-bearing read (<code>get_states</code>, <code>GetLiveContext</code>, the initial snapshot, an unfiltered search) returns <em>all</em> non-ATM entities. On a large install that is a recurring token and context cost: every discovery call ships the whole house into the model. A scoped token returns only what you granted.</p>
+          </div>
+        </div>
+
+        <p>Pass-through does <strong>not</strong> bypass:</p>
+        <ul>
+          <li>The <code>atm</code> domain blocklist and sensitive-attribute scrubbing</li>
+          <li>Rate limiting</li>
+          <li>Any capability in the write, system, and irreversible group (each must still be enabled)</li>
+          <li><code>cap_log_read</code></li>
+          <li>A capability set to <code>confirm</code>, which is gated even under pass-through</li>
+        </ul>
+        <p>All other read-tier capabilities are granted by pass-through. To enable pass-through through the admin API directly, the PATCH must include <code>"confirm_pass_through": true</code> alongside <code>"pass_through": true</code>; omitting it returns a 400. Use pass-through only for tools you fully control.</p>
+
+        <h2 id="mesa">Pass-through and MESA</h2>
+        <p>Pass-through bypasses ATM's per-token tree, but it does not bypass <strong>MESA</strong>, the per-entity safety layer that always runs last. When MESA is active, a pass-through token's writes are still governed by each entity's MESA <code>control_mode</code>. In effect, pass-through hands entity gating to MESA with ATM's per-token permissions out of the way.</p>
+        <p>In practice this pattern is niche, for two reasons:</p>
+        <ul>
+          <li>The token and open-read costs above apply in full; every agent sees the entire home.</li>
+          <li>MESA gates <strong>writes only</strong> and is allow-by-default for unprofiled entities, so without extra configuration it is not least-privilege.</li>
+        </ul>
+        <p>MESA can be made fail-closed for writes with deployment defaults and enforced mode, but reads stay open and the context cost remains. For most deployments a <strong>scoped token plus MESA</strong> is the better combination: the tree scopes what the agent sees (cheap context and read security) and MESA governs write nature on top.</p>
+
+        <nav class="pager" id="pager" aria-label="Page navigation"></nav>
+      </div>
+    </main>
+    <aside class="toc" id="toc"></aside>
+  </div>
+
+  <footer class="site-footer" id="site-footer"></footer>
+  <script src="assets/site.js"></script>
+</body>
+</html>
