@@ -575,6 +575,7 @@ select.input {
 }
 .modal-title { font-size: 18px; font-weight: 700; margin: 0 0 20px 0; color: var(--atm-text); }
 .modal-title-error { color: var(--atm-error); }
+.modal-body-text { margin: 0 0 16px; color: var(--atm-text-2); line-height: 1.5; }
 .modal-actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; margin-top: 20px; }
 /* Left-aligned link in a footer action row; pushes the buttons to the right. */
 .mesa-tree-link { margin-right: auto; }

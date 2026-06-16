@@ -347,6 +347,7 @@ function ProfileEditor({
   const [error, setError] = useState<string | null>(null);
   const [warnings, setWarnings] = useState<MesaValidationIssue[]>([]);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [confirmDiscard, setConfirmDiscard] = useState(false);
   const [showReco, setShowReco] = useState(false);
   // Snapshot of the last persisted (or freshly initialised) state, for the
   // unsaved-changes guard.
@@ -426,7 +427,7 @@ function ProfileEditor({
   }, [scope, state.key, canonicalTags]);
 
   function attemptClose() {
-    if (dirty && !window.confirm("Discard your unsaved changes?")) return;
+    if (dirty) { setConfirmDiscard(true); return; }
     onClose();
   }
 
@@ -468,6 +469,7 @@ function ProfileEditor({
   const roundTripToken = originToken && !originToken.pass_through ? originToken : null;
 
   return (
+    <>
     <Modal titleId="mesa-editor-title" onClose={attemptClose}>
       <h3 className="modal-title" id="mesa-editor-title">{titleVerb}</h3>
       <div className="mesa-editor-body">
@@ -602,6 +604,17 @@ function ProfileEditor({
         </button>
       </div>
     </Modal>
+    {confirmDiscard && (
+      <Modal titleId="mesa-discard-title" onClose={() => setConfirmDiscard(false)}>
+        <h3 className="modal-title" id="mesa-discard-title">Discard changes?</h3>
+        <p className="modal-body-text">You have unsaved changes to this profile. They will be lost.</p>
+        <div className="modal-actions">
+          <button className="btn btn-ghost" onClick={() => setConfirmDiscard(false)}>Keep editing</button>
+          <button className="btn btn-danger" onClick={onClose}>Discard changes</button>
+        </div>
+      </Modal>
+    )}
+    </>
   );
 }
 
