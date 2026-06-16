@@ -52,6 +52,9 @@ class AuditEntry:
     client_ip: str
     pass_through: bool = False
     payload: str | None = None
+    # True when MESA waved this action through under advisory mode (a confirm/
+    # read_only-by-nature entity proceeded with a warning instead of being gated).
+    mesa_advisory: bool = False
 
     def to_dict(self) -> dict:
         d = {
@@ -67,6 +70,8 @@ class AuditEntry:
         }
         if self.payload is not None:
             d["payload"] = self.payload
+        if self.mesa_advisory:
+            d["mesa_advisory"] = True
         return d
 
 
@@ -99,6 +104,7 @@ class AuditLog:
         settings: GlobalSettings,
         pass_through: bool = False,
         payload: dict | None = None,
+        mesa_advisory: bool = False,
         timestamp: datetime | None = None,
     ) -> None:
         """Append an audit entry, subject to the current logging settings.
@@ -139,6 +145,7 @@ class AuditLog:
             client_ip=logged_ip,
             pass_through=pass_through,
             payload=logged_payload,
+            mesa_advisory=mesa_advisory,
         ))
 
     _VALID_OUTCOMES = frozenset({"allowed", "denied", "not_found", "rate_limited", "not_implemented", "invalid_request", "pending_approval"})
@@ -235,6 +242,7 @@ class AuditLog:
                     client_ip=r["client_ip"],
                     pass_through=r.get("pass_through", False),
                     payload=r.get("payload"),
+                    mesa_advisory=r.get("mesa_advisory", False),
                 ))
             except (KeyError, TypeError, ValueError) as exc:
                 _LOGGER.warning("Skipping corrupt audit entry: %s", exc)

@@ -77,6 +77,7 @@ function EntryDetailModal({ entry, onClose }: { entry: AuditEntry; onClose: () =
       <DetailRow label="Method" value={entry.method} mono />
       <DetailRow label="Resource" value={entry.resource} mono />
       <DetailRow label="Outcome" value={OUTCOME_LABEL[entry.outcome] ?? entry.outcome} />
+      {entry.mesa_advisory && <DetailRow label="MESA" value="Advisory: proceeded with a warning (would require approval if enforced)" />}
       <DetailRow label="IP" value={entry.client_ip} mono />
       <DetailRow label="Request ID" value={entry.request_id} mono />
       {prettyPayload && (
@@ -157,6 +158,9 @@ export function AuditTable({ entries, loading, page, pageSize, onPageChange }: P
                 <span className={`outcome-badge ${OUTCOME_CLASS[entry.outcome]}`}>
                   {OUTCOME_LABEL[entry.outcome] ?? entry.outcome}
                 </span>
+                {entry.mesa_advisory && (
+                  <span className="outcome-badge mesa-advisory-badge" title="MESA advisory: proceeded with a warning">MESA</span>
+                )}
               </td>
               <td title={formatTokenName(entry.token_name)}>{formatTokenNameShort(entry.token_name)}</td>
               <td>

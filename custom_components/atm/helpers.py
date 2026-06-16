@@ -154,6 +154,7 @@ def log_request(
     outcome: str,
     client_ip: str,
     payload: dict | None = None,
+    mesa_advisory: bool = False,
 ) -> None:
     """Record an audit entry and update in-memory token counters."""
     data.audit.record(
@@ -167,6 +168,7 @@ def log_request(
         settings=data.store.get_settings(),
         pass_through=token.pass_through,
         payload=payload,
+        mesa_advisory=mesa_advisory,
     )
     update_token_counter(data, token.id, outcome)
 

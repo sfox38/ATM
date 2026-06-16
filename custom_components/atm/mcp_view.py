@@ -5,7 +5,9 @@ from __future__ import annotations
 import asyncio
 import functools
 import hashlib
+import dataclasses
 import json
+from contextvars import ContextVar
 import logging
 import math
 import os
@@ -1135,23 +1137,29 @@ _SYSTEM_TOOL_DEFS: list[dict] = [
     },
     {
         "name": "list_backups",
-        "description": "List existing Home Assistant backups and the available backup agents. Requires cap_backup.",
+        "description": "List existing Home Assistant backups (compact, newest first) and the available backup agents. Requires cap_backup.",
         "cap": "cap_backup",
-        "inputSchema": {"type": "object", "properties": {}},
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "limit": {"type": "integer", "minimum": 1, "maximum": 200, "default": 20,
+                          "description": "Max backups to return, newest first (default 20)."},
+            },
+        },
     },
     {
         "name": "create_backup",
         "description": (
-            "Create a new Home Assistant backup. Requires cap_backup (Confirm-eligible). Defaults to the "
-            "local backup agent. ATM does not support restoring backups (too destructive); restore from the "
-            "Home Assistant UI."
+            "Create a new Home Assistant backup. Requires cap_backup (Confirm-eligible). Defaults to an "
+            "available local backup agent (auto-detected). ATM does not support restoring backups (too "
+            "destructive); restore from the Home Assistant UI."
         ),
         "cap": "cap_backup",
         "inputSchema": {
             "type": "object",
             "properties": {
                 "name": {"type": "string", "description": "Optional backup name."},
-                "agent_ids": {"type": "array", "items": {"type": "string"}, "description": "Backup agents; defaults to [\"backup.local\"]."},
+                "agent_ids": {"type": "array", "items": {"type": "string"}, "description": "Backup agent ids (see list_backups available_agents); defaults to an auto-detected local agent."},
             },
         },
     },
@@ -1555,6 +1563,13 @@ def _approval_resource(approval: Any) -> str:
     return f"approval:{approval.tool_name}:{approval.id}"
 
 
+# Set True by a service-call path when MESA waved the action through under
+# advisory mode (warnings emitted, not gated). Read at the tools/call logging
+# point to flag the audit entry. A ContextVar is per-async-task and propagates
+# within the same request, so it survives the await into _call_tool and back.
+_mesa_advisory_ctx: ContextVar[bool] = ContextVar("atm_mesa_advisory", default=False)
+
+
 async def _gate(
     cap_name: str,
     token: TokenRecord,
@@ -1579,7 +1594,11 @@ async def _gate(
         client_ip=client_ip, diff=diff,
     )
     if result.is_deny:
-        return _tool_error("Forbidden."), "denied", tool_name
+        return _tool_error(
+            "Forbidden: this capability is not enabled for this token. It may have changed "
+            "since you connected; call get_capability_summary for the current state, or ask "
+            "the operator to grant it."
+        ), "denied", tool_name
     if result.is_pending:
         return _tool_pending(result.approval), "pending_approval", _approval_resource(result.approval)
     return None
@@ -1950,6 +1969,7 @@ async def _execute_call_service(
         body["service_response"] = filtered_response
     if mesa_outcome.warnings:
         body["mesa_advisory"] = mesa_outcome.warnings
+        _mesa_advisory_ctx.set(True)
 
     return _tool_success(json.dumps(body, default=str)), "allowed", resource
 
@@ -2707,6 +2727,8 @@ async def _tool_intent_action(
             return _tool_error("No accessible entities matched your request."), "denied", tool_name
         entities = mesa_outcome.entities
         mesa_warnings = mesa_outcome.warnings
+        if mesa_warnings:
+            _mesa_advisory_ctx.set(True)
 
     call_data = dict(service_data)
     call_data["entity_id"] = entities
@@ -4331,6 +4353,14 @@ async def _execute_delete_scene(
                 return _tool_error(f"No scene found with id '{scene_id}'."), "denied", "delete_scene"
             await hass.async_add_executor_job(_write_scenes_yaml, path, filtered)
         await hass.services.async_call("scene", "reload", blocking=True)
+        # Remove the now-orphaned entity-registry entry so the scene does not
+        # linger as an "unavailable" entity (HA's native scene delete purges the
+        # registry too; reloading scenes.yaml alone does not).
+        registry = er.async_get(hass)
+        for entry in list(registry.entities.values()):
+            if entry.domain == "scene" and entry.unique_id == scene_id:
+                registry.async_remove(entry.entity_id)
+                break
     except Exception as exc:  # noqa: BLE001
         _LOGGER.error("delete_scene failed: %s", exc)
         return _tool_error("Failed to delete scene. Check HA logs for details."), "denied", "delete_scene"
@@ -4823,17 +4853,76 @@ async def _execute_set_integration_enabled(
 # ---------------------------------------------------------------------------
 
 
+async def _backup_agent_ids(hass: Any) -> list[str]:
+    """Available backup agent ids (e.g. hassio.local on HAOS, backup.local on Core)."""
+    try:
+        info = await async_ws_command(hass, "backup/agents/info", {})
+    except WsDispatchError:
+        return []
+    agents = info.get("agents") if isinstance(info, dict) else None
+    if not isinstance(agents, list):
+        return []
+    return [a.get("agent_id") for a in agents if isinstance(a, dict) and a.get("agent_id")]
+
+
+def _backup_to_summary(b: Any) -> dict:
+    """Project one backup (a ManagerBackup dataclass or dict) to compact JSON.
+
+    The raw backup/info result holds dataclass instances; serializing them with
+    json default=str produces unparseable repr strings, so flatten to fields.
+    """
+    if isinstance(b, dict):
+        d = b
+    elif dataclasses.is_dataclass(b) and not isinstance(b, type):
+        try:
+            d = dataclasses.asdict(b)
+        except Exception:  # noqa: BLE001 - fall back to attribute access
+            d = {}
+    else:
+        d = {}
+    fields = ("backup_id", "name", "date", "database_included", "homeassistant_version")
+    out: dict = {f: (d.get(f) if d else getattr(b, f, None)) for f in fields}
+    agents = d.get("agents") if d else getattr(b, "agents", None)
+    size = None
+    agent_ids: list = []
+    if isinstance(agents, dict):
+        agent_ids = list(agents.keys())
+        for a in agents.values():
+            sz = a.get("size") if isinstance(a, dict) else getattr(a, "size", None)
+            if sz is not None:
+                size = sz
+                break
+    out["size"] = size
+    out["agents"] = agent_ids
+    return out
+
+
 async def _tool_list_backups(
     args: dict, token: TokenRecord, hass: Any
 ) -> tuple[dict, str, str]:
-    """MCP tool: list existing backups and available agents."""
+    """MCP tool: list existing backups (compact, newest first) and available agents."""
     if effective_cap(token, "cap_backup") == CAP_DENY:
         return _tool_error("Forbidden."), "denied", "list_backups"
     try:
         result = await async_ws_command(hass, "backup/info", {})
     except WsDispatchError as exc:
         return _tool_error(f"Failed to list backups: {exc}"), "invalid_request", "list_backups"
-    return _tool_success(json.dumps(result, default=str)), "allowed", "list_backups"
+    raw = result.get("backups") if isinstance(result, dict) else None
+    backups = raw if isinstance(raw, list) else []
+    summaries = [_backup_to_summary(b) for b in backups]
+    summaries.sort(key=lambda s: s.get("date") or "", reverse=True)
+    try:
+        limit = int(args.get("limit") or 20)
+    except (TypeError, ValueError):
+        limit = 20
+    limit = max(1, min(limit, 200))
+    body = {
+        "total": len(summaries),
+        "returned": min(len(summaries), limit),
+        "backups": summaries[:limit],
+        "available_agents": await _backup_agent_ids(hass),
+    }
+    return _tool_success(json.dumps(body, default=str)), "allowed", "list_backups"
 
 
 async def _tool_create_backup(
@@ -4856,7 +4945,12 @@ async def _execute_create_backup(
 ) -> tuple[dict, str, str]:
     agent_ids = args.get("agent_ids")
     if not isinstance(agent_ids, list) or not agent_ids:
-        agent_ids = ["backup.local"]
+        # Auto-detect: the default agent is install-type dependent (hassio.local on
+        # HAOS/supervised, backup.local on Core). Prefer a local one.
+        available = await _backup_agent_ids(hass)
+        agent_ids = next(([a] for a in ("hassio.local", "backup.local") if a in available), available[:1])
+        if not agent_ids:
+            return _tool_error("No backup agents are available; pass agent_ids explicitly."), "invalid_request", "create_backup"
     payload: dict = {"agent_ids": agent_ids}
     name = args.get("name")
     if isinstance(name, str) and name.strip():
@@ -4865,7 +4959,11 @@ async def _execute_create_backup(
         result = await async_ws_command(hass, "backup/generate", payload, timeout=60)
     except WsDispatchError as exc:
         return _tool_error(f"Failed to create backup: {exc}"), "invalid_request", "create_backup"
-    return _tool_success(json.dumps({"created": True, "result": result}, default=str)), "allowed", "create_backup"
+    job_id = getattr(result, "backup_job_id", None)
+    if job_id is None and isinstance(result, dict):
+        job_id = result.get("backup_job_id")
+    body = {"created": True, "backup_job_id": job_id, "agent_ids": agent_ids}
+    return _tool_success(json.dumps(body, default=str)), "allowed", "create_backup"
 
 
 # ---------------------------------------------------------------------------
@@ -5351,8 +5449,9 @@ def _build_instructions(token: TokenRecord, data: ATMData, base_url: str) -> str
     ]
     if confirm_gated:
         lines.append(
-            "- This token's capabilities that require admin approval per call: "
-            + ", ".join(confirm_gated) + "."
+            "- As of this connection, these capabilities require admin approval per call: "
+            + ", ".join(confirm_gated)
+            + ". Capabilities can change mid-session; call get_capability_summary for the current state."
         )
     if data.store.get_settings().mesa_mode != MESA_MODE_OFF:
         lines.append(
@@ -5432,13 +5531,15 @@ async def _dispatch_mcp(
     if method == "tools/call":
         tool_name = params.get("name", "")
         arguments = params.get("arguments") or {}
+        _mesa_advisory_ctx.set(False)
         tool_result, outcome, resource = await _call_tool(
             tool_name, arguments, token, hass, data,
             request_id=request_id, client_ip=client_ip,
         )
         _log(data, token, request_id=request_id, method=tool_name or "tools/call",
              resource=resource, outcome=outcome, client_ip=client_ip,
-             payload={"name": tool_name, "arguments": arguments})
+             payload={"name": tool_name, "arguments": arguments},
+             mesa_advisory=_mesa_advisory_ctx.get())
         return _jsonrpc_result(msg_id, tool_result), tool_name or "tools/call", resource, outcome
 
     if method == "resources/list":
@@ -6229,12 +6330,12 @@ def _build_diff_set_integration_enabled(args: dict, token: TokenRecord, hass: An
 
 def _build_diff_create_backup(args: dict, token: TokenRecord, hass: Any) -> dict:
     name = args.get("name") if isinstance(args.get("name"), str) else None
-    agent_ids = args.get("agent_ids") if isinstance(args.get("agent_ids"), list) else ["backup.local"]
+    agent_ids = args.get("agent_ids") if isinstance(args.get("agent_ids"), list) else None
     return {
         "kind": "system_action",
         "summary": f"Create backup{f' \"{name}\"' if name else ''}",
         "target": {"type": "backup", "id": None, "label": name},
-        "preview": {"name": name, "agent_ids": agent_ids,
+        "preview": {"name": name, "agent_ids": agent_ids or "(auto-detected local agent)",
                     "note": "Creates a backup; ATM cannot restore backups."},
     }
 

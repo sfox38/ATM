@@ -178,6 +178,7 @@ export interface AuditEntry {
   client_ip: string;
   pass_through: boolean;
   payload?: string | null;
+  mesa_advisory?: boolean;
 }
 
 export interface EntityInfo {

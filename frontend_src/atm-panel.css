@@ -307,6 +307,16 @@
 /* Links from a MESA entity profile to a token's permissions tree. */
 .mesa-token-links { display: flex; flex-wrap: wrap; gap: 14px; margin: -4px 0 14px; }
 
+/* Effective resolved control_mode/enforcement panel in the MESA entity editor. */
+.mesa-effective { margin: 0 0 14px; padding: 8px 10px; border: 1px solid var(--atm-border); border-radius: var(--atm-radius-sm); background: var(--atm-surface-2, var(--atm-surface)); font-size: 12px; color: var(--atm-text-2); }
+.mesa-effective-title { font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; margin-right: 8px; font-size: 11px; }
+.mesa-effective code { color: var(--atm-text); }
+.mesa-effective em { font-style: normal; }
+.mesa-effective-note { margin-top: 6px; color: var(--atm-warning, var(--atm-text)); }
+
+/* Small "MESA" tag on an audit row whose action was waved through under advisory. */
+.mesa-advisory-badge { margin-left: 6px; background: var(--atm-surface-2, var(--atm-surface)); color: var(--atm-text-2); border: 1px solid var(--atm-border); }
+
 /* ============================================================
    Buttons
    ============================================================ */

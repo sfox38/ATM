@@ -313,6 +313,35 @@ function MesaTokenLinks({ entityId, returnToken, onRevealInToken }: {
   );
 }
 
+// Shows an entity's EFFECTIVE resolved control_mode/enforcement and which layer
+// provides each, so an admin sees when a broader domain/area profile overrides
+// the entity-level setting (the resolver is most-restrictive-wins).
+function MesaEffectivePanel({ detail }: { detail: MesaProfileDetail }) {
+  const exps = detail.explanation?.explanation ?? [];
+  const find = (suffix: string) => exps.find((e) => e.field_path.endsWith(suffix));
+  const ob = (detail.effective?.semantic_profile as { operational_boundaries?: Record<string, unknown> } | undefined)?.operational_boundaries ?? {};
+  const cm = find("control_mode");
+  const en = find("enforcement_mode");
+  const cmVal = String(cm?.effective_value ?? ob.control_mode ?? "autonomous");
+  const enVal = String(en?.effective_value ?? ob.enforcement_mode ?? "advisory");
+  const cmLevel = cm?.provided_by_level;
+  const enLevel = en?.provided_by_level;
+  const overridden = (cmLevel && cmLevel !== "entity") || (enLevel && enLevel !== "entity");
+  return (
+    <div className="mesa-effective">
+      <span className="mesa-effective-title">Effective</span>
+      <span>
+        control mode <code>{cmVal}</code>{cmLevel && <em> (from {cmLevel})</em>}, enforcement <code>{enVal}</code>{enLevel && <em> (from {enLevel})</em>}
+      </span>
+      {overridden && (
+        <div className="mesa-effective-note">
+          A broader profile overrides this entity's setting (most-restrictive layer wins). The effective mode above is what actually applies.
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ProfileEditor({
   scope,
   profileKey,
@@ -471,6 +500,7 @@ function ProfileEditor({
         {error && <ErrorMsg msg={error} />}
         {loading ? <Loading /> : (
           <>
+            {scope === "entity" && !isNew && detail && <MesaEffectivePanel detail={detail} />}
             {isNew && (
               <div className="field">
                 <FieldLabel id="mesa-key" text={SCOPE_LABEL[scope]} help={HELP[scope]} />
