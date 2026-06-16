@@ -186,7 +186,7 @@ ATM implements all 20 native HA MCP tools using the same tool names and response
 | `get_automation_traces` | `cap_traces` |
 | `get_system_health` / `check_config` / `validate_config` | `cap_diagnostics` |
 | `watch_entity` / `subscribe_event` | `cap_config_read` (bounded blocking, max 30s) |
-| `get_capability_summary` / `get_audit_summary` | none (own data only) |
+| `get_capability_summary` / `get_audit_summary` / `get_approval_status` | none (own data only) |
 
 **System tools** - gated by capabilities:
 
@@ -357,10 +357,10 @@ Filter accessible entities. Requires `cap_search`. This is state/registry/name s
 
 **Parameters (all optional):** `query` (substring of entity_id or friendly name), `domain` (string or list), `area` (name or area_id), `device_class`, `state`, `unavailable` (boolean), `stale_hours` (number), `limit` (default 100, max 500).
 
-**Returns:** `{count, truncated, entities: [{entity_id, state, friendly_name, domain, area, device_class}]}`.
+**Returns:** `{count, truncated, entities: [{entity_id, state, friendly_name, domain, area, device_class}]}`. Each entity also carries `control_mode` when its MESA nature is non-default (read_only/confirm/prohibited), so you can spot restricted entities without a follow-up `describe_entity`.
 
 #### `get_overview`
-Compact home summary. Requires `cap_search`. Returns total accessible entities, counts by domain and by area, and the unavailable count.
+Compact home summary. Requires `cap_search`. Returns total accessible entities, counts by domain and by area, the unavailable count, and the deployment `mesa_mode` (off/advisory/enforced) so you know whether to expect confirm/read-only gates.
 
 #### `describe_area`
 One area, its floor, and accessible entities grouped by domain. Requires `cap_search`. **Parameters:** `area` (name, alias, or area_id).
@@ -396,16 +396,19 @@ Compare accessible entities' states between two times (recorder-backed). Require
 Accessible entities that changed in the last N minutes, newest first. Requires `cap_search`. **Parameters:** `minutes` (default 30), `limit` (default 50).
 
 #### `dry_run_service`
-Preview a service call without executing: resolves and flattens targets to the entities the token can write and reports the MESA verdict per entity. Requires `cap_search`. **Parameters:** same shape as `call_service` (`domain`, `service`, `service_data`, `entity_id`/`device_id`/`area_id`).
+Preview a service call without executing: resolves and flattens targets to the entities the token can write, reports the MESA verdict per entity, and returns a single `predicted_outcome` (`allowed`/`pending_approval`/`denied`) folding the capability gate and MESA so you know in advance whether the call will run, need approval, or be refused. Requires `cap_search`. **Parameters:** same shape as `call_service` (`domain`, `service`, `service_data`, `entity_id`/`device_id`/`area_id`).
 
 #### `validate_config`
 Validate an automation or script config without saving. Requires `cap_diagnostics`. Returns structural validity plus, for each referenced entity, whether it exists and is accessible. **Parameters:** `type` (`automation` or `script`), `config`.
 
 #### `get_capability_summary`
-Introspect this token: persona, effective capabilities, Confirm-gated capabilities, write scope, and rate limits. No capability required.
+Introspect this token: persona, effective capabilities, Confirm-gated capabilities, write scope, rate limits, and a tool-level gate map (`tools.usable` / `tools.needs_approval` / `tools.unavailable`) so you can reason in tools, not just capabilities. No capability required.
 
 #### `get_audit_summary`
 This token's own recent audit entries (request_id, time, method, resource, outcome), newest first. No capability required. **Parameters:** `limit` (default 50), optional `outcome` filter.
+
+#### `get_approval_status`
+Check a Confirm-gated action you submitted earlier, or list your outstanding ones. With `approval_id`: returns that approval's status (pending/approved/rejected/expired/cancelled) and the result if approved. Without `approval_id`: returns all of this token's currently pending approvals (id, tool, created/expires), useful after a reconnect or to resume polling. No capability required; you only ever see approvals this token created.
 
 ---
 

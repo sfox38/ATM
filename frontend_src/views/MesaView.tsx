@@ -288,31 +288,6 @@ function Combo({
   );
 }
 
-// Links from an entity's MESA profile to a token's permissions tree. The
-// round-trip link (back to the origin token) only shows for a SCOPED origin,
-// pass-through tokens have no permissions tree. A general "open in a token" link
-// is always offered (lands on the Tokens list; reveal applies when a scoped
-// token is opened).
-function MesaTokenLinks({ entityId, returnToken, onRevealInToken }: {
-  entityId: string;
-  returnToken: TokenRecord | null;
-  onRevealInToken: (entityId: string, tokenId: string | null) => void;
-}) {
-  const roundTrip = returnToken && !returnToken.pass_through;
-  return (
-    <div className="mesa-token-links">
-      {roundTrip && (
-        <button type="button" className="link-btn" onClick={() => onRevealInToken(entityId, returnToken!.id)}>
-          Show in {returnToken!.name}'s permissions tree
-        </button>
-      )}
-      <button type="button" className="link-btn" onClick={() => onRevealInToken(entityId, null)}>
-        Open in a token's permissions
-      </button>
-    </div>
-  );
-}
-
 // Shows an entity's EFFECTIVE resolved control_mode/enforcement and which layer
 // provides each, so an admin sees when a broader domain/area profile overrides
 // the entity-level setting (the resolver is most-restrictive-wins).
@@ -486,16 +461,15 @@ function ProfileEditor({
 
   const titleVerb = isNew ? `Add ${SCOPE_LABEL[scope].toLowerCase()} profile` : `Edit ${scope}: ${profileKey}`;
 
+  // The origin token to jump back to, only when it is scoped (pass-through tokens
+  // have no permissions tree). Profiles opened directly from the MESA list have
+  // no origin, so the footer link is simply absent.
+  const originToken = returnTokenId ? (tokens ?? []).find((t) => t.id === returnTokenId) ?? null : null;
+  const roundTripToken = originToken && !originToken.pass_through ? originToken : null;
+
   return (
     <Modal titleId="mesa-editor-title" onClose={attemptClose}>
       <h3 className="modal-title" id="mesa-editor-title">{titleVerb}</h3>
-      {scope === "entity" && !isNew && profileKey && onRevealInToken && (
-        <MesaTokenLinks
-          entityId={profileKey}
-          returnToken={returnTokenId ? (tokens ?? []).find((t) => t.id === returnTokenId) ?? null : null}
-          onRevealInToken={onRevealInToken}
-        />
-      )}
       <div className="mesa-editor-body">
         {error && <ErrorMsg msg={error} />}
         {loading ? <Loading /> : (
@@ -523,7 +497,7 @@ function ProfileEditor({
                 <FieldLabel id="mesa-tags" text="Semantic tags" help={HELP.tags} />
                 {recommendedTags.length > 0 && (
                   <button type="button" className="link-btn" onClick={() => setShowReco((s) => !s)}>
-                    {showReco ? "Hide suggestions" : "Recommendations"}
+                    {showReco ? "Hide suggestions" : "Show suggestions"}
                   </button>
                 )}
               </div>
@@ -604,6 +578,15 @@ function ProfileEditor({
         )}
       </div>
       <div className="modal-actions">
+        {scope === "entity" && !isNew && profileKey && onRevealInToken && roundTripToken && (
+          <button
+            type="button"
+            className="link-btn mesa-tree-link"
+            onClick={() => onRevealInToken(profileKey, roundTripToken.id)}
+          >
+            View in permissions tree...
+          </button>
+        )}
         {!isNew && !confirmDelete && (
           <button
             className="btn btn-danger"
@@ -894,7 +877,7 @@ export function MesaView({ openProfileEntityId, onProfileOpened, tokens, returnT
                             <ControlBadge mode={rawControlMode(p.document)} />
                             {isEnforced(p.document) && <span className="badge badge-blue">Enforced</span>}
                           </td>
-                          <td className="mesa-row-tags">{tagsOf(p.document).join(", ") || "-"}</td>
+                          <td className="mesa-row-tags">{tagsOf(p.document).join(", ")}</td>
                         </tr>
                       ))}
                     </tbody>

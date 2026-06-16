@@ -407,23 +407,29 @@ _ENTITY_TOOL_DEFS: list[dict] = [
     {
         "name": "get_approval_status",
         "description": (
-            "Check the status of a pending approval that was created by an earlier tool call. "
-            "Returns status (pending, approved, rejected, expired, cancelled), and the result if approved. "
-            "Tokens can only fetch approvals they themselves created."
+            "Check a pending approval created by an earlier tool call, or list your own outstanding "
+            "approvals. With approval_id: returns that approval's status (pending, approved, rejected, "
+            "expired, cancelled) and the result if approved. Without approval_id: returns all of this "
+            "token's currently pending approvals (id, tool, created/expires), useful after a reconnect "
+            "or to resume polling. Tokens only ever see approvals they themselves created."
         ),
         "inputSchema": {
             "type": "object",
             "properties": {
-                "approval_id": {"type": "string"},
+                "approval_id": {
+                    "type": "string",
+                    "description": "Omit to list all of this token's pending approvals.",
+                },
             },
-            "required": ["approval_id"],
         },
     },
     {
         "name": "get_capability_summary",
         "description": (
             "Introspect this token: its persona, effective capabilities (deny/allow/confirm), which "
-            "capabilities are Confirm-gated (will require admin approval), write scope, and rate limits. "
+            "capabilities are Confirm-gated (will require admin approval), write scope, rate limits, and a "
+            "tool-level gate map (tools.usable / tools.needs_approval / tools.unavailable) so you know "
+            "which tools run directly, which return pending_approval, and which you cannot use. "
             "Call this at session start to orient. No capability required; a token only ever sees itself."
         ),
         "inputSchema": {"type": "object", "properties": {}},
@@ -688,7 +694,9 @@ _SYSTEM_TOOL_DEFS: list[dict] = [
         "description": (
             "Search the entities this token can access by name, domain, area, device_class, or state. "
             "For semantic/profile-based discovery (tags, classification, control mode) use mesa_query_profiles instead. "
-            "Filters combine with AND. Returns a compact list (entity_id, state, friendly_name, domain, area)."
+            "Filters combine with AND. Returns a compact list (entity_id, state, friendly_name, domain, area); each "
+            "result also carries control_mode when its MESA nature is non-default (read_only, confirm, prohibited), "
+            "so you can spot restricted entities without a follow-up describe_entity call."
         ),
         "cap": "cap_search",
         "inputSchema": {
@@ -712,7 +720,9 @@ _SYSTEM_TOOL_DEFS: list[dict] = [
         "name": "get_overview",
         "description": (
             "A compact summary of the home as this token sees it: total accessible entities, "
-            "counts by domain and by area, and how many are unavailable. Good for orienting at session start."
+            "counts by domain and by area, how many are unavailable, and the deployment MESA mode "
+            "(off | advisory | enforced) so you know whether to expect confirm/read-only gates. "
+            "Good for orienting at session start."
         ),
         "cap": "cap_search",
         "inputSchema": {"type": "object", "properties": {}},
@@ -867,8 +877,10 @@ _SYSTEM_TOOL_DEFS: list[dict] = [
         "name": "dry_run_service",
         "description": (
             "Preview a service call without executing it: resolves and flattens the targets to the "
-            "entities this token can write, and reports the MESA verdict (allow/confirm/block) per entity. "
-            "Use before a risky call_service to reason about its effect."
+            "entities this token can write, reports the MESA verdict (allow/confirm/block) per entity, and "
+            "gives a single predicted_outcome (allowed | pending_approval | denied) folding in the "
+            "capability gate and MESA. Use before a risky call_service to know in advance whether it will "
+            "run, need approval, or be refused."
         ),
         "cap": "cap_search",
         "inputSchema": {
@@ -1497,6 +1509,47 @@ def _tool_is_announced(tool_def: dict, token: TokenRecord, has_write: bool) -> b
     if tool_def["name"] in _WRITE_GATED_TOOLS:
         return has_write
     return True
+
+
+def _tool_gate_map(token: TokenRecord, data: ATMData) -> dict[str, list[str]]:
+    """Classify every tool by how it would behave for this token, at the tool level.
+
+    Buckets (token's own data, no entity oracle):
+      usable        - announced and executes directly.
+      needs_approval - cap-tied tool whose cap is Confirm: returns pending_approval.
+      unavailable   - not usable (cap denied, or a write/action tool without write scope).
+
+    This is a static, tool-level view. call_service and the native Hass* action
+    tools appear "usable" when the token has write scope even though a specific
+    target may still hit a physical/dual gate or MESA confirm at call time; use
+    dry_run_service to preview an individual call. Mirrors _tool_is_announced so
+    the summary and tools/list agree.
+    """
+    has_write = token_has_write_scope(token)
+    mesa_defs = mesa_tool_defs() if data.mesa is not None else []
+    usable: list[str] = []
+    needs_approval: list[str] = []
+    unavailable: list[str] = []
+    for tool_def in list(_ENTITY_TOOL_DEFS) + list(_NATIVE_TOOL_DEFS) + list(_SYSTEM_TOOL_DEFS) + mesa_defs:
+        name = tool_def["name"]
+        cap = tool_def.get("cap")
+        if cap is not None:
+            mode = effective_cap(token, cap)
+            if mode == CAP_DENY:
+                unavailable.append(name)
+            elif mode == CAP_CONFIRM:
+                needs_approval.append(name)
+            else:
+                usable.append(name)
+        elif name in _WRITE_GATED_TOOLS:
+            (usable if has_write else unavailable).append(name)
+        else:
+            usable.append(name)
+    return {
+        "usable": sorted(usable),
+        "needs_approval": sorted(needs_approval),
+        "unavailable": sorted(unavailable),
+    }
 
 
 def _jsonrpc_result(msg_id: Any, result: Any) -> dict:
@@ -2433,15 +2486,32 @@ async def _execute_restart_ha(
 async def _tool_get_approval_status(
     args: dict, token: TokenRecord, hass: Any, data: ATMData
 ) -> tuple[dict, str, str]:
-    """MCP tool: poll an approval the token previously created.
+    """MCP tool: poll an approval the token previously created, or list the
+    token's own outstanding (pending) approvals when no approval_id is given.
 
     Cross-token reads return 404 (matching the missing-record response) to avoid
     a token-existence oracle.
     """
-    from .approvals import get_approval  # noqa: PLC0415
+    from .approvals import STATUS_PENDING, get_approval, list_approvals  # noqa: PLC0415
 
     approval_id = args.get("approval_id")
-    if not approval_id or not isinstance(approval_id, str):
+    if approval_id is None:
+        # No id: enumerate this token's own pending approvals (own data only).
+        pending = list_approvals(data.store, status=STATUS_PENDING, token_id=token.id)
+        items = [
+            {
+                "approval_id": a.id,
+                "status": a.status,
+                "tool_name": a.tool_name,
+                "created_at": a.created_at.isoformat() if a.created_at else None,
+                "expires_at": a.expires_at.isoformat() if a.expires_at else None,
+            }
+            for a in pending
+        ]
+        body = {"count": len(items), "pending_approvals": items}
+        return _tool_success(json.dumps(body, default=str)), "allowed", "get_approval_status"
+
+    if not isinstance(approval_id, str) or not approval_id:
         return _tool_error("Missing approval_id."), "invalid_request", "get_approval_status"
     record = get_approval(data.store, approval_id)
     if record is None or record.token_id != token.id:
@@ -3429,7 +3499,7 @@ def _area_name_for_entity(eid: str, registry: Any, dev_reg: Any, area_reg: Any) 
 
 
 async def _tool_search_entities(
-    args: dict, token: TokenRecord, hass: Any
+    args: dict, token: TokenRecord, hass: Any, data: ATMData
 ) -> tuple[dict, str, str]:
     """MCP tool: filter the token's accessible entities by name/domain/area/etc."""
     if effective_cap(token, "cap_search") == CAP_DENY:
@@ -3500,12 +3570,26 @@ async def _tool_search_entities(
         })
 
     truncated = len(matches) > limit
-    body = {"count": min(len(matches), limit), "truncated": truncated, "entities": matches[:limit]}
+    results = matches[:limit]
+
+    # Annotate each returned row with its MESA control_mode when that mode is
+    # non-default (anything other than autonomous), so the agent sees which
+    # results are read-only/confirm/prohibited by nature without a follow-up
+    # describe_entity call. Evaluated only on the capped results to bound cost;
+    # autonomous is omitted to avoid bloating every row.
+    settings = data.store.get_settings()
+    if data.mesa is not None and settings.mesa_mode != MESA_MODE_OFF:
+        for row in results:
+            cm = entity_control_mode(data.mesa, token, row["entity_id"])
+            if cm is not None and cm != "autonomous":
+                row["control_mode"] = cm
+
+    body = {"count": len(results), "truncated": truncated, "entities": results}
     return _tool_success(json.dumps(body, default=str)), "allowed", "search_entities"
 
 
 async def _tool_get_overview(
-    args: dict, token: TokenRecord, hass: Any
+    args: dict, token: TokenRecord, hass: Any, data: ATMData
 ) -> tuple[dict, str, str]:
     """MCP tool: compact home summary scoped to the token."""
     if effective_cap(token, "cap_search") == CAP_DENY:
@@ -3532,6 +3616,13 @@ async def _tool_get_overview(
         "by_domain": dict(sorted(by_domain.items())),
         "by_area": dict(sorted(by_area.items())),
     }
+    # Deployment-wide MESA posture: a cheap one-field orientation signal so the
+    # agent knows whether to expect confirm/read-only gates (off | advisory |
+    # enforced). A per-entity rollup is intentionally omitted here: control_mode
+    # is mostly baseline-derived, so a home-wide count reflects defaults, not
+    # admin intent. Use search_entities (per-row control_mode) for that.
+    if data.mesa is not None:
+        body["mesa_mode"] = data.store.get_settings().mesa_mode
     return _tool_success(json.dumps(body, default=str)), "allowed", "get_overview"
 
 
@@ -3824,7 +3915,7 @@ async def _tool_describe_entity(
 
 
 async def _tool_get_capability_summary(
-    args: dict, token: TokenRecord, hass: Any
+    args: dict, token: TokenRecord, hass: Any, data: ATMData
 ) -> tuple[dict, str, str]:
     """MCP tool: the token introspecting its own caps/persona/limits. No cap required."""
     caps = effective_caps(token)
@@ -3837,6 +3928,7 @@ async def _tool_get_capability_summary(
         "allowed": sorted(c for c, m in caps.items() if m == CAP_ALLOW),
         "confirm_gated": sorted(c for c, m in caps.items() if m == CAP_CONFIRM),
         "denied": sorted(c for c, m in caps.items() if m == CAP_DENY),
+        "tools": _tool_gate_map(token, data),
         "rate_limit": (
             {"requests_per_min": token.rate_limit_requests, "burst_per_sec": token.rate_limit_burst}
             if token.rate_limit_requests > 0 else "none"
@@ -4091,6 +4183,15 @@ async def _tool_recent_activity(
     return _tool_success(json.dumps(body, default=str)), "allowed", "recent_activity"
 
 
+def _cap_outcome(mode: str) -> str:
+    """Map an effective cap mode to a predicted call outcome string."""
+    if mode == CAP_DENY:
+        return "denied"
+    if mode == CAP_CONFIRM:
+        return "pending_approval"
+    return "allowed"
+
+
 async def _tool_dry_run_service(
     args: dict, token: TokenRecord, hass: Any, data: ATMData
 ) -> tuple[dict, str, str]:
@@ -4108,9 +4209,12 @@ async def _tool_dry_run_service(
     service_key = f"{domain}/{service}"
 
     if service_key in DUAL_GATE_SERVICES:
+        predicted = _cap_outcome(effective_cap(token, "cap_restart"))
         body = {
             "domain": domain, "service": service, "system_service": True,
-            "resolved_entities": [], "would_execute": effective_cap(token, "cap_restart") != CAP_DENY,
+            "resolved_entities": [],
+            "predicted_outcome": predicted,
+            "would_execute": predicted == "allowed",
         }
         return _tool_success(json.dumps(body, default=str)), "allowed", "dry_run_service"
 
@@ -4121,6 +4225,19 @@ async def _tool_dry_run_service(
         )
     except EntityCreationNotPermitted:
         permitted, requested = [], 0
+
+    # Predict the outcome in the same order call_service applies its gates: the
+    # physical-control cap gate runs first (before target resolution and MESA),
+    # then empty resolution denies, then MESA (confirm -> pending, nothing
+    # allowed -> deny, else allow). A confirm at any layer surfaces as pending.
+    physical_gate = service_key in PHYSICAL_GATE_SERVICES
+    predicted: str
+    if physical_gate and effective_cap(token, "cap_physical_control") != CAP_ALLOW:
+        predicted = _cap_outcome(effective_cap(token, "cap_physical_control"))
+    elif not permitted:
+        predicted = "denied"
+    else:
+        predicted = "allowed"
 
     mesa: dict | None = None
     settings = data.store.get_settings()
@@ -4135,6 +4252,13 @@ async def _tool_dry_run_service(
             "blocked": [{"entity_id": e, "rule": r, "reason": reason} for e, r, reason in verdict.blocked],
             "warnings": verdict.warnings,
         }
+        # MESA only narrows the outcome, and only when the cap gate did not
+        # already deny/pend (mirrors call_service: the cap gate returns first).
+        if predicted == "allowed":
+            if verdict.confirm:
+                predicted = "pending_approval"
+            elif not verdict.allowed:
+                predicted = "denied"
 
     body = {
         "domain": domain,
@@ -4143,7 +4267,8 @@ async def _tool_dry_run_service(
         "resolved_entities": permitted,
         "dropped_count": max(requested - len(permitted), 0),
         "mesa": mesa,
-        "physical_gate": service_key in PHYSICAL_GATE_SERVICES,
+        "physical_gate": physical_gate,
+        "predicted_outcome": predicted,
     }
     return _tool_success(json.dumps(body, default=str)), "allowed", "dry_run_service"
 
@@ -5108,7 +5233,7 @@ async def _call_tool(
     if tool_name == "get_approval_status":
         return await _tool_get_approval_status(arguments, token, hass, data)
     if tool_name == "get_capability_summary":
-        return await _tool_get_capability_summary(arguments, token, hass)
+        return await _tool_get_capability_summary(arguments, token, hass, data)
     if tool_name == "get_audit_summary":
         return await _tool_get_audit_summary(arguments, token, hass, data)
     if tool_name in MESA_TOOL_NAMES:
@@ -5172,9 +5297,9 @@ async def _call_tool(
     if tool_name == "get_device":
         return await _tool_get_device(arguments, token, hass)
     if tool_name == "search_entities":
-        return await _tool_search_entities(arguments, token, hass)
+        return await _tool_search_entities(arguments, token, hass, data)
     if tool_name == "get_overview":
-        return await _tool_get_overview(arguments, token, hass)
+        return await _tool_get_overview(arguments, token, hass, data)
     if tool_name == "describe_area":
         return await _tool_describe_area(arguments, token, hass)
     if tool_name == "find_available_actions":

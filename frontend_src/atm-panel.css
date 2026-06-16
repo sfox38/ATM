@@ -304,8 +304,6 @@
 }
 .collapsible-body { margin-top: 16px; }
 
-/* Links from a MESA entity profile to a token's permissions tree. */
-.mesa-token-links { display: flex; flex-wrap: wrap; gap: 14px; margin: -4px 0 14px; }
 
 /* Effective resolved control_mode/enforcement panel in the MESA entity editor. */
 .mesa-effective { margin: 0 0 14px; padding: 8px 10px; border: 1px solid var(--atm-border); border-radius: var(--atm-radius-sm); background: var(--atm-surface-2, var(--atm-surface)); font-size: 12px; color: var(--atm-text-2); }
@@ -577,7 +575,9 @@ select.input {
 }
 .modal-title { font-size: 18px; font-weight: 700; margin: 0 0 20px 0; color: var(--atm-text); }
 .modal-title-error { color: var(--atm-error); }
-.modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 20px; }
+.modal-actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; margin-top: 20px; }
+/* Left-aligned link in a footer action row; pushes the buttons to the right. */
+.mesa-tree-link { margin-right: auto; }
 
 /* ============================================================
    Warning / info blocks
@@ -1424,7 +1424,7 @@ select.input {
 .mesa-group .data-table td:nth-child(3) { width: 22%; }
 .mesa-row-name { font-size: 13px; color: var(--atm-text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mesa-row-id { font-size: 11px; color: var(--atm-text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.mesa-row-modes { display: flex; gap: 6px; flex-wrap: wrap; }
+.mesa-row-modes { display: flex; gap: 6px; flex-wrap: nowrap; white-space: nowrap; }
 .mesa-row-tags { font-size: 12px; color: var(--atm-text-2); white-space: normal; overflow-wrap: anywhere; }
 @media (max-width: 600px) { .mesa-search { max-width: none; } }
 
