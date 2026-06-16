@@ -36,6 +36,9 @@ export const PassThroughNotice = React.memo(function PassThroughNotice({ token, 
         <p className="mt-8">
           Pass-through grants reads and everyday actions automatically, but the write, system, and irreversible capabilities (plus log reading) stay enforced exactly as set in the Capabilities section and must be enabled there individually. Capabilities set to Confirm remain gated even under pass-through.
         </p>
+        <p className="mt-8">
+          Because pass-through exposes every entity, discovery calls ship the whole home into the model, which can significantly increase token usage. A scoped permission tree also keeps context small; pass-through trades that away.
+        </p>
       </div>
 
       {error && <div className="banner banner-error">{error}</div>}

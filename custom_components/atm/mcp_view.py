@@ -3860,16 +3860,18 @@ async def _tool_get_audit_summary(
     if entries is None:
         return _tool_error("Invalid outcome filter."), "invalid_request", "get_audit_summary"
 
-    items = [
-        {
+    items = []
+    for e in entries:
+        item = {
             "request_id": e.request_id,
             "timestamp": e.timestamp,
             "method": e.method,
             "resource": e.resource,
             "outcome": e.outcome,
         }
-        for e in entries
-    ]
+        if e.mesa_advisory:
+            item["mesa_advisory"] = True
+        items.append(item)
     body = {"token_name": token.name, "count": len(items), "entries": items}
     return _tool_success(json.dumps(body, default=str)), "allowed", "get_audit_summary"
 

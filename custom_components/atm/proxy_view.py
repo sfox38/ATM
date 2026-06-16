@@ -334,7 +334,8 @@ class ATMServiceView(HomeAssistantView):
                 )
         except asyncio.TimeoutError:
             _log(data, token, request_id=request_id, method="POST", resource=resource,
-                 outcome="allowed", client_ip=client_ip, payload=body)
+                 outcome="allowed", client_ip=client_ip, payload=body,
+                 mesa_advisory=bool(mesa_outcome.warnings))
             return _json_response(
                 {"success": True, "partial": True, "message": "Service dispatched but HA did not respond within the timeout window."},
                 200, request_id, rl_result, extra_headers=extra,
@@ -354,7 +355,8 @@ class ATMServiceView(HomeAssistantView):
         filtered_response = filter_service_response(svc_response, token, hass) if svc_response is not None else None
 
         _log(data, token, request_id=request_id, method="POST", resource=resource,
-             outcome="allowed", client_ip=client_ip, payload=body)
+             outcome="allowed", client_ip=client_ip, payload=body,
+             mesa_advisory=bool(mesa_outcome.warnings))
 
         resp_body: dict[str, Any] = {"success": True}
         if filtered_response is not None:
