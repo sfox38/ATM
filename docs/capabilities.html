@@ -52,7 +52,7 @@
               <tr><td><span class="badge badge-cap">cap_template_render</span></td><td>Render Jinja2 templates in a permission-scoped environment</td><td><span class="yes">granted</span></td></tr>
               <tr><td><span class="badge badge-cap">cap_service_response</span></td><td>Return response data from services that declare a response schema</td><td><span class="yes">granted</span></td></tr>
               <tr><td><span class="badge badge-cap">cap_broadcast</span></td><td>Announcements via <code>HassBroadcast</code> through assist satellite devices</td><td><span class="yes">granted</span></td></tr>
-              <tr><td><span class="badge badge-cap">cap_log_read</span></td><td>Read HA system log entries (<code>get_logs</code>). ATM's own entries are excluded and token values scrubbed.</td><td><span class="no">must enable</span></td></tr>
+              <tr><td><span class="badge badge-cap">cap_log_read</span></td><td>Read HA system log entries (<code>get_logs</code>). ATM's own entries are excluded; tokens, JWTs, and URL credentials are scrubbed. A <a href="security.html#residual-exposure">sensitive grant</a>: logs are free-form text from every integration.</td><td><span class="no">must enable</span></td></tr>
             </tbody>
           </table>
         </div>

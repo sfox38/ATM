@@ -199,9 +199,9 @@
         <!-- ===== Realtime ===== -->
         <section class="tool-group" data-cap="read">
           <div class="tool-group-head"><h2>Realtime subscriptions</h2></div>
-          <article class="tool" data-cap="read" data-search="watch_entity subscribe_event blocking 30s">
-            <div class="tool-head"><span class="tool-name">watch_entity</span><span class="tool-name">subscribe_event</span><span class="badge badge-cap">cap_config_read</span></div>
-            <p class="tool-desc">Bounded blocking subscriptions (max 30 seconds) that wait for an accessible entity to change or for a matching event on the bus.</p>
+          <article class="tool" data-cap="read" data-search="watch_entity blocking 30s">
+            <div class="tool-head"><span class="tool-name">watch_entity</span><span class="badge badge-cap">cap_config_read</span></div>
+            <p class="tool-desc">Bounded blocking subscription (max 30 seconds) that waits for an accessible entity to change state, then returns it.</p>
           </article>
         </section>
 

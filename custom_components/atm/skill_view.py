@@ -139,10 +139,10 @@ the allowed directories. There is no restore-backup tool by design.
 
 ## Bounded subscriptions
 
-`watch_entity` and `subscribe_event` open short, time-boxed streams (capped at a
-few tens of seconds). They are for catching an imminent change, not long-lived
-monitoring. Expect them to end on their own; re-subscribe if you still need to
-watch.
+`watch_entity` opens a short, time-boxed wait (capped at a few tens of seconds)
+for an accessible entity's next state change. It is for catching an imminent
+change, not long-lived monitoring. Expect it to end on its own; call it again if
+you still need to watch.
 
 ## If a tool is not listed, you do not have it
 

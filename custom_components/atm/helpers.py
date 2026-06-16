@@ -665,7 +665,26 @@ def render_template_for_token(template_str: str, token: TokenRecord, hass: HomeA
 
 _LOG_LEVEL_RANK: dict[str, int] = {"DEBUG": 0, "INFO": 1, "WARNING": 2, "ERROR": 3, "CRITICAL": 3}
 _ATM_TOKEN_SCRUB_RE = re.compile(r"atm_[0-9a-f]{64}", re.IGNORECASE)
+# Home Assistant long-lived access tokens (and other JWTs) are three base64url
+# segments whose header always begins "eyJ". Redact so a leaked LLAT in a log
+# line is not handed back to a token holding cap_log_read.
+_JWT_SCRUB_RE = re.compile(r"eyJ[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{6,}")
+# Credentials embedded in URLs/log text: query params (token=..., api_password=...)
+# and userinfo (https://user:pass@host). Over-redaction in logs is acceptable.
+_URL_CRED_QUERY_RE = re.compile(
+    r"(?i)(access_token|refresh_token|api_password|password|api_key|apikey|client_secret|secret|token|auth)=[^\s&\"';]+"
+)
+_URL_CRED_USERINFO_RE = re.compile(r"://[^/\s:@]+:[^/\s:@]+@")
 _ATM_LOGGER_PREFIXES = ("homeassistant.components.atm", "custom_components.atm")
+
+
+def _scrub_log_text(text: str) -> str:
+    """Redact ATM tokens, JWTs/LLATs, and URL-embedded credentials from a log line."""
+    text = _ATM_TOKEN_SCRUB_RE.sub("<atm-token>", text)
+    text = _JWT_SCRUB_RE.sub("<token>", text)
+    text = _URL_CRED_QUERY_RE.sub(r"\1=<redacted>", text)
+    text = _URL_CRED_USERINFO_RE.sub("://<redacted>@", text)
+    return text
 
 
 def collect_log_entries(hass: Any, level: str, integration: str | None, limit: int) -> list[dict]:
@@ -703,8 +722,8 @@ def collect_log_entries(hass: Any, level: str, integration: str | None, limit: i
             "first_occurred": getattr(record, "first_occurred", 0),
             "level": record_level,
             "logger": logger_name,
-            "message": _ATM_TOKEN_SCRUB_RE.sub("<atm-token>", msg),
-            "exception": _ATM_TOKEN_SCRUB_RE.sub("<atm-token>", exc_str) if exc_str else None,
+            "message": _scrub_log_text(msg),
+            "exception": _scrub_log_text(exc_str) if exc_str else None,
             "occurrences": getattr(record, "count", 1),
         })
     entries.sort(key=lambda e: e["timestamp"], reverse=True)

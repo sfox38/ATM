@@ -13,7 +13,12 @@ from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 from homeassistant.util.dt import utcnow
 
-from .const import BLOCKED_DOMAINS, DOMAIN, SENSITIVE_ATTRIBUTES
+from .const import (
+    BLOCKED_DOMAINS,
+    DOMAIN,
+    SENSITIVE_ATTRIBUTES,
+    SENSITIVE_KEY_SUBSTRINGS,
+)
 from .token_store import TokenRecord
 
 _LOGGER = logging.getLogger(__name__)
@@ -104,12 +109,27 @@ def resolve(entity_id: str, token: TokenRecord, hass: HomeAssistant) -> Permissi
     return Permission.NO_ACCESS
 
 
+def is_sensitive_key(key: Any) -> bool:
+    """Whether an attribute/response key name marks its value as sensitive.
+
+    True when the key is in the fixed SENSITIVE_ATTRIBUTES list or contains any
+    SENSITIVE_KEY_SUBSTRINGS marker (case-insensitive). Used to drop secrets that
+    third-party integrations surface under arbitrary keys.
+    """
+    if not isinstance(key, str):
+        return False
+    if key in SENSITIVE_ATTRIBUTES:
+        return True
+    lowered = key.lower()
+    return any(marker in lowered for marker in SENSITIVE_KEY_SUBSTRINGS)
+
+
 def scrub_sensitive_attributes(state: State) -> dict[str, Any]:
     """Return a state dict with sensitive attributes removed."""
     d = state.as_dict()
     clean_attrs = {
         k: v for k, v in d.get("attributes", {}).items()
-        if k not in SENSITIVE_ATTRIBUTES
+        if not is_sensitive_key(k)
     }
     return {**d, "attributes": clean_attrs}
 
@@ -120,7 +140,7 @@ def scrub_state_dict(d: dict) -> dict:
     Use this when the input is already a dict (e.g. from state history results).
     Use scrub_sensitive_attributes when working with State objects directly.
     """
-    attrs = {k: v for k, v in d.get("attributes", {}).items() if k not in SENSITIVE_ATTRIBUTES}
+    attrs = {k: v for k, v in d.get("attributes", {}).items() if not is_sensitive_key(k)}
     return {**d, "attributes": attrs}
 
 
@@ -298,7 +318,12 @@ def filter_service_response(
     hass: HomeAssistant,
     _depth: int = 0,
 ) -> Any:
-    """Recursively redact entity IDs the token cannot access from service response data."""
+    """Recursively redact secrets and inaccessible entity IDs from service response data.
+
+    Two redactions are applied: any string that is an entity ID the token cannot
+    access becomes "<redacted>", and any dict value whose key name is sensitive
+    (is_sensitive_key) becomes "<redacted>" without recursing into it.
+    """
     if _depth > 10:
         # Depth limit reached. Still redact entity ID strings, but truncate
         # containers to empty rather than returning their raw contents - a dict
@@ -323,7 +348,11 @@ def filter_service_response(
                 return "<redacted>"
         return response_data
     if isinstance(response_data, dict):
-        return {k: filter_service_response(v, token, hass, _depth + 1) for k, v in response_data.items()}
+        return {
+            k: "<redacted>" if is_sensitive_key(k)
+            else filter_service_response(v, token, hass, _depth + 1)
+            for k, v in response_data.items()
+        }
     if isinstance(response_data, list):
         return [filter_service_response(item, token, hass, _depth + 1) for item in response_data]
     return response_data

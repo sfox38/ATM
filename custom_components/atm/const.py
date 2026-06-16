@@ -65,6 +65,19 @@ SENSITIVE_ATTRIBUTES = frozenset({
     "still_image_url",
 })
 
+# Substrings (matched case-insensitively against a key name) that mark a value as
+# sensitive regardless of which integration produced it. Such values are dropped
+# from state attributes and replaced with "<redacted>" in service-response and
+# event data. Defense in depth: third-party integrations can surface secrets
+# (tokens, passwords, API keys) under arbitrary attribute/response keys that the
+# fixed SENSITIVE_ATTRIBUTES list does not name. Over-redaction is the safe
+# failure mode here, so the substrings are matched liberally.
+SENSITIVE_KEY_SUBSTRINGS = frozenset({
+    "password", "secret", "api_key", "apikey", "access_token",
+    "auth_token", "authorization", "credential", "private_key",
+    "token", "session",
+})
+
 BLOCKED_DOMAINS = frozenset({"atm"})
 
 HIGH_RISK_DOMAINS = frozenset({
@@ -248,8 +261,8 @@ MAX_HISTORY_RANGE_DAYS = 7
 # Maximum number of log entries returned by the logs endpoint/tool.
 MAX_LOG_ENTRIES = 100
 
-# Hard cap (and default) for the bounded watch_entity / subscribe_event tools.
-# These block the tool call up to this many seconds waiting for a change/event.
+# Hard cap (and default) for the bounded watch_entity tool.
+# It blocks the tool call up to this many seconds waiting for a state change.
 MAX_SUBSCRIPTION_SECONDS = 30
 
 # Directories (relative to the HA config dir) the cap_filesystem tools may touch.

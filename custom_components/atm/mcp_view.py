@@ -1039,23 +1039,6 @@ _SYSTEM_TOOL_DEFS: list[dict] = [
         },
     },
     {
-        "name": "subscribe_event",
-        "description": (
-            "Wait (up to timeout seconds, max 30) for a Home Assistant bus event of the given type, then "
-            "return it. Entity IDs in the event data that this token cannot access are redacted. "
-            "High-volume/sensitive event types (state_changed, call_service) cannot be subscribed to."
-        ),
-        "cap": "cap_config_read",
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "event_type": {"type": "string"},
-                "timeout": {"type": "integer", "minimum": 1, "maximum": 30, "default": 30},
-            },
-            "required": ["event_type"],
-        },
-    },
-    {
         "name": "list_files",
         "description": (
             "List files in an allowed config directory (www/, themes/, custom_templates/). "
@@ -4627,17 +4610,8 @@ async def _execute_delete_helper(
 
 
 # ---------------------------------------------------------------------------
-# Bounded subscriptions (cap_config_read): watch_entity / subscribe_event
+# Bounded subscription (cap_config_read): watch_entity
 # ---------------------------------------------------------------------------
-
-# Event types that are a firehose or carry cross-entity / service data and so
-# must not be subscribable (state_changed would stream every entity's changes;
-# call_service would reveal all service calls regardless of token scope).
-_SUBSCRIBE_EVENT_DENYLIST = frozenset({
-    "state_changed", "call_service", "service_registered", "service_removed",
-    "state_reported", "entity_registry_updated", "device_registry_updated",
-    "area_registry_updated", "core_config_updated", "logbook_entry",
-})
 
 
 def _clamp_timeout(value: Any) -> int:
@@ -4692,47 +4666,6 @@ async def _tool_watch_entity(
             "when": getattr(new_state, "last_changed", None),
         }
     return _tool_success(json.dumps(body, default=str)), "allowed", entity_id
-
-
-async def _tool_subscribe_event(
-    args: dict, token: TokenRecord, hass: Any
-) -> tuple[dict, str, str]:
-    """MCP tool: block until a bus event of the given type fires, or until timeout.
-
-    Entity IDs in the event data the token cannot access are redacted; firehose
-    and cross-scope event types are refused.
-    """
-    if effective_cap(token, "cap_config_read") == CAP_DENY:
-        return _tool_error("Forbidden."), "denied", "subscribe_event"
-
-    event_type = args.get("event_type", "")
-    if not event_type or not isinstance(event_type, str):
-        return _tool_error("Missing required argument: event_type"), "invalid_request", "subscribe_event"
-    if event_type in _SUBSCRIBE_EVENT_DENYLIST:
-        return _tool_error("This event type cannot be subscribed to."), "denied", event_type
-
-    timeout = _clamp_timeout(args.get("timeout", MAX_SUBSCRIPTION_SECONDS))
-    future: asyncio.Future = hass.loop.create_future()
-
-    @callback
-    def _on_event(event: Any) -> None:
-        if not future.done():
-            future.set_result(event)
-
-    unsub = hass.bus.async_listen(event_type, _on_event)
-    try:
-        event = await asyncio.wait_for(future, timeout)
-    except TimeoutError:
-        return (
-            _tool_success(json.dumps({"event_type": event_type, "fired": False, "timeout_seconds": timeout})),
-            "allowed", event_type,
-        )
-    finally:
-        unsub()
-
-    redacted = filter_service_response(dict(event.data), token, hass)
-    body = {"event_type": event_type, "fired": True, "data": redacted}
-    return _tool_success(json.dumps(body, default=str)), "allowed", event_type
 
 
 # ---------------------------------------------------------------------------
@@ -5342,8 +5275,6 @@ async def _call_tool(
         return await _tool_delete_helper(arguments, token, hass, data, request_id, client_ip)
     if tool_name == "watch_entity":
         return await _tool_watch_entity(arguments, token, hass)
-    if tool_name == "subscribe_event":
-        return await _tool_subscribe_event(arguments, token, hass)
     if tool_name == "list_files":
         return await _tool_list_files(arguments, token, hass)
     if tool_name == "read_file":
