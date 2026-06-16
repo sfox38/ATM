@@ -48,7 +48,23 @@ class _CapturingConnection(ActiveConnection):
     """
 
     def __init__(self, hass: HomeAssistant, user: Any) -> None:
-        super().__init__(_LOGGER, hass, self._noop_send, user, None)
+        # Build the constructor kwargs against the live ActiveConnection
+        # signature and pass only what it accepts, so ATM works across the HA
+        # versions it supports: parameters have been added over time (e.g.
+        # `remote` in HA 2026.6). Read names from the code object, never
+        # inspect.signature, which on Python 3.14 evaluates ActiveConnection's
+        # TYPE_CHECKING-only annotations and raises NameError.
+        available: dict[str, Any] = {
+            "logger": _LOGGER,
+            "hass": hass,
+            "send_message": self._noop_send,
+            "user": user,
+            "refresh_token": None,
+            "remote": None,
+        }
+        code = ActiveConnection.__init__.__code__
+        accepted = set(code.co_varnames[: code.co_argcount + code.co_kwonlyargcount])
+        super().__init__(**{k: v for k, v in available.items() if k in accepted})
         self.result_future: asyncio.Future = hass.loop.create_future()
 
     @staticmethod
@@ -127,7 +143,13 @@ async def async_ws_command(
         raise WsDispatchError(f"WebSocket command {command} failed: {err}") from err
 
 
-_REQUIRED_CONNECTION_PARAMS = ("logger", "hass", "send_message", "user", "refresh_token")
+# The ActiveConnection.__init__ params _CapturingConnection knows how to supply.
+# Must stay in sync with the `available` dict in _CapturingConnection.__init__.
+# HA adds params over time (e.g. `remote` in 2026.6); construction supplies the
+# intersection with the live signature, so old and new HA both work.
+_SUPPLIED_CONNECTION_PARAMS = frozenset(
+    {"logger", "hass", "send_message", "user", "refresh_token", "remote"}
+)
 _REQUIRED_CONNECTION_METHODS = ("send_result", "send_error", "async_handle_exception")
 
 
@@ -137,8 +159,9 @@ def check_ws_dispatch_compat(hass: HomeAssistant) -> str | None:
     Returns None when compatible, or a short human-readable reason when HA appears
     to have changed shape (in which case helper CRUD will still fail per-call with
     a clean WsDispatchError; this just surfaces it once at startup). Detects the
-    realistic break scenarios: a changed ActiveConnection constructor, a missing
-    result-sink method, or a registry that is no longer a dict.
+    realistic break scenarios: a new required ActiveConnection constructor param
+    ATM cannot supply, a missing result-sink method, or a registry that is no
+    longer a dict.
     """
     try:
         registry = hass.data.get(ws_const.DOMAIN)
@@ -151,10 +174,15 @@ def check_ws_dispatch_compat(hass: HomeAssistant) -> str | None:
         # runtime, so signature() raises NameError and would abort setup.
         code = getattr(ActiveConnection.__init__, "__code__", None)
         if code is not None:
-            names = set(code.co_varnames[: code.co_argcount + code.co_kwonlyargcount])
-            missing_params = [p for p in _REQUIRED_CONNECTION_PARAMS if p not in names]
-            if missing_params:
-                return f"ActiveConnection.__init__ no longer accepts: {', '.join(missing_params)}"
+            posargs = code.co_varnames[1 : code.co_argcount]  # skip self
+            defaults = getattr(ActiveConnection.__init__, "__defaults__", None) or ()
+            required = posargs[: len(posargs) - len(defaults)] if defaults else posargs
+            unsupported = [p for p in required if p not in _SUPPLIED_CONNECTION_PARAMS]
+            if unsupported:
+                return (
+                    "ActiveConnection.__init__ has required params ATM cannot "
+                    f"supply: {', '.join(unsupported)}"
+                )
         missing_methods = [m for m in _REQUIRED_CONNECTION_METHODS if not hasattr(ActiveConnection, m)]
         if missing_methods:
             return f"ActiveConnection is missing methods: {', '.join(missing_methods)}"
