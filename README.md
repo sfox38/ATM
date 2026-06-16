@@ -821,6 +821,8 @@ In practice, a token with a narrow entity scope but `cap_automation_write` enabl
 
 Pass-through tokens bypass the three-level permission check and have 🟢 GREEN access to all entities. They are intended for trusted tools where managing a full Permissions Tree is impractical or unnecessary.
 
+**It exposes everything, and that has a real token cost.** Because pass-through skips the permission tree, every context-bearing tool (`get_states`, `GetLiveContext`, the initial context snapshot, an unfiltered `search_entities`) returns *all* non-ATM entities rather than a scoped subset. On a large installation that is a substantial, recurring token/context cost on the agent side, every discovery call ships the whole house into the model's context window. The Permissions Tree is therefore also a **cost control**, not only an access control: a scoped token's reads return only the entities you granted. Reads are likewise fully open under pass-through (ATM does not gate reads in this mode), so only use it when broad read exposure is acceptable.
+
 Pass-through does NOT bypass:
 
 - The `atm` domain blocklist
@@ -836,6 +838,17 @@ Pass-through does NOT bypass:
 These exempt caps must be explicitly enabled regardless of pass-through mode. All other capabilities (e.g. `cap_config_read`, `cap_template_render`, `cap_service_response`, `cap_broadcast`, `cap_search`, `cap_registry_read`, `cap_traces`, `cap_diagnostics`) are bypassed. A cap set to `confirm` is still gated even under pass-through.
 
 The ATM panel shows a confirmation dialog before enabling pass-through on a token. When using the admin API directly, the PATCH request must include `"confirm_pass_through": true` alongside `"pass_through": true`. Omitting it returns a 400 error. Use pass-through only for tools you fully control. For anything externally hosted or shared, use the scoped Permissions Tree instead.
+
+### Pass-through and MESA
+
+Pass-through bypasses ATM's per-token permission tree, but it does **not** bypass MESA, the per-entity safety layer always runs last. So when MESA is active, a pass-through token's writes are still governed by each entity's MESA `control_mode`. In effect, pass-through hands entity gating to MESA with ATM's own per-token permissions out of the way, which can be appealing if you want one global per-entity policy instead of maintaining a tree per token.
+
+In practice this "MESA-governed" pattern is **niche**, for two reasons:
+
+1. The token-burn and open-read costs above apply in full, every agent sees the entire home.
+2. MESA gates **writes only** and is **allow-by-default** for unprofiled entities (an entity with no profile falls back to its per-domain safety baseline, e.g. `light` is `autonomous`), so without extra configuration it is not least-privilege.
+
+MESA can be made fail-closed for writes by setting deployment defaults (`default_control_mode = prohibited` plus per-domain opt-ins) and running enforced, but reads stay open and the context cost remains. For most deployments a **scoped token + MESA** is the better combination: the Permissions Tree scopes what the agent sees (cheap context plus read security) and MESA governs write nature on top.
 
 ---
 
