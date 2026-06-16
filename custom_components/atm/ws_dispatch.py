@@ -21,7 +21,6 @@ all, the same way create_automation performs a privileged file write under a cap
 from __future__ import annotations
 
 import asyncio
-import inspect
 import logging
 from typing import Any
 
@@ -141,17 +140,24 @@ def check_ws_dispatch_compat(hass: HomeAssistant) -> str | None:
     realistic break scenarios: a changed ActiveConnection constructor, a missing
     result-sink method, or a registry that is no longer a dict.
     """
-    registry = hass.data.get(ws_const.DOMAIN)
-    if registry is not None and not isinstance(registry, dict):
-        return "websocket_api command registry is not a dict"
     try:
-        params = inspect.signature(ActiveConnection.__init__).parameters
-    except (ValueError, TypeError):
-        return "cannot introspect ActiveConnection.__init__"
-    missing_params = [p for p in _REQUIRED_CONNECTION_PARAMS if p not in params]
-    if missing_params:
-        return f"ActiveConnection.__init__ no longer accepts: {', '.join(missing_params)}"
-    missing_methods = [m for m in _REQUIRED_CONNECTION_METHODS if not hasattr(ActiveConnection, m)]
-    if missing_methods:
-        return f"ActiveConnection is missing methods: {', '.join(missing_methods)}"
-    return None
+        registry = hass.data.get(ws_const.DOMAIN)
+        if registry is not None and not isinstance(registry, dict):
+            return "websocket_api command registry is not a dict"
+        # Read parameter names straight from the code object. Do NOT use
+        # inspect.signature here: on Python 3.14 it eagerly evaluates the
+        # target's annotations, and ActiveConnection.__init__ annotates a
+        # TYPE_CHECKING-only name (WebSocketAdapter) that is undefined at
+        # runtime, so signature() raises NameError and would abort setup.
+        code = getattr(ActiveConnection.__init__, "__code__", None)
+        if code is not None:
+            names = set(code.co_varnames[: code.co_argcount + code.co_kwonlyargcount])
+            missing_params = [p for p in _REQUIRED_CONNECTION_PARAMS if p not in names]
+            if missing_params:
+                return f"ActiveConnection.__init__ no longer accepts: {', '.join(missing_params)}"
+        missing_methods = [m for m in _REQUIRED_CONNECTION_METHODS if not hasattr(ActiveConnection, m)]
+        if missing_methods:
+            return f"ActiveConnection is missing methods: {', '.join(missing_methods)}"
+        return None
+    except Exception as err:  # noqa: BLE001 - advisory probe must never abort setup
+        return f"compatibility probe could not run: {err}"
