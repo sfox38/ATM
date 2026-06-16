@@ -35,6 +35,7 @@
           <div class="card"><h3><span class="badge badge-cap">confirm</span></h3><p>The operation is held as a pending approval until a human approves it in the panel. Honored even under pass-through.</p></div>
         </div>
         <p><code>confirm</code> is only meaningful for the write, system, and irreversible capabilities; the read-tier capabilities are <code>deny</code> or <code>allow</code> only.</p>
+        <p>A pending approval stores the requested action so the admin can review it. For file and <code>configuration.yaml</code> writes, the stored before/after diff is run through a secret redactor first: values on sensitive-looking keys (<code>password</code>, <code>api_key</code>, <code>secret</code>, and similar) and any embedded tokens or URL credentials are replaced with <code>&lt;redacted&gt;</code>, so a confirm-gated write never copies secrets verbatim into <code>.storage</code>. The structure of the change stays visible.</p>
 
         <h2>The capability flags</h2>
         <p>The <strong>pass-through</strong> column shows what happens under a pass-through token: <em>granted</em> means pass-through turns it on for you, <em>must enable</em> means it stays off until you set it explicitly, even for pass-through tokens.</p>

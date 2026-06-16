@@ -30,7 +30,13 @@ from .const import (
     TOKEN_LENGTH,
     TOKEN_PREFIX,
 )
-from .policy_engine import Permission, parse_relative_time, resolve, template_blocklist_vars
+from .policy_engine import (
+    Permission,
+    is_sensitive_key,
+    parse_relative_time,
+    resolve,
+    template_blocklist_vars,
+)
 from .token_store import token_name_slug
 
 if TYPE_CHECKING:
@@ -685,6 +691,32 @@ def _scrub_log_text(text: str) -> str:
     text = _URL_CRED_QUERY_RE.sub(r"\1=<redacted>", text)
     text = _URL_CRED_USERINFO_RE.sub("://<redacted>@", text)
     return text
+
+
+# A "key: value" or "key = value" line in a YAML/config diff, capturing the
+# leading key so its value can be redacted when the key name looks sensitive.
+_CONFIG_SECRET_LINE_RE = re.compile(r"^(\s*)([\w.\-]+)(\s*[:=]\s*)(\S.*)$")
+
+
+def redact_secrets_in_text(text: str | None) -> str | None:
+    """Redact secret-valued config lines and embedded credentials from diff text.
+
+    Applied to approval diffs (file writes, configuration.yaml edits) before they
+    persist to .storage so secrets are not copied to disk verbatim. A line whose
+    key name is sensitive (is_sensitive_key) has its value replaced; JWTs and
+    URL-embedded credentials anywhere in the text are scrubbed too. The structure
+    of the change stays visible to the reviewing admin.
+    """
+    if not text:
+        return text
+    out: list[str] = []
+    for line in text.split("\n"):
+        m = _CONFIG_SECRET_LINE_RE.match(line)
+        if m is not None and is_sensitive_key(m.group(2)):
+            out.append(f"{m.group(1)}{m.group(2)}{m.group(3)}<redacted>")
+        else:
+            out.append(line)
+    return _scrub_log_text("\n".join(out))
 
 
 def collect_log_entries(hass: Any, level: str, integration: str | None, limit: int) -> list[dict]:
