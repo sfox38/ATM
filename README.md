@@ -122,6 +122,25 @@ claude mcp add --transport http home-assistant \
 
 Start a new Claude Code session and run `/mcp`. The `home-assistant` server should appear as connected. Ask Claude to list your entities or check a light state to confirm it is working.
 
+### Step 5: Install the ATM agent skill (optional)
+
+ATM ships an agent skill: a usage guide that teaches a connected AI how to work with ATM's scoped permissions, the human-approval gate, and the MESA per-entity safety layer, so it behaves correctly from the first turn instead of learning by trial and error.
+
+You get it two ways:
+
+- **Automatically (no install).** On every connection, ATM sends a short, token-aware primer in the MCP `initialize` response that names which of this token's capabilities are approval-gated and links to the full guide.
+- **As an installed skill (optional).** The full guide is served, unauthenticated, at `/api/atm/skill`. The **Connect** step in the panel gives a per-agent install command. For Claude Code it installs as a real skill:
+
+  ```bash
+  mkdir -p ~/.claude/skills/atm-home-assistant && \
+    curl -fsSL http://your-ha-address:8123/api/atm/skill \
+    -o ~/.claude/skills/atm-home-assistant/SKILL.md
+  ```
+
+  Other agents (Cursor, Codex, Gemini CLI, and so on) download the same guide and reference it from their project rules or context file; the panel shows the exact path per agent. The guide is generic and contains no token or entity data.
+
+The skill is advisory only. ATM's permission tree, approval gate, and MESA remain the enforcement regardless of what any connected AI has been told.
+
 ---
 
 ## Available MCP Tools

@@ -3,7 +3,7 @@
 // the standard token-created modal so both show identical, copy-ready instructions.
 import React, { useState } from "react";
 import { copyToClipboard } from "../utils";
-import { buildAgentTabs, buildMcpUrl } from "../wizard_helpers";
+import { buildAgentTabs, buildMcpUrl, buildSkillInstall, skillUrlFromMcp } from "../wizard_helpers";
 
 // A full-width value box (read-only or editable) with the Copy button inside it,
 // matching the look of the command/JSON blocks.
@@ -50,6 +50,7 @@ export function ConnectInstructions({ token }: { token: string }) {
   const [agentTab, setAgentTab] = useState("claude");
   const tabs = buildAgentTabs(mcpUrl, token);
   const current = tabs.find((t) => t.key === agentTab) ?? tabs[0];
+  const skillUrl = skillUrlFromMcp(mcpUrl);
   return (
     <div className="connect-instructions">
       <p className="wizard-sub">
@@ -84,6 +85,19 @@ export function ConnectInstructions({ token }: { token: string }) {
           <a className="btn btn-text btn-sm" href={current.href} target="_blank" rel="noopener noreferrer">
             Open the {current.label} setup guide
           </a>
+        </div>
+      )}
+      {current && (
+        <div className="connect-skill-section">
+          <div className="wizard-tabs-label">Teach your agent to use ATM well (optional)</div>
+          <p className="wizard-sub">
+            Install the ATM skill so {current.label} understands ATM's scoped permissions, the
+            approval gate, and the MESA safety layer before it acts. ATM also links this guide
+            automatically on every connection, so this step is optional.
+          </p>
+          {buildSkillInstall(skillUrl, current.key).map((b, i) => (
+            <CommandBlock key={i} title={b.title} hint={b.hint} code={b.code} fields={b.fields} />
+          ))}
         </div>
       )}
     </div>

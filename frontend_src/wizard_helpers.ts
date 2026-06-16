@@ -7,6 +7,16 @@ export function buildMcpUrl(origin: string): string {
   return `${origin.replace(/\/+$/, "")}/api/atm/mcp`;
 }
 
+// The unauthenticated Agent Skill guide endpoint (Channel B).
+export const SKILL_PATH = "/api/atm/skill";
+
+// Derive the skill guide URL from the (possibly admin-edited) MCP URL so both
+// point at the same host the agent will reach. Falls back to appending the path
+// if the MCP URL was changed to something that does not end in the MCP path.
+export function skillUrlFromMcp(mcpUrl: string): string {
+  return mcpUrl.replace(/\/api\/atm\/mcp\/?$/, "") + SKILL_PATH;
+}
+
 // The server name used in agent configs. Kept short and hyphen-safe.
 export const MCP_SERVER_NAME = "atm-home-assistant";
 
@@ -142,6 +152,51 @@ export function buildAgentTabs(url: string, token: string): AgentTab[] {
       blocks: [{ code: buildMcpJson(url, token) }],
     },
   ];
+}
+
+// Per-agent "install the ATM skill" guidance (Channel B). Channel A already
+// links every connection to the same guide, so installing it locally is
+// optional, but it makes the agent use ATM correctly from the first turn. Only
+// Claude Code has a first-class skills directory; other agents load a project
+// context or rules file, so for those we download the guide and name where to
+// reference it. agentKey matches the keys from buildAgentTabs.
+export function buildSkillInstall(skillUrl: string, agentKey: string): AgentBlock[] {
+  const title = "Optional: install the ATM skill";
+  switch (agentKey) {
+    case "claude":
+      return [{
+        title,
+        hint: "Installs the ATM usage guide as a Claude Code skill so it loads automatically. Run in your terminal.",
+        code: `mkdir -p ~/.claude/skills/atm-home-assistant && curl -fsSL ${skillUrl} -o ~/.claude/skills/atm-home-assistant/SKILL.md`,
+      }];
+    case "cursor":
+      return [{
+        title,
+        hint: "Saves the ATM usage guide as a Cursor project rule. Run from your project root, then attach it under Cursor Settings > Rules if needed.",
+        code: `mkdir -p .cursor/rules && curl -fsSL ${skillUrl} -o .cursor/rules/atm-home-assistant.md`,
+      }];
+    case "gemini":
+      return [{
+        title,
+        hint: "Download the guide, then add its contents to your GEMINI.md context file (or reference the file). Your agent can also fetch it on demand at the URL below.",
+        fields: [{ label: "Skill guide URL", value: skillUrl }],
+        code: `curl -fsSL ${skillUrl} -o atm-home-assistant.md`,
+      }];
+    case "codex":
+      return [{
+        title,
+        hint: "Download the guide, then add its contents to your AGENTS.md instructions file (or reference the file). Your agent can also fetch it on demand at the URL below.",
+        fields: [{ label: "Skill guide URL", value: skillUrl }],
+        code: `curl -fsSL ${skillUrl} -o atm-home-assistant.md`,
+      }];
+    default:
+      return [{
+        title,
+        hint: "Download the guide and add it to your agent's project context or rules file. Your agent can also fetch it on demand at the URL below, which ATM links automatically on every connection.",
+        fields: [{ label: "Skill guide URL", value: skillUrl }],
+        code: `curl -fsSL ${skillUrl} -o atm-home-assistant.md`,
+      }];
+  }
 }
 
 export interface TestPrompts {

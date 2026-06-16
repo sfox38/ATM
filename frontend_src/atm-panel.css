@@ -1193,6 +1193,10 @@ select.input {
 .wizard-tab-active { background: var(--atm-accent); color: var(--atm-accent-fg); border-color: var(--atm-accent); }
 .wizard-tab-active:hover { color: var(--atm-accent-fg); }
 
+/* The optional "install the ATM skill" step under the connect instructions.
+   A light top divider sets it apart as a distinct, secondary step. */
+.connect-skill-section { margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--atm-border); }
+
 .command-block { margin: 12px 0; }
 .command-block-title { font-size: 12px; font-weight: 700; color: var(--atm-text); margin-bottom: 2px; }
 .command-block .wizard-hint { display: block; margin-bottom: 6px; }
