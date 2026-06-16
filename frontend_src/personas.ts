@@ -16,11 +16,6 @@ export interface PersonaDef {
 
 export const PERSONAS: PersonaDef[] = [
   {
-    key: "new_user",
-    label: "New user",
-    description: "A safe starting point: the agent can read your home and control the devices you grant it. Locks, alarms, and covers ask for your confirmation. You can change this any time later.",
-  },
-  {
     key: "read_only",
     label: "Read-only observer",
     description: "Reads state, history, logs, templates. No actions, no broadcast.",
@@ -54,6 +49,11 @@ export const PERSONAS: PersonaDef[] = [
     key: "home_admin",
     label: "Home administrator",
     description: "Whole-home control with a safety net. All reads and config writes; restart, physical actions, integrations, dashboards, backups, filesystem, and raw YAML all require admin confirmation.",
+  },
+  {
+    key: "new_user",
+    label: "New user",
+    description: "A safe starting point: the agent can read your home and control the devices you grant it. Locks, alarms, and covers ask for your confirmation. You can change this any time later.",
   },
   {
     key: "custom",

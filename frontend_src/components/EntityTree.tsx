@@ -259,8 +259,12 @@ function DeviceGroup({
     if (revealEntity && entityIds.includes(revealEntity)) setExpanded(true);
   }, [revealEntity, entityIds]);
 
-  // Collapse when collapseKey changes
+  // Collapse when collapseKey changes, but NOT on initial mount: this group is
+  // lazily mounted when its domain expands (often due to a reveal), and a
+  // mount-time collapse would immediately undo the reveal-driven expand above.
+  const skipFirstCollapse = React.useRef(true);
   useEffect(() => {
+    if (skipFirstCollapse.current) { skipFirstCollapse.current = false; return; }
     setExpanded(false);
   }, [collapseKey]);
 
@@ -365,8 +369,10 @@ function DomainGroup({
     if (revealEntity && revealEntity.split(".")[0] === domainKey) setExpanded(true);
   }, [revealEntity, domainKey]);
 
-  // Collapse when collapseKey changes
+  // Collapse when collapseKey changes, but NOT on initial mount (see DeviceGroup).
+  const skipFirstCollapse = React.useRef(true);
   useEffect(() => {
+    if (skipFirstCollapse.current) { skipFirstCollapse.current = false; return; }
     setExpanded(false);
   }, [collapseKey]);
 

@@ -5,6 +5,7 @@ import type {
   MesaProfileDocument,
   MesaProfileListItem,
   MesaValidationIssue,
+  TokenRecord,
 } from "../types";
 import { api, ApiError } from "../api";
 import { Modal } from "../components/Modal";
@@ -287,6 +288,31 @@ function Combo({
   );
 }
 
+// Links from an entity's MESA profile to a token's permissions tree. The
+// round-trip link (back to the origin token) only shows for a SCOPED origin,
+// pass-through tokens have no permissions tree. A general "open in a token" link
+// is always offered (lands on the Tokens list; reveal applies when a scoped
+// token is opened).
+function MesaTokenLinks({ entityId, returnToken, onRevealInToken }: {
+  entityId: string;
+  returnToken: TokenRecord | null;
+  onRevealInToken: (entityId: string, tokenId: string | null) => void;
+}) {
+  const roundTrip = returnToken && !returnToken.pass_through;
+  return (
+    <div className="mesa-token-links">
+      {roundTrip && (
+        <button type="button" className="link-btn" onClick={() => onRevealInToken(entityId, returnToken!.id)}>
+          Show in {returnToken!.name}'s permissions tree
+        </button>
+      )}
+      <button type="button" className="link-btn" onClick={() => onRevealInToken(entityId, null)}>
+        Open in a token's permissions
+      </button>
+    </div>
+  );
+}
+
 function ProfileEditor({
   scope,
   profileKey,
@@ -295,6 +321,9 @@ function ProfileEditor({
   canonicalTags,
   onClose,
   onSaved,
+  tokens,
+  returnTokenId,
+  onRevealInToken,
 }: {
   scope: ProfileScope;
   profileKey: string | null;
@@ -303,6 +332,9 @@ function ProfileEditor({
   canonicalTags: string[];
   onClose: () => void;
   onSaved: () => void;
+  tokens?: TokenRecord[];
+  returnTokenId?: string | null;
+  onRevealInToken?: (entityId: string, tokenId: string | null) => void;
 }) {
   const [detail, setDetail] = useState<MesaProfileDetail | null>(null);
   const [state, setState] = useState<EditorState>(docToEditor(profileKey ?? "", null));
@@ -428,6 +460,13 @@ function ProfileEditor({
   return (
     <Modal titleId="mesa-editor-title" onClose={attemptClose}>
       <h3 className="modal-title" id="mesa-editor-title">{titleVerb}</h3>
+      {scope === "entity" && !isNew && profileKey && onRevealInToken && (
+        <MesaTokenLinks
+          entityId={profileKey}
+          returnToken={returnTokenId ? (tokens ?? []).find((t) => t.id === returnTokenId) ?? null : null}
+          onRevealInToken={onRevealInToken}
+        />
+      )}
       <div className="mesa-editor-body">
         {error && <ErrorMsg msg={error} />}
         {loading ? <Loading /> : (
@@ -582,9 +621,12 @@ function ControlBadge({ mode }: { mode: string }) {
 
 type Editing = { scope: ProfileScope; key: string | null; isNew: boolean };
 
-export function MesaView({ openProfileEntityId, onProfileOpened }: {
+export function MesaView({ openProfileEntityId, onProfileOpened, tokens, returnTokenId, onRevealInToken }: {
   openProfileEntityId?: string | null;
   onProfileOpened?: () => void;
+  tokens?: TokenRecord[];
+  returnTokenId?: string | null;
+  onRevealInToken?: (entityId: string, tokenId: string | null) => void;
 } = {}) {
   const [profiles, setProfiles] = useState<MesaProfileListItem[]>([]);
   const [issues, setIssues] = useState<{ issues: MesaValidationIssue[]; orphans: string[] }>({ issues: [], orphans: [] });
@@ -843,6 +885,9 @@ export function MesaView({ openProfileEntityId, onProfileOpened }: {
           canonicalTags={canonicalTags}
           onClose={() => setEditing(null)}
           onSaved={refresh}
+          tokens={tokens}
+          returnTokenId={returnTokenId}
+          onRevealInToken={onRevealInToken}
         />
       )}
     </div>

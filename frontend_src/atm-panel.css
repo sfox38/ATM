@@ -304,6 +304,9 @@
 }
 .collapsible-body { margin-top: 16px; }
 
+/* Links from a MESA entity profile to a token's permissions tree. */
+.mesa-token-links { display: flex; flex-wrap: wrap; gap: 14px; margin: -4px 0 14px; }
+
 /* ============================================================
    Buttons
    ============================================================ */
@@ -1066,6 +1069,9 @@ select.input {
   border-radius: var(--atm-radius-sm); background: var(--atm-surface);
   cursor: pointer; transition: background 0.12s, border-color 0.12s;
   font-family: inherit; color: inherit;
+  /* Cards stretch to equal height in the grid; a native button centers its
+     content vertically, so force a top-aligned column instead. */
+  display: flex; flex-direction: column; align-items: stretch; justify-content: flex-start;
 }
 .persona-card:hover:not(:disabled) { background: var(--atm-surface-2); }
 .persona-card:disabled { cursor: default; opacity: 0.7; }

@@ -23,6 +23,10 @@ interface Props {
   onBack: () => void;
   onRefresh?: () => void;
   onOpenMesaProfile?: (entityId: string) => void;
+  // When navigated here from a MESA profile, reveal this entity in the
+  // permissions tree (ignored for pass-through tokens, which have no tree).
+  revealEntity?: string | null;
+  onRevealConsumed?: () => void;
 }
 
 
@@ -139,7 +143,7 @@ function ToolAnnouncementToggle({ token, onUpdate }: { token: TokenRecord; onUpd
   );
 }
 
-export function TokenDetailView({ tokenId, onBack, onRefresh, onOpenMesaProfile }: Props) {
+export function TokenDetailView({ tokenId, onBack, onRefresh, onOpenMesaProfile, revealEntity, onRevealConsumed }: Props) {
   const [token, setToken] = useState<TokenRecord | null>(null);
   const [mesaProfileEntities, setMesaProfileEntities] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
@@ -186,6 +190,19 @@ export function TokenDetailView({ tokenId, onBack, onRefresh, onOpenMesaProfile 
       .then((r) => setMesaProfileEntities(new Set(r.profiles.map((p) => p.entity_id))))
       .catch(() => null);
   }, []);
+
+  // Reveal an entity in the permissions tree when arriving from a MESA profile.
+  // Pass-through tokens have no tree, so just consume the request.
+  useEffect(() => {
+    if (!revealEntity || !token) return;
+    if (!token.pass_through) {
+      setSelectedEntityId(revealEntity);
+      setSelectedDepth("entity");
+      setPermissionsVersion((v) => v + 1);
+    }
+    onRevealConsumed?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [revealEntity, token]);
 
   async function revoke() {
     setRevoking(true);
@@ -406,19 +423,18 @@ export function TokenDetailView({ tokenId, onBack, onRefresh, onOpenMesaProfile 
       <div className="token-detail-body">
         <div className="two-col">
           <div>
-            <div className="card">
-              <div className="card-header">Persona</div>
+            <CollapsibleCard title="Persona" summary={personaLabel} defaultOpen persistKey="atm:fold:persona">
               <PersonaPicker token={token} onUpdate={setToken} />
-            </div>
+            </CollapsibleCard>
 
             <div className="advanced-section-label">Advanced</div>
-            <CollapsibleCard title="Capabilities" summary={capsSummary} defaultOpen={token.persona === "custom"}>
+            <CollapsibleCard title="Capabilities" summary={capsSummary} persistKey="atm:fold:capabilities">
               <CapabilityMatrix token={token} onUpdate={setToken} />
             </CollapsibleCard>
-            <CollapsibleCard title="Tool Announcement" summary={announceSummary}>
+            <CollapsibleCard title="Tool Announcement" summary={announceSummary} persistKey="atm:fold:announce">
               <ToolAnnouncementToggle token={token} onUpdate={setToken} />
             </CollapsibleCard>
-            <CollapsibleCard title="Rate Limiting" summary={rateSummary}>
+            <CollapsibleCard title="Rate Limiting" summary={rateSummary} persistKey="atm:fold:ratelimit">
               <RateLimitConfig token={token} onUpdate={setToken} />
             </CollapsibleCard>
 
