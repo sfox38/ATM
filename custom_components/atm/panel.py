@@ -15,10 +15,25 @@ from homeassistant.core import HomeAssistant
 _LOGGER = logging.getLogger(__name__)
 
 _FRONTEND_DIR = Path(__file__).parent / "frontend"
+_JS_FILE = _FRONTEND_DIR / "atm-panel.js"
 _PANEL_URL = "/local/atm"
 _JS_URL = f"{_PANEL_URL}/atm-panel.js"
 _PANEL_KEY = "atm"
 _PANEL_REGISTERED_KEY = "atm_panel_registered"
+
+
+def _js_url_with_cache_bust() -> str:
+    """Append the bundle's mtime as a query param so each rebuild busts the cache.
+
+    The panel JS is served without cache headers, so browsers otherwise keep a
+    stale copy across frontend builds. Reading the mtime ties the URL to the
+    actual file on disk; no version constant to keep in sync. Runs in the
+    executor (see caller) since it touches the filesystem.
+    """
+    try:
+        return f"{_JS_URL}?v={int(_JS_FILE.stat().st_mtime)}"
+    except OSError:
+        return _JS_URL
 
 
 async def async_register_atm_panel(hass: HomeAssistant) -> None:
@@ -41,6 +56,8 @@ async def async_register_atm_panel(hass: HomeAssistant) -> None:
     if hass.data.get(_PANEL_REGISTERED_KEY):
         async_remove_panel(hass, _PANEL_KEY)
 
+    js_url = await hass.async_add_executor_job(_js_url_with_cache_bust)
+
     async_register_built_in_panel(
         hass=hass,
         component_name="custom",
@@ -51,7 +68,7 @@ async def async_register_atm_panel(hass: HomeAssistant) -> None:
         config={
             "_panel_custom": {
                 "name": "atm-panel",
-                "js_url": _JS_URL,
+                "js_url": js_url,
             }
         },
     )

@@ -820,17 +820,18 @@ select.input {
 .perm-summary { font-family: "Roboto Mono", monospace; font-size: 12px; }
 .perm-summary-row { display: flex; align-items: center; justify-content: space-between; padding: 3px 0; border-bottom: 1px solid var(--atm-divider); }
 .perm-summary-row:last-child { border-bottom: none; }
-.perm-summary-table { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: 12px; font-family: "Roboto Mono", monospace; }
-/* Column widths are set via colgroup in PermissionSummary.tsx (col % resolves against
-   the table width; th % is circular in table-layout: fixed and falls back to auto). */
-.perm-summary-th { cursor: pointer; user-select: none; color: var(--atm-text-2); white-space: nowrap; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; padding: 6px 8px; border-bottom: 2px solid var(--atm-border); text-align: left; }
+.perm-summary-table { display: block; width: 100%; border-collapse: collapse; font-size: 12px; font-family: "Roboto Mono", monospace; }
+.perm-summary-table thead,
+.perm-summary-table tbody { display: block; width: 100%; }
+.perm-summary-table tr { display: grid; grid-template-columns: 86px minmax(0, 3fr) minmax(0, 2fr) 80px; width: 100%; }
+.perm-summary-th { min-width: 0; cursor: pointer; user-select: none; color: var(--atm-text-2); white-space: nowrap; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; padding: 6px 8px; border-bottom: 2px solid var(--atm-border); text-align: left; }
 .perm-summary-th.active { color: var(--atm-accent); }
 .perm-summary-arrow { font-size: 9px; opacity: 0.35; }
 .perm-summary-arrow.active { opacity: 1; }
 .perm-summary-tr { border-bottom: 1px solid var(--atm-divider); }
-.perm-summary-td         { padding: 5px 8px; white-space: nowrap; }
-.perm-summary-td-name    { padding: 5px 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.perm-summary-td-id      { padding: 5px 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--atm-text-2); }
+.perm-summary-td         { min-width: 0; padding: 5px 8px; white-space: nowrap; }
+.perm-summary-td-name    { min-width: 0; padding: 5px 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.perm-summary-td-id      { min-width: 0; padding: 5px 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--atm-text-2); }
 .perm-summary-td-name.clickable, .perm-summary-td-id.clickable { cursor: pointer; }
 .perm-summary-empty { color: var(--atm-text-2); font-size: 13px; margin: 0; }
 
@@ -1388,7 +1389,7 @@ select.input {
 }
 .mesa-link:hover { border-color: var(--atm-accent); color: var(--atm-accent); background: var(--atm-accent-lt); }
 .mesa-link-exists { border-color: var(--atm-accent); color: var(--atm-accent); }
-.perm-summary-td-name { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.perm-summary-name-wrap { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .perm-summary-name-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .sim-mesa-row { display: flex; align-items: center; gap: 6px; margin-top: 8px; font-size: 12px; color: var(--atm-text-2); }
 .tag-reco-chip {

@@ -161,6 +161,14 @@ export function TokenDetailView({ tokenId, onBack, onRefresh }: Props) {
   const [showPtModal, setShowPtModal] = useState(false);
   const [selectedEntityId, setSelectedEntityId] = useState("");
   const [selectedDepth, setSelectedDepth] = useState<"entity" | "device" | "domain">("entity");
+  // Bumped on every reveal request so clicking the same row re-triggers the
+  // tree expand/scroll (selecting the same id/depth alone is a no-op in React).
+  const [revealNonce, setRevealNonce] = useState(0);
+  const revealNode = (eid: string, depth: "entity" | "device" | "domain" = "entity") => {
+    setSelectedEntityId(eid);
+    setSelectedDepth(depth);
+    setRevealNonce((n) => n + 1);
+  };
   const [permissionsVersion, setPermissionsVersion] = useState(0);
   const [collapseTreeKey, setCollapseTreeKey] = useState(0);
 
@@ -442,7 +450,7 @@ export function TokenDetailView({ tokenId, onBack, onRefresh }: Props) {
                 <PermissionSummary
                   permissions={token.permissions}
                   entityTree={entityTree}
-                  onEntityClick={(eid, depth = "entity") => { setSelectedEntityId(eid); setSelectedDepth(depth); }}
+                  onEntityClick={revealNode}
                   mesaProfileEntities={mesaProfileEntities}
                   onOpenMesa={openMesaInline}
                 />
@@ -481,9 +489,11 @@ export function TokenDetailView({ tokenId, onBack, onRefresh }: Props) {
                     setToken({ ...token, permissions: tree });
                     setPermissionsVersion((v) => v + 1);
                   }}
-                  onEntityClick={(eid, depth = "entity") => { setSelectedEntityId(eid); setSelectedDepth(depth); }}
+                  onEntityClick={revealNode}
                   collapseKey={collapseTreeKey}
                   revealEntity={selectedEntityId || undefined}
+                  revealDepth={selectedDepth}
+                  revealNonce={revealNonce}
                   mesaProfileEntities={mesaProfileEntities}
                   onOpenMesa={openMesaInline}
                 />

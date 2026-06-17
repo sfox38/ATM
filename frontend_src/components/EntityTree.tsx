@@ -22,6 +22,13 @@ interface Props {
   // When set, the tree expands the path to this entity and scrolls it into view
   // (e.g. after selecting it in the Permission Summary card).
   revealEntity?: string;
+  // Which node the reveal targets. For "domain"/"device" the matching group
+  // header is flashed and scrolled to (revealEntity is a representative child);
+  // for "entity" the entity row itself is the target. Defaults to "entity".
+  revealDepth?: "entity" | "device" | "domain";
+  // Bumped by the parent on every reveal request so re-selecting the same
+  // target still re-runs the expand/scroll effects.
+  revealNonce?: number;
   // Entities that have a MESA profile, and the handler to open one. When given,
   // each entity row shows a "MESA"/"+" jump to its profile.
   mesaProfileEntities?: Set<string>;
@@ -181,6 +188,8 @@ interface EntityRowProps {
   onPermChange: (tree: PermissionTree) => void;
   onEntityClick?: (entityId: string, depth?: "entity" | "device" | "domain") => void;
   revealEntity?: string;
+  revealDepth?: "entity" | "device" | "domain";
+  revealNonce?: number;
   mesaProfileEntities?: Set<string>;
   onOpenMesa?: (entityId: string) => void;
   globalHints: Record<string, string>;
@@ -189,20 +198,20 @@ interface EntityRowProps {
 
 function EntityRow({
   entityId, friendlyName, deviceId, domainKey, permissions,
-  tokenId, filterText, isGhost, onPermChange, onEntityClick, revealEntity, mesaProfileEntities, onOpenMesa, globalHints, onGlobalHintsChange,
+  tokenId, filterText, isGhost, onPermChange, onEntityClick, revealEntity, revealDepth, revealNonce, mesaProfileEntities, onOpenMesa, globalHints, onGlobalHintsChange,
 }: EntityRowProps) {
   const entityNode = permissions.entities[entityId];
   const state: NodeState = entityNode?.state ?? "GREY";
   const effective = effectivePermission(entityId, domainKey, deviceId, permissions);
   const rowRef = React.useRef<HTMLDivElement>(null);
-  const isRevealed = revealEntity === entityId;
+  const isRevealed = (revealDepth ?? "entity") === "entity" && revealEntity === entityId;
 
   // When this row becomes the reveal target, scroll it into view and flash it.
   useEffect(() => {
     if (isRevealed && rowRef.current) {
       rowRef.current.scrollIntoView({ block: "center", behavior: "smooth" });
     }
-  }, [isRevealed]);
+  }, [isRevealed, revealNonce]);
 
   if (filterText) {
     const q = filterText.toLowerCase();
@@ -271,6 +280,8 @@ interface DeviceGroupProps {
   onEntityClick?: (entityId: string, depth?: "entity" | "device" | "domain") => void;
   collapseKey?: number;
   revealEntity?: string;
+  revealDepth?: "entity" | "device" | "domain";
+  revealNonce?: number;
   mesaProfileEntities?: Set<string>;
   onOpenMesa?: (entityId: string) => void;
   globalHints: Record<string, string>;
@@ -279,13 +290,15 @@ interface DeviceGroupProps {
 
 function DeviceGroup({
   deviceId, deviceName, domainKey, entityIds, domainData,
-  permissions, tokenId, filterText, allEntityIds, onPermChange, onEntityClick, collapseKey, revealEntity, mesaProfileEntities, onOpenMesa, globalHints, onGlobalHintsChange,
+  permissions, tokenId, filterText, allEntityIds, onPermChange, onEntityClick, collapseKey, revealEntity, revealDepth, revealNonce, mesaProfileEntities, onOpenMesa, globalHints, onGlobalHintsChange,
 }: DeviceGroupProps) {
   const [expanded, setExpanded] = useState(false);
   const deviceNode = permissions.devices[deviceId];
   const state: NodeState = deviceNode?.state ?? "GREY";
   const effective = effectiveForNode("device", deviceId, domainKey, permissions);
   const isDynamic = state !== "GREY";
+  const headerRef = React.useRef<HTMLDivElement>(null);
+  const isRevealed = revealDepth === "device" && !!revealEntity && entityIds.includes(revealEntity);
 
   // Entities sorted by friendly name (falling back to entity id).
   const sortedEntityIds = [...entityIds].sort((a, b) => {
@@ -299,10 +312,18 @@ function DeviceGroup({
     if (filterText) setExpanded(true);
   }, [filterText]);
 
-  // Expand when an entity inside this device is the reveal target.
+  // Expand when an entity inside this device is the reveal target. Skip for
+  // domain-depth reveals: those target the domain header, not every device.
   useEffect(() => {
-    if (revealEntity && entityIds.includes(revealEntity)) setExpanded(true);
-  }, [revealEntity, entityIds]);
+    if (revealDepth !== "domain" && revealEntity && entityIds.includes(revealEntity)) setExpanded(true);
+  }, [revealDepth, revealEntity, entityIds, revealNonce]);
+
+  // When this device is the reveal target, scroll its header into view and flash it.
+  useEffect(() => {
+    if (isRevealed && headerRef.current) {
+      headerRef.current.scrollIntoView({ block: "center", behavior: "smooth" });
+    }
+  }, [isRevealed, revealNonce]);
 
   // Collapse when collapseKey changes, but NOT on initial mount: this group is
   // lazily mounted when its domain expands (often due to a reveal), and a
@@ -336,7 +357,7 @@ function DeviceGroup({
 
   return (
     <div role="treeitem" aria-expanded={expanded} aria-label={deviceName}>
-      <div className="tree-node">
+      <div ref={headerRef} className={`tree-node${isRevealed ? " tree-node-revealed" : ""}`}>
         <button className="tree-expand" onClick={() => setExpanded((x) => !x)} aria-label={expanded ? `Collapse ${deviceName}` : `Expand ${deviceName}`}>
           <span className={`collapsible-chevron${expanded ? " open" : ""}`} aria-hidden="true" />
         </button>
@@ -367,6 +388,8 @@ function DeviceGroup({
                 onPermChange={onPermChange}
                 onEntityClick={onEntityClick}
                 revealEntity={revealEntity}
+                revealDepth={revealDepth}
+                revealNonce={revealNonce}
                 mesaProfileEntities={mesaProfileEntities}
                 onOpenMesa={onOpenMesa}
                 globalHints={globalHints}
@@ -391,6 +414,8 @@ interface DomainGroupProps {
   onEntityClick?: (entityId: string, depth?: "entity" | "device" | "domain") => void;
   collapseKey?: number;
   revealEntity?: string;
+  revealDepth?: "entity" | "device" | "domain";
+  revealNonce?: number;
   mesaProfileEntities?: Set<string>;
   onOpenMesa?: (entityId: string) => void;
   globalHints: Record<string, string>;
@@ -398,7 +423,7 @@ interface DomainGroupProps {
 }
 
 function DomainGroup({
-  domainKey, domainData, permissions, tokenId, filterText, allEntityIds, onPermChange, onEntityClick, collapseKey, revealEntity, mesaProfileEntities, onOpenMesa, globalHints, onGlobalHintsChange,
+  domainKey, domainData, permissions, tokenId, filterText, allEntityIds, onPermChange, onEntityClick, collapseKey, revealEntity, revealDepth, revealNonce, mesaProfileEntities, onOpenMesa, globalHints, onGlobalHintsChange,
 }: DomainGroupProps) {
   const [expanded, setExpanded] = useState(false);
   const domainNode = permissions.domains[domainKey];
@@ -407,6 +432,8 @@ function DomainGroup({
   const isRisk = HIGH_RISK_DOMAINS.has(domainKey);
   const isIndirect = INDIRECT_CONTROL_DOMAINS.has(domainKey);
   const isDynamic = state !== "GREY";
+  const headerRef = React.useRef<HTMLDivElement>(null);
+  const isRevealed = revealDepth === "domain" && !!revealEntity && revealEntity.split(".")[0] === domainKey;
 
   useEffect(() => {
     if (filterText) setExpanded(true);
@@ -415,7 +442,14 @@ function DomainGroup({
   // Expand when the reveal target lives in this domain.
   useEffect(() => {
     if (revealEntity && revealEntity.split(".")[0] === domainKey) setExpanded(true);
-  }, [revealEntity, domainKey]);
+  }, [revealEntity, domainKey, revealNonce]);
+
+  // When this domain is the reveal target, scroll its header into view and flash it.
+  useEffect(() => {
+    if (isRevealed && headerRef.current) {
+      headerRef.current.scrollIntoView({ block: "center", behavior: "smooth" });
+    }
+  }, [isRevealed, revealNonce]);
 
   // Collapse when collapseKey changes, but NOT on initial mount (see DeviceGroup).
   const skipFirstCollapse = React.useRef(true);
@@ -452,7 +486,7 @@ function DomainGroup({
 
   return (
     <div className="tree-domain-group" role="treeitem" aria-expanded={expanded} aria-label={domainKey}>
-      <div className="tree-node">
+      <div ref={headerRef} className={`tree-node${isRevealed ? " tree-node-revealed" : ""}`}>
         <button className="tree-expand" onClick={() => setExpanded((x) => !x)} aria-label={expanded ? `Collapse ${domainKey}` : `Expand ${domainKey}`}>
           <span className={`collapsible-chevron${expanded ? " open" : ""}`} aria-hidden="true" />
         </button>
@@ -501,6 +535,8 @@ function DomainGroup({
                       onPermChange={onPermChange}
                       onEntityClick={onEntityClick}
                       revealEntity={revealEntity}
+                      revealDepth={revealDepth}
+                      revealNonce={revealNonce}
                       mesaProfileEntities={mesaProfileEntities}
                       onOpenMesa={onOpenMesa}
                       globalHints={globalHints}
@@ -528,6 +564,8 @@ function DomainGroup({
                 onEntityClick={onEntityClick}
                 collapseKey={collapseKey}
                 revealEntity={revealEntity}
+                revealDepth={revealDepth}
+                revealNonce={revealNonce}
                 mesaProfileEntities={mesaProfileEntities}
                 onOpenMesa={onOpenMesa}
                 globalHints={globalHints}
@@ -548,6 +586,8 @@ function DomainGroup({
               onPermChange={onPermChange}
               onEntityClick={onEntityClick}
               revealEntity={revealEntity}
+              revealDepth={revealDepth}
+              revealNonce={revealNonce}
               mesaProfileEntities={mesaProfileEntities}
               onOpenMesa={onOpenMesa}
               globalHints={globalHints}
@@ -560,7 +600,7 @@ function DomainGroup({
   );
 }
 
-export function EntityTree({ tokenId, permissions, onPermissionsChange, onEntityClick, collapseKey, domainAllowlist, revealEntity, mesaProfileEntities, onOpenMesa }: Props) {
+export function EntityTree({ tokenId, permissions, onPermissionsChange, onEntityClick, collapseKey, domainAllowlist, revealEntity, revealDepth, revealNonce, mesaProfileEntities, onOpenMesa }: Props) {
   const [tree, setTree] = useState<EntityTree | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -628,6 +668,8 @@ export function EntityTree({ tokenId, permissions, onPermissionsChange, onEntity
             onEntityClick={onEntityClick}
             collapseKey={collapseKey}
             revealEntity={revealEntity}
+            revealDepth={revealDepth}
+            revealNonce={revealNonce}
             mesaProfileEntities={mesaProfileEntities}
             onOpenMesa={onOpenMesa}
             globalHints={globalHints}

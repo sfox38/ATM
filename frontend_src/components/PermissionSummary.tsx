@@ -205,12 +205,6 @@ export function PermissionSummary({ permissions, entityTree, onEntityClick, mesa
 
   return (
     <table className="perm-summary-table">
-      <colgroup>
-        <col style={{ width: "86px" }} />
-        <col style={{ width: "calc((100% - 166px) * 0.80)" }} />
-        <col style={{ width: "calc((100% - 166px) * 0.20)" }} />
-        <col style={{ width: "80px" }} />
-      </colgroup>
       <thead>
         <tr>
           <SortHeader label="Type" col="type" current={sortCol} dir={sortDir} onSort={handleSort} />
@@ -237,20 +231,22 @@ export function PermissionSummary({ permissions, entityTree, onEntityClick, mesa
                 </span>
               </td>
               <td className="perm-summary-td-name">
-                {item.type === "entity" && onOpenMesa && (
-                  <MesaProfileLink
-                    entityId={item.id}
-                    exists={!!mesaProfileEntities?.has(item.id)}
-                    onOpen={onOpenMesa}
-                  />
-                )}
-                <span
-                  className={`perm-summary-name-text${isClickable ? " clickable" : ""}`}
-                  onClick={handleClick}
-                  title={title}
-                >
-                  {item.friendlyName !== item.id ? item.friendlyName : <span className="state-GREY">-</span>}
-                </span>
+                <div className="perm-summary-name-wrap">
+                  {item.type === "entity" && onOpenMesa && (
+                    <MesaProfileLink
+                      entityId={item.id}
+                      exists={!!mesaProfileEntities?.has(item.id)}
+                      onOpen={onOpenMesa}
+                    />
+                  )}
+                  <span
+                    className={`perm-summary-name-text${isClickable ? " clickable" : ""}`}
+                    onClick={handleClick}
+                    title={title}
+                  >
+                    {item.friendlyName !== item.id ? item.friendlyName : <span className="state-GREY">-</span>}
+                  </span>
+                </div>
               </td>
               <td
                 className={`perm-summary-td-id${isClickable ? " clickable" : ""}`}
