@@ -178,10 +178,12 @@ def _build_entity_tree(hass: Any) -> dict:
     from homeassistant.helpers import area_registry as ar
     from homeassistant.helpers import device_registry as dr
     from homeassistant.helpers import entity_registry as er
+    from homeassistant.helpers import label_registry as lr
 
     entity_reg = er.async_get(hass)
     device_reg = dr.async_get(hass)
     area_reg = ar.async_get(hass)
+    label_reg = lr.async_get(hass)
 
     tree: dict[str, dict] = {}
 
@@ -222,12 +224,27 @@ def _build_entity_tree(hass: Any) -> dict:
             area = area_reg.async_get_area(area_id)
             area_name = area.name if area else None
 
+        # Effective labels follow HA label-target semantics: the entity's own
+        # labels plus those of its device. Used by the "Select by Label" picker.
+        label_ids: set[str] = set(entry.labels)
+        if entry.device_id:
+            dev_for_labels = device_reg.async_get(entry.device_id)
+            if dev_for_labels:
+                label_ids |= dev_for_labels.labels
+        labels = []
+        for lid in label_ids:
+            lbl = label_reg.async_get_label(lid)
+            if lbl is not None:
+                labels.append({"id": lid, "name": lbl.name})
+        labels.sort(key=lambda x: x["name"].lower())
+
         entity_info: dict[str, Any] = {
             "entity_id": entity_id,
             "friendly_name": friendly_name,
             "device_id": entry.device_id,
             "area_id": area_id,
             "area_name": area_name,
+            "labels": labels,
         }
 
         if entry.device_id:

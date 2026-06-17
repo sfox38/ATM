@@ -16,7 +16,7 @@ import { PassThroughNotice } from "../components/PassThroughNotice";
 import { EntityTree } from "../components/EntityTree";
 import { PermissionSummary } from "../components/PermissionSummary";
 import { PermissionSimulator } from "../components/PermissionSimulator";
-import { AreaPicker } from "../components/AreaPicker";
+import { SelectByPicker } from "../components/SelectByPicker";
 
 interface Props {
   tokenId: string;
@@ -153,7 +153,7 @@ export function TokenDetailView({ tokenId, onBack, onRefresh, onOpenMesaProfile,
   const [rotating, setRotating] = useState(false);
   const [showRotateModal, setShowRotateModal] = useState(false);
   const [rotatedRawToken, setRotatedRawToken] = useState<string | null>(null);
-  const [showAreaPicker, setShowAreaPicker] = useState(false);
+  const [showSelectByPicker, setShowSelectByPicker] = useState(false);
   const [showClearPerms, setShowClearPerms] = useState(false);
   const [clearingPerms, setClearingPerms] = useState(false);
   const [entityTree, setEntityTree] = useState<import("../types").EntityTree | null>(null);
@@ -464,8 +464,8 @@ export function TokenDetailView({ tokenId, onBack, onRefresh, onOpenMesaProfile,
                   <span>Permissions Tree</span>
                   <div className="tree-header-actions">
                     {entityTree && (
-                      <button className="btn btn-outline btn-sm" onClick={() => setShowAreaPicker(true)}>
-                        Select by Area
+                      <button className="btn btn-outline btn-sm" onClick={() => setShowSelectByPicker(true)}>
+                        Select by Area or Label
                       </button>
                     )}
                     <button
@@ -495,15 +495,15 @@ export function TokenDetailView({ tokenId, onBack, onRefresh, onOpenMesaProfile,
         </div>
       </div>
 
-      {showAreaPicker && entityTree && (
-        <AreaPicker
+      {showSelectByPicker && entityTree && (
+        <SelectByPicker
           tokenId={tokenId}
           entityTree={entityTree}
           onDone={() => {
-            setShowAreaPicker(false);
+            setShowSelectByPicker(false);
             load();
           }}
-          onClose={() => setShowAreaPicker(false)}
+          onClose={() => setShowSelectByPicker(false)}
         />
       )}
 

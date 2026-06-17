@@ -187,6 +187,7 @@ export interface EntityInfo {
   device_id: string | null;
   area_id: string | null;
   area_name: string | null;
+  labels: { id: string; name: string }[];
 }
 
 export interface DeviceInfo {
