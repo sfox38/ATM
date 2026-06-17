@@ -287,31 +287,46 @@ function Combo({
   );
 }
 
-// Shows an entity's EFFECTIVE resolved control_mode/enforcement and which layer
-// provides each, so an admin sees when a broader domain/area profile overrides
-// the entity-level setting (the resolver is most-restrictive-wins).
-function MesaEffectivePanel({ detail }: { detail: MesaProfileDetail }) {
+// Effective (inherited) control + enforcement mode from a resolved profile detail,
+// preferring the explanation's resolved value, then the effective doc, then the
+// mesa-core defaults. Drives the "Effective"/"Currently" panel and the pre-fill of
+// a new entity profile.
+function effectiveModes(detail: MesaProfileDetail): { control_mode: string; enforcement_mode: string; cmLevel?: string; enLevel?: string } {
   const exps = detail.explanation?.explanation ?? [];
   const find = (suffix: string) => exps.find((e) => e.field_path.endsWith(suffix));
   const ob = (detail.effective?.semantic_profile as { operational_boundaries?: Record<string, unknown> } | undefined)?.operational_boundaries ?? {};
   const cm = find("control_mode");
   const en = find("enforcement_mode");
-  const cmVal = String(cm?.effective_value ?? ob.control_mode ?? "autonomous");
-  const enVal = String(en?.effective_value ?? ob.enforcement_mode ?? "advisory");
-  const cmLevel = cm?.provided_by_level;
-  const enLevel = en?.provided_by_level;
+  return {
+    control_mode: String(cm?.effective_value ?? ob.control_mode ?? "autonomous"),
+    enforcement_mode: String(en?.effective_value ?? ob.enforcement_mode ?? "advisory"),
+    cmLevel: cm?.provided_by_level,
+    enLevel: en?.provided_by_level,
+  };
+}
+
+// Shows an entity's EFFECTIVE resolved control_mode/enforcement and which layer
+// provides each. For an existing profile it flags when a broader domain/area
+// profile overrides the entity-level setting (most-restrictive-wins); for a new
+// profile (creating) it explains that the fields below are pre-filled to match.
+function MesaEffectivePanel({ detail, creating }: { detail: MesaProfileDetail; creating?: boolean }) {
+  const { control_mode: cmVal, enforcement_mode: enVal, cmLevel, enLevel } = effectiveModes(detail);
   const overridden = (cmLevel && cmLevel !== "entity") || (enLevel && enLevel !== "entity");
   return (
     <div className="mesa-effective">
-      <span className="mesa-effective-title">Effective</span>
+      <span className="mesa-effective-title">{creating ? "Currently" : "Effective"}</span>
       <span>
         control mode <code>{cmVal}</code>{cmLevel && <em> (from {cmLevel})</em>}, enforcement <code>{enVal}</code>{enLevel && <em> (from {enLevel})</em>}
       </span>
-      {overridden && (
+      {creating ? (
+        <div className="mesa-effective-note">
+          This is what MESA applies to this entity now. The fields below are pre-filled to match; change them only to override it.
+        </div>
+      ) : overridden ? (
         <div className="mesa-effective-note">
           A broader profile overrides this entity's setting (most-restrictive layer wins). The effective mode above is what actually applies.
         </div>
-      )}
+      ) : null}
     </div>
   );
 }
@@ -345,6 +360,9 @@ export function ProfileEditor({
   // Snapshot of the last persisted (or freshly initialised) state, for the
   // unsaved-changes guard.
   const cleanSnapshot = useRef<string>(JSON.stringify(docToEditor(profileKey ?? "", null)));
+  // Entity key already pre-filled from effective, so a re-render does not re-seed
+  // and clobber the user's edits.
+  const seededForKey = useRef<string | null>(null);
 
   useEffect(() => {
     if (isNew || !profileKey) return;
@@ -391,6 +409,36 @@ export function ProfileEditor({
     }
     return out.sort((a, b) => a.label.localeCompare(b.label));
   }, [entityTree, scope]);
+
+  // New entity profiles: seed control + enforcement from the entity's effective
+  // (inherited) mode, so creating a profile starts from what MESA already applies
+  // (e.g. a lock opens at "prohibited") rather than a generic Autonomous default.
+  // Seeds once per selected entity and never overwrites a value the user then edits.
+  useEffect(() => {
+    if (!isNew || scope !== "entity") return;
+    const key = state.key.trim();
+    if (!key || !keyOptions.some((o) => o.value === key)) {
+      setDetail(null);
+      seededForKey.current = null;
+      return;
+    }
+    if (seededForKey.current === key) return;
+    seededForKey.current = key;
+    let cancelled = false;
+    api.getMesaProfile(key)
+      .then((d) => {
+        if (cancelled) return;
+        setDetail(d);
+        const eff = effectiveModes(d);
+        setState((s) => {
+          const next = { ...s, control_mode: eff.control_mode, enforcement_mode: eff.enforcement_mode };
+          cleanSnapshot.current = JSON.stringify(next);
+          return next;
+        });
+      })
+      .catch(() => { if (!cancelled) setDetail(null); });
+    return () => { cancelled = true; };
+  }, [isNew, scope, state.key, keyOptions]);
 
   const keyValid = !isNew || keyOptions.some((o) => o.value === state.key.trim());
   const keyInvalidShown = isNew && state.key.trim() !== "" && !keyValid;
@@ -480,6 +528,8 @@ export function ProfileEditor({
                 )}
               </div>
             )}
+
+            {isNew && scope === "entity" && detail && <MesaEffectivePanel detail={detail} creating />}
 
             <div className="field">
               <div className="mesa-taglabel-row">
