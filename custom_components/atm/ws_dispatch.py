@@ -33,6 +33,25 @@ _LOGGER = logging.getLogger(__name__)
 
 DEFAULT_TIMEOUT = 10.0
 
+# The only WS commands ATM is permitted to dispatch in-process. async_ws_command
+# refuses anything outside this set, so a future caller cannot turn user input
+# into an arbitrary privileged command run as admin. Adding a command here is a
+# deliberate act. Keep in sync with the callers in mcp_view.py (helper CRUD,
+# backup read/create, lovelace dashboard CRUD). restore_backup is deliberately
+# absent (too destructive).
+_HELPER_DOMAINS = (
+    "input_boolean", "input_number", "input_text",
+    "input_select", "input_datetime", "counter", "timer",
+)
+ALLOWED_WS_COMMANDS: frozenset[str] = frozenset(
+    [f"{domain}/{op}" for domain in _HELPER_DOMAINS for op in ("create", "update", "delete")]
+    + [
+        "backup/agents/info", "backup/info", "backup/generate",
+        "lovelace/dashboards/list", "lovelace/dashboards/create",
+        "lovelace/dashboards/update", "lovelace/dashboards/delete",
+    ]
+)
+
 
 class WsDispatchError(Exception):
     """Raised when an in-process WS command cannot be dispatched or fails."""
@@ -105,10 +124,13 @@ async def async_ws_command(
 ) -> Any:
     """Invoke a registered HA WebSocket command in-process and return its result.
 
-    Raises WsDispatchError if the command is not registered, the payload fails
-    the command's schema, no admin user is available, or the handler reports an
-    error / times out.
+    Raises WsDispatchError if the command is not on the ALLOWED_WS_COMMANDS
+    allowlist, is not registered, the payload fails the command's schema, no
+    admin user is available, or the handler reports an error / times out.
     """
+    if command not in ALLOWED_WS_COMMANDS:
+        raise WsDispatchError(f"WebSocket command not allowed: {command}")
+
     handlers = hass.data.get(ws_const.DOMAIN)
     if not handlers or command not in handlers:
         raise WsDispatchError(f"WebSocket command not available: {command}")

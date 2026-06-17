@@ -676,6 +676,31 @@ def redact_secrets_in_text(text: str | None) -> str | None:
     return _scrub_log_text("\n".join(out))
 
 
+def redact_structure(obj: Any, _depth: int = 0) -> Any:
+    """Recursively redact secrets from a JSON-able structure.
+
+    A dict value whose key name is sensitive (is_sensitive_key) becomes
+    "<redacted>"; string values are scrubbed for secret-valued config lines and
+    embedded credentials (redact_secrets_in_text). Other scalars pass through
+    unchanged. Used for audit payloads and the admin-facing copy of approval
+    args so secrets are never serialised verbatim. Recursion is depth-bounded so
+    a pathologically nested payload cannot raise RecursionError on the logging
+    path; subtrees past the limit collapse to "<redacted>".
+    """
+    if _depth > 25:
+        return "<redacted>"
+    if isinstance(obj, dict):
+        return {
+            k: "<redacted>" if is_sensitive_key(k) else redact_structure(v, _depth + 1)
+            for k, v in obj.items()
+        }
+    if isinstance(obj, list):
+        return [redact_structure(item, _depth + 1) for item in obj]
+    if isinstance(obj, str):
+        return redact_secrets_in_text(obj)
+    return obj
+
+
 def collect_log_entries(hass: Any, level: str, integration: str | None, limit: int) -> list[dict]:
     """Read system_log records, filter, scrub, and return newest-first.
 

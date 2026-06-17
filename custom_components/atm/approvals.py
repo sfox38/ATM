@@ -82,14 +82,24 @@ class PendingApproval:
     rejected_reason: str | None = None
     result: Any = None
 
-    def to_dict(self) -> dict:
+    def to_dict(self, redact_args: bool = True) -> dict:
+        """Serialise the approval.
+
+        Args are redacted by default so admin-API responses never echo secret
+        bearing content (write_file / set_yaml_config bodies, credentials); the
+        review surface is the already-redacted diff. The persistence path passes
+        redact_args=False to keep the raw args the approved-action executor
+        re-runs from. See helpers.redact_structure.
+        """
+        from .helpers import redact_structure  # noqa: PLC0415
+
         return {
             "id": self.id,
             "token_id": self.token_id,
             "token_name": self.token_name,
             "tool_name": self.tool_name,
             "cap_name": self.cap_name,
-            "args": self.args,
+            "args": self.args if not redact_args else redact_structure(self.args),
             "diff": self.diff,
             "status": self.status,
             "created_at": self.created_at.isoformat() if self.created_at else None,
@@ -173,7 +183,7 @@ async def create_pending_approval(
         request_id=request_id,
         client_ip=client_ip,
     )
-    raw.append(approval.to_dict())
+    raw.append(approval.to_dict(redact_args=False))
     store.set_pending_approvals(raw)
     await store.async_save()
     return approval

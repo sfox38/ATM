@@ -129,7 +129,9 @@ class AuditLog:
         logged_payload: str | None = None
         if payload is not None:
             try:
-                s = json.dumps(payload, default=str)
+                from .helpers import redact_structure  # noqa: PLC0415
+
+                s = json.dumps(redact_structure(payload), default=str)
                 logged_payload = s if len(s) <= MAX_AUDIT_PAYLOAD_BYTES else s[:MAX_AUDIT_PAYLOAD_BYTES] + "...[truncated]"
             except (TypeError, ValueError):
                 logged_payload = None
