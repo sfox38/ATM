@@ -5,7 +5,6 @@ import type {
   MesaProfileDocument,
   MesaProfileListItem,
   MesaValidationIssue,
-  TokenRecord,
 } from "../types";
 import { api, ApiError } from "../api";
 import { Modal } from "../components/Modal";
@@ -317,7 +316,7 @@ function MesaEffectivePanel({ detail }: { detail: MesaProfileDetail }) {
   );
 }
 
-function ProfileEditor({
+export function ProfileEditor({
   scope,
   profileKey,
   isNew,
@@ -325,9 +324,6 @@ function ProfileEditor({
   canonicalTags,
   onClose,
   onSaved,
-  tokens,
-  returnTokenId,
-  onRevealInToken,
 }: {
   scope: ProfileScope;
   profileKey: string | null;
@@ -336,9 +332,6 @@ function ProfileEditor({
   canonicalTags: string[];
   onClose: () => void;
   onSaved: () => void;
-  tokens?: TokenRecord[];
-  returnTokenId?: string | null;
-  onRevealInToken?: (entityId: string, tokenId: string | null) => void;
 }) {
   const [detail, setDetail] = useState<MesaProfileDetail | null>(null);
   const [state, setState] = useState<EditorState>(docToEditor(profileKey ?? "", null));
@@ -462,12 +455,6 @@ function ProfileEditor({
 
   const titleVerb = isNew ? `Add ${SCOPE_LABEL[scope].toLowerCase()} profile` : `Edit ${scope}: ${profileKey}`;
 
-  // The origin token to jump back to, only when it is scoped (pass-through tokens
-  // have no permissions tree). Profiles opened directly from the MESA list have
-  // no origin, so the footer link is simply absent.
-  const originToken = returnTokenId ? (tokens ?? []).find((t) => t.id === returnTokenId) ?? null : null;
-  const roundTripToken = originToken && !originToken.pass_through ? originToken : null;
-
   return (
     <>
     <Modal titleId="mesa-editor-title" onClose={attemptClose}>
@@ -580,15 +567,6 @@ function ProfileEditor({
         )}
       </div>
       <div className="modal-actions">
-        {scope === "entity" && !isNew && profileKey && onRevealInToken && roundTripToken && (
-          <button
-            type="button"
-            className="link-btn mesa-tree-link"
-            onClick={() => onRevealInToken(profileKey, roundTripToken.id)}
-          >
-            View in permissions tree...
-          </button>
-        )}
         {!isNew && !confirmDelete && (
           <button
             className="btn btn-danger"
@@ -647,13 +625,7 @@ function ControlBadge({ mode }: { mode: string }) {
 
 type Editing = { scope: ProfileScope; key: string | null; isNew: boolean };
 
-export function MesaView({ openProfileEntityId, onProfileOpened, tokens, returnTokenId, onRevealInToken }: {
-  openProfileEntityId?: string | null;
-  onProfileOpened?: () => void;
-  tokens?: TokenRecord[];
-  returnTokenId?: string | null;
-  onRevealInToken?: (entityId: string, tokenId: string | null) => void;
-} = {}) {
+export function MesaView() {
   const [profiles, setProfiles] = useState<MesaProfileListItem[]>([]);
   const [issues, setIssues] = useState<{ issues: MesaValidationIssue[]; orphans: string[] }>({ issues: [], orphans: [] });
   const [entityTree, setEntityTree] = useState<EntityTreeData | null>(null);
@@ -694,18 +666,6 @@ export function MesaView({ openProfileEntityId, onProfileOpened, tokens, returnT
   useEffect(() => { api.getEntityTree().then(setEntityTree).catch(() => null); }, []);
   // The canonical MESA tag vocabulary powers the tag-input autocomplete.
   useEffect(() => { api.getMesaVocabulary().then((v) => setCanonicalTags(v.canonical_tags)).catch(() => null); }, []);
-
-  // Deep-link from a token card: open the entity editor once profiles have
-  // loaded (so we know whether to open it as edit or create).
-  const [pendingOpen, setPendingOpen] = useState<string | null>(openProfileEntityId ?? null);
-  useEffect(() => { if (openProfileEntityId) setPendingOpen(openProfileEntityId); }, [openProfileEntityId]);
-  useEffect(() => {
-    if (!pendingOpen || loading) return;
-    const exists = profiles.some((p) => p.entity_id === pendingOpen);
-    setEditing({ scope: "entity", key: pendingOpen, isNew: !exists });
-    setPendingOpen(null);
-    onProfileOpened?.();
-  }, [pendingOpen, loading, profiles, onProfileOpened]);
 
   const friendly = useCallback((eid: string): string => {
     return entityTree?.[domainOf(eid)]?.entity_details[eid]?.friendly_name ?? "";
@@ -911,9 +871,6 @@ export function MesaView({ openProfileEntityId, onProfileOpened, tokens, returnT
           canonicalTags={canonicalTags}
           onClose={() => setEditing(null)}
           onSaved={refresh}
-          tokens={tokens}
-          returnTokenId={returnTokenId}
-          onRevealInToken={onRevealInToken}
         />
       )}
     </div>

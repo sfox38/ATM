@@ -60,33 +60,7 @@ function ATMApp({ hass, narrow, theme, onThemeChange }: { hass: unknown; narrow:
   const [showCreate, setShowCreate] = useState(false);
   const [pendingCount, setPendingCount] = useState<number>(0);
   const [deepApprovalId, setDeepApprovalId] = useState<string | null>(null);
-  const [mesaProfileTarget, setMesaProfileTarget] = useState<string | null>(null);
-  // The token a MESA profile was opened from (for the round-trip link back), and
-  // an entity to reveal in a token's permissions tree after navigating there.
-  const [mesaReturnTokenId, setMesaReturnTokenId] = useState<string | null>(null);
-  const [pendingReveal, setPendingReveal] = useState<string | null>(null);
   const menuRef = useRef<HTMLElement | null>(null);
-
-  // Jump from a token card to an entity's MESA profile (the MESA tab opens it,
-  // creating a prefilled draft if none exists). Remember the origin token so the
-  // profile can offer a link back to that token's permissions tree.
-  const openMesaProfile = useCallback((entityId: string) => {
-    setMesaReturnTokenId(view.name === "detail" ? view.tokenId : null);
-    setTab("mesa");
-    setView({ name: "list" });
-    setMesaProfileTarget(entityId);
-  }, [view]);
-
-  // Jump from a MESA profile to a token's permissions tree, revealing the entity.
-  // tokenId set -> open that token (the scoped round-trip); null -> go to the
-  // Tokens list so the user picks one. The reveal only takes effect for scoped
-  // tokens (pass-through tokens have no permissions tree).
-  const revealEntityInToken = useCallback((entityId: string, tokenId: string | null) => {
-    setPendingReveal(entityId);
-    setMesaProfileTarget(null);
-    setTab("tokens");
-    setView(tokenId ? { name: "detail", tokenId } : { name: "list" });
-  }, []);
 
   // Deep-link from a notification: /atm#approvals or /atm#approvals/{id} opens
   // the Approvals tab (and that specific approval's popup).
@@ -249,9 +223,6 @@ function ATMApp({ hass, narrow, theme, onThemeChange }: { hass: unknown; narrow:
             tokenId={view.tokenId}
             onBack={goBack}
             onRefresh={refreshTokens}
-            onOpenMesaProfile={openMesaProfile}
-            revealEntity={pendingReveal}
-            onRevealConsumed={() => setPendingReveal(null)}
           />
         )}
         {tab === "approvals" && (
@@ -261,15 +232,7 @@ function ATMApp({ hass, narrow, theme, onThemeChange }: { hass: unknown; narrow:
             onConsumedDeepLink={() => setDeepApprovalId(null)}
           />
         )}
-        {tab === "mesa" && (
-          <MesaView
-            openProfileEntityId={mesaProfileTarget}
-            onProfileOpened={() => setMesaProfileTarget(null)}
-            tokens={tokens}
-            returnTokenId={mesaReturnTokenId}
-            onRevealInToken={revealEntityInToken}
-          />
-        )}
+        {tab === "mesa" && <MesaView />}
         {tab === "audit" && <AuditView tokens={tokens} />}
         {tab === "settings" && (
           <SettingsView

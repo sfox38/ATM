@@ -577,8 +577,6 @@ select.input {
 .modal-title-error { color: var(--atm-error); }
 .modal-body-text { margin: 0 0 16px; color: var(--atm-text-2); line-height: 1.5; }
 .modal-actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; margin-top: 20px; }
-/* Left-aligned link in a footer action row; pushes the buttons to the right. */
-.mesa-tree-link { margin-right: auto; }
 
 /* ============================================================
    Warning / info blocks
@@ -646,7 +644,7 @@ select.input {
   .atm-header-action-label { display: none; }
 
   .tree-badge, .tree-effective, .tree-hint-link { display: none; }
-  .tree-children { padding-left: 12px; }
+  .tree-children { margin-left: 9px; padding-left: 6px; }
   .tree-node { gap: 6px; }
 
   .token-table th:nth-child(4), .token-table th:nth-child(5),
@@ -736,10 +734,12 @@ select.input {
 }
 .tree-expand:hover { background: var(--atm-accent-lt); }
 .tree-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.tree-entity-id { font-size: 12px; color: var(--atm-text-2); }
-.tree-friendly { font-size: 13px; }
+.tree-entity-id { font-size: 12px; color: var(--atm-text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tree-friendly { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tree-effective { font-size: 11px; color: var(--atm-text-2); white-space: nowrap; }
-.tree-children { padding-left: 20px; }
+.tree-children { margin-left: 14px; padding-left: 8px; border-left: 1px solid var(--atm-border); }
+/* Device entities align with 1st-level (deviceless) entities: no extra indent. */
+.tree-children-flat { margin: 0; padding: 0; }
 .tree-badge { font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: 4px; flex-shrink: 0; }
 .tree-badge-dynamic { background: var(--atm-info-bg);    color: var(--atm-info); }
 .tree-badge-risk    { background: var(--atm-error-bg);   color: var(--atm-error); }
@@ -1046,7 +1046,6 @@ select.input {
    ============================================================ */
 .tree-spacer { width: 20px; flex-shrink: 0; }
 .tree-cursor-pointer { cursor: pointer; }
-.tree-device-indent { padding-left: 26px; }
 .tree-domain-group { margin-bottom: 4px; }
 .tree-domain-label { font-weight: 600; }
 .tree-orphan-label { color: var(--atm-text-2); font-size: 12px; }

@@ -176,7 +176,6 @@ interface EntityRowProps {
   domainKey: string;
   permissions: PermissionTree;
   tokenId: string;
-  indent: number;
   filterText: string;
   isGhost: boolean;
   onPermChange: (tree: PermissionTree) => void;
@@ -190,7 +189,7 @@ interface EntityRowProps {
 
 function EntityRow({
   entityId, friendlyName, deviceId, domainKey, permissions,
-  tokenId, indent, filterText, isGhost, onPermChange, onEntityClick, revealEntity, mesaProfileEntities, onOpenMesa, globalHints, onGlobalHintsChange,
+  tokenId, filterText, isGhost, onPermChange, onEntityClick, revealEntity, mesaProfileEntities, onOpenMesa, globalHints, onGlobalHintsChange,
 }: EntityRowProps) {
   const entityNode = permissions.entities[entityId];
   const state: NodeState = entityNode?.state ?? "GREY";
@@ -225,7 +224,7 @@ function EntityRow({
   }
 
   return (
-    <div ref={rowRef} className={`tree-node${isRevealed ? " tree-node-revealed" : ""}`} role="treeitem" aria-label={friendlyName ?? entityId} style={{ paddingLeft: `${indent * 20 + 6}px` }}>
+    <div ref={rowRef} className={`tree-node${isRevealed ? " tree-node-revealed" : ""}`} role="treeitem" aria-label={friendlyName ?? entityId}>
       <span className="tree-spacer" />
       {onOpenMesa && !isGhost && (
         <MesaProfileLink entityId={entityId} exists={!!mesaProfileEntities?.has(entityId)} onOpen={onOpenMesa} />
@@ -337,9 +336,9 @@ function DeviceGroup({
 
   return (
     <div role="treeitem" aria-expanded={expanded} aria-label={deviceName}>
-      <div className="tree-node tree-device-indent">
+      <div className="tree-node">
         <button className="tree-expand" onClick={() => setExpanded((x) => !x)} aria-label={expanded ? `Collapse ${deviceName}` : `Expand ${deviceName}`}>
-          {expanded ? "v" : ">"}
+          <span className={`collapsible-chevron${expanded ? " open" : ""}`} aria-hidden="true" />
         </button>
         <div className="tree-name tree-cursor-pointer" onClick={() => setExpanded((x) => !x)}>
           <span className="tree-friendly">{deviceName}</span>
@@ -351,7 +350,7 @@ function DeviceGroup({
         <PermissionSelector value={state} onChange={setDeviceState} />
       </div>
       {expanded && (
-        <div className="tree-children" role="group">
+        <div className="tree-children-flat" role="group">
           {sortedEntityIds.map((eid) => {
             const detail = domainData.entity_details[eid];
             return (
@@ -363,7 +362,6 @@ function DeviceGroup({
                 domainKey={domainKey}
                 permissions={permissions}
                 tokenId={tokenId}
-                indent={2}
                 filterText={filterText}
                 isGhost={!allEntityIds.has(eid)}
                 onPermChange={onPermChange}
@@ -456,7 +454,7 @@ function DomainGroup({
     <div className="tree-domain-group" role="treeitem" aria-expanded={expanded} aria-label={domainKey}>
       <div className="tree-node">
         <button className="tree-expand" onClick={() => setExpanded((x) => !x)} aria-label={expanded ? `Collapse ${domainKey}` : `Expand ${domainKey}`}>
-          {expanded ? "v" : ">"}
+          <span className={`collapsible-chevron${expanded ? " open" : ""}`} aria-hidden="true" />
         </button>
         <div className="tree-name tree-cursor-pointer" onClick={() => setExpanded((x) => !x)}>
           <span className="tree-friendly tree-domain-label">{domainKey}</span>
@@ -478,7 +476,7 @@ function DomainGroup({
           {domainData.deviceless_entities.length > 0 && (
             <div>
               {Object.keys(domainData.devices).length > 0 && (
-                <div className="tree-node tree-device-indent">
+                <div className="tree-node">
                   <span className="tree-spacer" />
                   <span className="tree-name tree-orphan-label">
                     Deviceless Entities
@@ -498,7 +496,6 @@ function DomainGroup({
                       domainKey={domainKey}
                       permissions={permissions}
                       tokenId={tokenId}
-                      indent={1}
                       filterText={filterText}
                       isGhost={!allEntityIds.has(eid)}
                       onPermChange={onPermChange}
@@ -546,7 +543,6 @@ function DomainGroup({
               domainKey={domainKey}
               permissions={permissions}
               tokenId={tokenId}
-              indent={1}
               filterText={filterText}
               isGhost={true}
               onPermChange={onPermChange}

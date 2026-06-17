@@ -17,16 +17,12 @@ import { EntityTree } from "../components/EntityTree";
 import { PermissionSummary } from "../components/PermissionSummary";
 import { PermissionSimulator } from "../components/PermissionSimulator";
 import { SelectByPicker } from "../components/SelectByPicker";
+import { ProfileEditor } from "./MesaView";
 
 interface Props {
   tokenId: string;
   onBack: () => void;
   onRefresh?: () => void;
-  onOpenMesaProfile?: (entityId: string) => void;
-  // When navigated here from a MESA profile, reveal this entity in the
-  // permissions tree (ignored for pass-through tokens, which have no tree).
-  revealEntity?: string | null;
-  onRevealConsumed?: () => void;
 }
 
 
@@ -143,9 +139,13 @@ function ToolAnnouncementToggle({ token, onUpdate }: { token: TokenRecord; onUpd
   );
 }
 
-export function TokenDetailView({ tokenId, onBack, onRefresh, onOpenMesaProfile, revealEntity, onRevealConsumed }: Props) {
+export function TokenDetailView({ tokenId, onBack, onRefresh }: Props) {
   const [token, setToken] = useState<TokenRecord | null>(null);
   const [mesaProfileEntities, setMesaProfileEntities] = useState<Set<string>>(new Set());
+  // The entity whose MESA profile is being edited inline (overlaid on this tab),
+  // and the canonical tag vocabulary the editor needs.
+  const [mesaEdit, setMesaEdit] = useState<{ entityId: string; isNew: boolean } | null>(null);
+  const [canonicalTags, setCanonicalTags] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [revoking, setRevoking] = useState(false);
@@ -184,25 +184,23 @@ export function TokenDetailView({ tokenId, onBack, onRefresh, onOpenMesaProfile,
   }, []);
 
   // Which entities already have a MESA profile, so the cards can show
-  // "view" vs "create". Re-fetched on mount (i.e. when returning from MESA tab).
-  useEffect(() => {
+  // "view" (MESA) vs "create" (+). Reloaded after the inline editor saves so a
+  // newly created profile flips its "+" to "MESA" without leaving the tab.
+  const loadMesaProfiles = useCallback(() => {
     api.listMesaProfiles({ limit: 500 })
       .then((r) => setMesaProfileEntities(new Set(r.profiles.map((p) => p.entity_id))))
       .catch(() => null);
   }, []);
+  useEffect(() => { loadMesaProfiles(); }, [loadMesaProfiles]);
 
-  // Reveal an entity in the permissions tree when arriving from a MESA profile.
-  // Pass-through tokens have no tree, so just consume the request.
-  useEffect(() => {
-    if (!revealEntity || !token) return;
-    if (!token.pass_through) {
-      setSelectedEntityId(revealEntity);
-      setSelectedDepth("entity");
-      setPermissionsVersion((v) => v + 1);
-    }
-    onRevealConsumed?.();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [revealEntity, token]);
+  // The canonical MESA tag vocabulary powers the inline editor's tag autocomplete.
+  useEffect(() => { api.getMesaVocabulary().then((v) => setCanonicalTags(v.canonical_tags)).catch(() => null); }, []);
+
+  // Open the MESA profile editor as an overlay on this tab (no tab switch). isNew
+  // mirrors the +/MESA affordance the user clicked (driven by the same set).
+  const openMesaInline = useCallback((entityId: string) => {
+    setMesaEdit({ entityId, isNew: !mesaProfileEntities.has(entityId) });
+  }, [mesaProfileEntities]);
 
   async function revoke() {
     setRevoking(true);
@@ -412,7 +410,7 @@ export function TokenDetailView({ tokenId, onBack, onRefresh, onOpenMesaProfile,
                 resolveDepth={selectedDepth}
                 triggerVersion={permissionsVersion}
                 mesaProfileEntities={mesaProfileEntities}
-                onOpenMesa={onOpenMesaProfile}
+                onOpenMesa={openMesaInline}
               />
             )}
           </div>
@@ -446,7 +444,7 @@ export function TokenDetailView({ tokenId, onBack, onRefresh, onOpenMesaProfile,
                   entityTree={entityTree}
                   onEntityClick={(eid, depth = "entity") => { setSelectedEntityId(eid); setSelectedDepth(depth); }}
                   mesaProfileEntities={mesaProfileEntities}
-                  onOpenMesa={onOpenMesaProfile}
+                  onOpenMesa={openMesaInline}
                 />
               </div>
             )}
@@ -487,7 +485,7 @@ export function TokenDetailView({ tokenId, onBack, onRefresh, onOpenMesaProfile,
                   collapseKey={collapseTreeKey}
                   revealEntity={selectedEntityId || undefined}
                   mesaProfileEntities={mesaProfileEntities}
-                  onOpenMesa={onOpenMesaProfile}
+                  onOpenMesa={openMesaInline}
                 />
               </div>
             )}
@@ -522,6 +520,18 @@ export function TokenDetailView({ tokenId, onBack, onRefresh, onOpenMesaProfile,
             </button>
           </div>
         </Modal>
+      )}
+
+      {mesaEdit && (
+        <ProfileEditor
+          scope="entity"
+          profileKey={mesaEdit.entityId}
+          isNew={mesaEdit.isNew}
+          entityTree={entityTree}
+          canonicalTags={canonicalTags}
+          onClose={() => setMesaEdit(null)}
+          onSaved={loadMesaProfiles}
+        />
       )}
     </div>
   );
