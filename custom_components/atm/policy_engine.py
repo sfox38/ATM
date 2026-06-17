@@ -358,10 +358,17 @@ def filter_service_response(
     return response_data
 
 
-def get_effective_hint(token: TokenRecord, entity_id: str, hass: HomeAssistant) -> str | None:
-    """Return the most specific hint for an entity, checking entity then device then domain nodes.
+def get_effective_hint(
+    token: TokenRecord,
+    entity_id: str,
+    hass: HomeAssistant,
+    entity_hints: dict[str, str] | None = None,
+) -> str | None:
+    """Return the most specific hint for an entity.
 
-    Returns None if no hint is configured at any level in the ancestor chain.
+    Checks the per-token entity, device, then domain nodes. If none is set, falls
+    back to the global entity_hints map (entity_id -> hint) when provided. The
+    per-token node hint always wins over the global hint.
     """
     registry = er.async_get(hass)
     entry = registry.async_get(entity_id)
@@ -381,6 +388,8 @@ def get_effective_hint(token: TokenRecord, entity_id: str, hass: HomeAssistant) 
     if domain_node and domain_node.hint:
         return domain_node.hint
 
+    if entity_hints:
+        return entity_hints.get(entity_id)
     return None
 
 

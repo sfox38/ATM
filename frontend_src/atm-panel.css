@@ -745,12 +745,10 @@ select.input {
 .tree-badge-risk    { background: var(--atm-error-bg);   color: var(--atm-error); }
 .tree-badge-ghost   { background: var(--atm-warning-bg); color: var(--atm-warning); }
 .tree-hint-link { font-size: 11px; color: var(--atm-accent); cursor: pointer; background: none; border: none; padding: 0; text-decoration: underline; white-space: nowrap; }
-.tree-hint-input {
-  font-size: 12px; padding: 2px 8px;
-  border: 1.5px solid var(--atm-border); border-radius: var(--atm-radius-xs);
-  background: var(--atm-surface); color: var(--atm-text); width: 120px; font-family: inherit;
-}
-.tree-hint-input:focus { outline: none; border-color: var(--atm-accent); }
+.hint-modal-entity { font-family: var(--atm-mono, monospace); font-size: 12px; color: var(--atm-text-2); margin: 0 0 12px; }
+.hint-scope { display: flex; align-items: center; justify-content: center; gap: 10px; margin: 14px 0 6px; font-size: 13px; color: var(--atm-text-2); }
+.hint-scope-active { color: var(--atm-text); font-weight: 600; }
+.hint-scope-note { font-size: 12px; color: var(--atm-text-2); margin: 0 0 4px; text-align: center; }
 
 /* ============================================================
    Loading spinner
@@ -1046,7 +1044,6 @@ select.input {
 /* ============================================================
    Entity tree extras
    ============================================================ */
-.hint-input-row { display: flex; gap: 4px; align-items: center; }
 .tree-spacer { width: 20px; flex-shrink: 0; }
 .tree-cursor-pointer { cursor: pointer; }
 .tree-device-indent { padding-left: 26px; }

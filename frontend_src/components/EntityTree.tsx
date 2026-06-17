@@ -2,6 +2,7 @@ import React, { useState, useCallback, useEffect } from "react";
 import type { EntityTree, DomainTree, PermissionTree, NodeState } from "../types";
 import { PermissionSelector } from "./PermissionSelector";
 import { MesaProfileLink } from "./MesaProfileLink";
+import { Modal } from "./Modal";
 import { api } from "../api";
 import { HIGH_RISK_DOMAINS } from "../utils";
 
@@ -74,27 +75,42 @@ interface HintInputProps {
   tokenId: string;
   entityId: string;
   currentHint: string | null;
+  globalHint: string | null;
   currentState: NodeState;
   onSaved: (tree: PermissionTree) => void;
+  onGlobalHintsChange: (hints: Record<string, string>) => void;
 }
 
-function HintInput({ tokenId, entityId, currentHint, currentState, onSaved }: HintInputProps) {
+function HintInput({ tokenId, entityId, currentHint, globalHint, currentState, onSaved, onGlobalHintsChange }: HintInputProps) {
   const [open, setOpen] = useState(false);
-  const [value, setValue] = useState(currentHint ?? "");
+  const [allTokens, setAllTokens] = useState(true);
+  const [value, setValue] = useState("");
   const [saving, setSaving] = useState(false);
 
-  useEffect(() => {
-    setValue(currentHint ?? "");
-  }, [currentHint]);
+  function openModal() {
+    setAllTokens(true);
+    setValue(globalHint ?? "");
+    setOpen(true);
+  }
+
+  function switchScope(all: boolean) {
+    setAllTokens(all);
+    setValue((all ? globalHint : currentHint) ?? "");
+  }
 
   async function save() {
     setSaving(true);
     try {
-      const tree = await api.patchEntityPermission(tokenId, entityId, {
-        state: currentState,
-        hint: value.trim() || null,
-      });
-      onSaved(tree);
+      if (allTokens) {
+        const r = await api.setEntityHint(entityId, value.trim() || null);
+        onGlobalHintsChange(r.entity_hints);
+      } else {
+        const tree = await api.patchEntityPermission(tokenId, entityId, {
+          state: currentState,
+          hint: value.trim() || null,
+        });
+        onSaved(tree);
+      }
       setOpen(false);
     } catch {
       // ignore
@@ -104,28 +120,52 @@ function HintInput({ tokenId, entityId, currentHint, currentState, onSaved }: Hi
   }
 
   if (!open) {
+    const hasHint = !!currentHint || !!globalHint;
     return (
-      <button className="tree-hint-link" onClick={() => setOpen(true)}>
-        {currentHint ? "Edit hint" : "Add hint"}
+      <button className="tree-hint-link" onClick={openModal}>
+        {hasHint ? "Edit hint" : "Add hint"}
       </button>
     );
   }
 
   return (
-    <span className="hint-input-row">
+    <Modal titleId="hint-modal-title" onClose={saving ? undefined : () => setOpen(false)}>
+      <h3 className="modal-title" id="hint-modal-title">Entity hint</h3>
+      <p className="hint-modal-entity">{entityId}</p>
       <input
-        className="tree-hint-input"
+        className="input"
         value={value}
         onChange={(e) => setValue(e.target.value)}
-        placeholder="Hint for LLM..."
+        placeholder="Hint for the AI agent..."
+        maxLength={200}
         onKeyDown={(e) => { if (e.key === "Enter") save(); if (e.key === "Escape") setOpen(false); }}
         autoFocus
       />
-      <button className="btn btn-primary btn-sm" onClick={save} disabled={saving}>
-        {saving ? "..." : "Save"}
-      </button>
-      <button className="btn btn-text btn-sm" onClick={() => setOpen(false)}>Cancel</button>
-    </span>
+      <div className="hint-scope">
+        <span className={allTokens ? "" : "hint-scope-active"}>This token only</span>
+        <label className={`toggle-switch${saving ? " disabled" : ""}`}>
+          <input
+            type="checkbox"
+            checked={allTokens}
+            disabled={saving}
+            onChange={(e) => switchScope(e.target.checked)}
+          />
+          <span className="toggle-switch-track" />
+        </label>
+        <span className={allTokens ? "hint-scope-active" : ""}>All tokens</span>
+      </div>
+      <p className="hint-scope-note">
+        {allTokens
+          ? "Saved globally: applies to every token that can see this entity."
+          : "Saved for this token only. A token-level hint overrides the global one."}
+      </p>
+      <div className="modal-actions">
+        <button className="btn btn-primary" onClick={save} disabled={saving}>
+          {saving ? "Saving..." : "Save"}
+        </button>
+        <button className="btn btn-text" onClick={() => setOpen(false)} disabled={saving}>Cancel</button>
+      </div>
+    </Modal>
   );
 }
 
@@ -144,11 +184,13 @@ interface EntityRowProps {
   revealEntity?: string;
   mesaProfileEntities?: Set<string>;
   onOpenMesa?: (entityId: string) => void;
+  globalHints: Record<string, string>;
+  onGlobalHintsChange: (hints: Record<string, string>) => void;
 }
 
 function EntityRow({
   entityId, friendlyName, deviceId, domainKey, permissions,
-  tokenId, indent, filterText, isGhost, onPermChange, onEntityClick, revealEntity, mesaProfileEntities, onOpenMesa,
+  tokenId, indent, filterText, isGhost, onPermChange, onEntityClick, revealEntity, mesaProfileEntities, onOpenMesa, globalHints, onGlobalHintsChange,
 }: EntityRowProps) {
   const entityNode = permissions.entities[entityId];
   const state: NodeState = entityNode?.state ?? "GREY";
@@ -205,8 +247,10 @@ function EntityRow({
           tokenId={tokenId}
           entityId={entityId}
           currentHint={entityNode?.hint ?? null}
+          globalHint={globalHints[entityId] ?? null}
           currentState={state}
           onSaved={onPermChange}
+          onGlobalHintsChange={onGlobalHintsChange}
         />
       )}
       <PermissionSelector value={state} onChange={setEntityState} />
@@ -230,11 +274,13 @@ interface DeviceGroupProps {
   revealEntity?: string;
   mesaProfileEntities?: Set<string>;
   onOpenMesa?: (entityId: string) => void;
+  globalHints: Record<string, string>;
+  onGlobalHintsChange: (hints: Record<string, string>) => void;
 }
 
 function DeviceGroup({
   deviceId, deviceName, domainKey, entityIds, domainData,
-  permissions, tokenId, filterText, allEntityIds, onPermChange, onEntityClick, collapseKey, revealEntity, mesaProfileEntities, onOpenMesa,
+  permissions, tokenId, filterText, allEntityIds, onPermChange, onEntityClick, collapseKey, revealEntity, mesaProfileEntities, onOpenMesa, globalHints, onGlobalHintsChange,
 }: DeviceGroupProps) {
   const [expanded, setExpanded] = useState(false);
   const deviceNode = permissions.devices[deviceId];
@@ -325,6 +371,8 @@ function DeviceGroup({
                 revealEntity={revealEntity}
                 mesaProfileEntities={mesaProfileEntities}
                 onOpenMesa={onOpenMesa}
+                globalHints={globalHints}
+                onGlobalHintsChange={onGlobalHintsChange}
               />
             );
           })}
@@ -347,10 +395,12 @@ interface DomainGroupProps {
   revealEntity?: string;
   mesaProfileEntities?: Set<string>;
   onOpenMesa?: (entityId: string) => void;
+  globalHints: Record<string, string>;
+  onGlobalHintsChange: (hints: Record<string, string>) => void;
 }
 
 function DomainGroup({
-  domainKey, domainData, permissions, tokenId, filterText, allEntityIds, onPermChange, onEntityClick, collapseKey, revealEntity, mesaProfileEntities, onOpenMesa,
+  domainKey, domainData, permissions, tokenId, filterText, allEntityIds, onPermChange, onEntityClick, collapseKey, revealEntity, mesaProfileEntities, onOpenMesa, globalHints, onGlobalHintsChange,
 }: DomainGroupProps) {
   const [expanded, setExpanded] = useState(false);
   const domainNode = permissions.domains[domainKey];
@@ -456,6 +506,8 @@ function DomainGroup({
                       revealEntity={revealEntity}
                       mesaProfileEntities={mesaProfileEntities}
                       onOpenMesa={onOpenMesa}
+                      globalHints={globalHints}
+                      onGlobalHintsChange={onGlobalHintsChange}
                     />
                   );
                 })}
@@ -481,6 +533,8 @@ function DomainGroup({
                 revealEntity={revealEntity}
                 mesaProfileEntities={mesaProfileEntities}
                 onOpenMesa={onOpenMesa}
+                globalHints={globalHints}
+                onGlobalHintsChange={onGlobalHintsChange}
               />
             ))}
           {[...ghostEntityIds].sort().map((eid) => (
@@ -500,6 +554,8 @@ function DomainGroup({
               revealEntity={revealEntity}
               mesaProfileEntities={mesaProfileEntities}
               onOpenMesa={onOpenMesa}
+              globalHints={globalHints}
+              onGlobalHintsChange={onGlobalHintsChange}
             />
           ))}
         </div>
@@ -513,6 +569,7 @@ export function EntityTree({ tokenId, permissions, onPermissionsChange, onEntity
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState("");
+  const [globalHints, setGlobalHints] = useState<Record<string, string>>({});
 
   const loadTree = useCallback(async (force = false) => {
     setLoading(true);
@@ -528,6 +585,7 @@ export function EntityTree({ tokenId, permissions, onPermissionsChange, onEntity
   }, []);
 
   useEffect(() => { loadTree(); }, [loadTree]);
+  useEffect(() => { api.getEntityHints().then((r) => setGlobalHints(r.entity_hints)).catch(() => undefined); }, []);
 
   const allEntityIds = React.useMemo(() => {
     if (!tree) return new Set<string>();
@@ -576,6 +634,8 @@ export function EntityTree({ tokenId, permissions, onPermissionsChange, onEntity
             revealEntity={revealEntity}
             mesaProfileEntities={mesaProfileEntities}
             onOpenMesa={onOpenMesa}
+            globalHints={globalHints}
+            onGlobalHintsChange={setGlobalHints}
           />
         ))}
       </div>

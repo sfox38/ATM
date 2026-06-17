@@ -778,7 +778,7 @@ class ATMAdminResolveView(HomeAssistantView):
             Permission.NOT_FOUND: "NOT_FOUND",
         }
 
-        effective_hint = get_effective_hint(token, entity_id, hass)
+        effective_hint = get_effective_hint(token, entity_id, hass, data.store.get_entity_hints())
 
         return _ok({
             "entity_id": entity_id,
@@ -876,6 +876,67 @@ class ATMAdminEntityTreeView(HomeAssistantView):
             text=json_body,
             headers={"X-ATM-Request-ID": rid},
         )
+
+
+class ATMAdminEntityHintsView(HomeAssistantView):
+    """GET /api/atm/admin/entity-hints - the global entity-hint map (entity_id -> hint)."""
+
+    url = "/api/atm/admin/entity-hints"
+    name = "api:atm:admin:entity_hints"
+    requires_auth = True
+
+    @require_admin
+    async def get(self, request: web.Request) -> web.Response:
+        rid = request["atm_rid"]
+        data: ATMData = self.hass.data[DOMAIN]
+        return _ok({"entity_hints": dict(data.store.get_entity_hints())}, request_id=rid)
+
+
+class ATMAdminEntityHintView(HomeAssistantView):
+    """PUT /api/atm/admin/entity-hints/{entity_id} - set or clear one global entity hint.
+
+    A global hint applies to every token that can see the entity. It is distinct
+    from a per-token permission-node hint, which always takes precedence.
+    """
+
+    url = "/api/atm/admin/entity-hints/{entity_id}"
+    name = "api:atm:admin:entity_hint"
+    requires_auth = True
+
+    @require_admin
+    async def put(self, request: web.Request, entity_id: str) -> web.Response:
+        rid = request["atm_rid"]
+        if not _ENTITY_RE.match(entity_id):
+            return _err("invalid_request", "Invalid entity ID format.", 400, rid)
+        data: ATMData = self.hass.data[DOMAIN]
+
+        body = await _read_body(request, rid)
+        if isinstance(body, web.Response):
+            return body
+
+        hint = body.get("hint")
+        if hint is not None:
+            if not isinstance(hint, str):
+                return _err("invalid_request", "hint must be a string.", 400, rid)
+            hint = hint.strip()
+            if len(hint) > 200:
+                return _err("invalid_request", "hint must be 200 characters or fewer.", 400, rid)
+
+        async with data.store.async_lock:
+            await data.store.async_set_entity_hint(entity_id, hint or None)
+
+        user = request[KEY_HASS_USER]
+        data.audit.record(
+            request_id=rid,
+            token_id="admin",
+            token_name=f"admin:{user.id}",
+            method=request.method,
+            resource=request.path,
+            outcome="allowed",
+            client_ip=request.remote or "",
+            settings=data.store.get_settings(),
+        )
+        return _ok({"entity_hints": dict(data.store.get_entity_hints())}, request_id=rid)
 
 
 class ATMAdminTokenStatsView(HomeAssistantView):
@@ -1912,6 +1973,8 @@ ALL_ADMIN_VIEWS: list[type[HomeAssistantView]] = [
     ATMAdminTokenRotateView,
     ATMAdminScopeView,
     ATMAdminEntityTreeView,
+    ATMAdminEntityHintsView,
+    ATMAdminEntityHintView,
     ATMAdminTokenStatsView,
     ATMAdminTokenConnectionView,
     ATMAdminTokenAuditView,

@@ -5417,13 +5417,14 @@ def _build_context_plain(token: TokenRecord, hass: Any) -> str:
         lines.append("The atm domain is always blocked regardless of token type.")
     else:
         states = hass.states.async_all()
+        entity_hints = hass.data[DOMAIN].store.get_entity_hints()
         accessible: list[tuple[str, str, str | None]] = []
         for state in states:
             perm = resolve(state.entity_id, token, hass)
             if perm == Permission.WRITE:
-                accessible.append((state.entity_id, "READ/WRITE", get_effective_hint(token, state.entity_id, hass)))
+                accessible.append((state.entity_id, "READ/WRITE", get_effective_hint(token, state.entity_id, hass, entity_hints)))
             elif perm == Permission.READ:
-                accessible.append((state.entity_id, "READ", get_effective_hint(token, state.entity_id, hass)))
+                accessible.append((state.entity_id, "READ", get_effective_hint(token, state.entity_id, hass, entity_hints)))
 
         accessible.sort(key=lambda x: x[0])
         lines.append("You have access to the following Home Assistant entities:")
@@ -5499,6 +5500,7 @@ def _build_context_json(token: TokenRecord, hass: Any) -> dict:
                 "area_id": area_id,
             })
     else:
+        entity_hints = hass.data[DOMAIN].store.get_entity_hints()
         for state in states:
             perm = resolve(state.entity_id, token, hass)
             if perm not in (Permission.READ, Permission.WRITE):
@@ -5507,7 +5509,7 @@ def _build_context_json(token: TokenRecord, hass: Any) -> dict:
             area_id = _resolve_area_id(entry, dev_registry)
             perm_str = "READ/WRITE" if perm == Permission.WRITE else "READ"
             e: dict = {"entity_id": state.entity_id, "permission": perm_str, "area_id": area_id}
-            hint = get_effective_hint(token, state.entity_id, hass)
+            hint = get_effective_hint(token, state.entity_id, hass, entity_hints)
             if hint:
                 e["hint"] = hint
             entities.append(e)

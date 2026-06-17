@@ -118,6 +118,11 @@ export const api = {
   getEntityTree: (forceReload = false) =>
     req<EntityTree>("GET", `/entities${forceReload ? "?force_reload=1" : ""}`),
 
+  getEntityHints: () =>
+    req<{ entity_hints: Record<string, string> }>("GET", "/entity-hints"),
+  setEntityHint: (entityId: string, hint: string | null) =>
+    req<{ entity_hints: Record<string, string> }>("PUT", `/entity-hints/${encodeURIComponent(entityId)}`, { hint }),
+
   getTokenStats: (tokenId: string) => req<TokenStats>("GET", `/tokens/${tokenId}/stats`),
   getTokenConnection: (tokenId: string) => req<TokenConnection>("GET", `/tokens/${tokenId}/connection`),
   getTokenAudit: (tokenId: string, params?: AuditQueryParams) =>

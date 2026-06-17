@@ -340,6 +340,9 @@ class TokenStore:
         self._archived: dict[str, ArchivedTokenRecord] = {}
         self._pending_approvals: list[dict] = []
         self._settings: GlobalSettings = GlobalSettings()
+        # Global per-entity hints (entity_id -> hint text), surfaced to every token
+        # in the context endpoint. Distinct from per-token permission-node hints.
+        self._entity_hints: dict[str, str] = {}
         self.async_lock: asyncio.Lock = asyncio.Lock()
 
     @classmethod
@@ -378,6 +381,9 @@ class TokenStore:
 
         self._settings = GlobalSettings.from_dict(raw.get("settings", {}))
         self._pending_approvals = list(raw.get("pending_approvals", []))
+        self._entity_hints = {
+            str(k): str(v) for k, v in (raw.get("entity_hints") or {}).items()
+        }
 
         if migrated:
             _LOGGER.info("ATM storage migrated from v1 to v2; saving canonical form")
@@ -391,6 +397,7 @@ class TokenStore:
             "archived_tokens": [a.to_storage_dict() for a in self._archived.values()],
             "pending_approvals": self._pending_approvals,
             "settings": self._settings.to_dict(),
+            "entity_hints": self._entity_hints,
         })
 
     def get_pending_approvals(self) -> list[dict]:
@@ -631,6 +638,18 @@ class TokenStore:
     def get_settings(self) -> GlobalSettings:
         return self._settings
 
+    def get_entity_hints(self) -> dict[str, str]:
+        """Return the global entity-hint map (entity_id -> hint). Mutate via async_set_entity_hint."""
+        return self._entity_hints
+
+    async def async_set_entity_hint(self, entity_id: str, hint: str | None) -> None:
+        """Set or clear the global hint for an entity, then persist. Falsy hint clears it."""
+        if hint:
+            self._entity_hints[entity_id] = hint
+        else:
+            self._entity_hints.pop(entity_id, None)
+        await self.async_save()
+
     async def async_patch_settings(self, **kwargs) -> GlobalSettings:
         """Update any GlobalSettings fields by name and persist."""
         for key, value in kwargs.items():
@@ -644,6 +663,7 @@ class TokenStore:
         self._tokens.clear()
         self._archived.clear()
         self._settings = GlobalSettings()
+        self._entity_hints = {}
         await self.async_save()
 
 
