@@ -12,12 +12,16 @@
   var PAGES = [
     { id: "index",        file: "index.html",        title: "Overview",                 group: "Getting started" },
     { id: "install",      file: "install.html",      title: "Installation",             group: "Getting started" },
+    { id: "quickstart",   file: "quickstart.html",   title: "Quick start",              group: "Getting started" },
     { id: "connect",      file: "connect.html",      title: "Connect an AI client",     group: "Getting started" },
     { id: "permissions",  file: "permissions.html",  title: "Permissions",              group: "Concepts" },
     { id: "capabilities", file: "capabilities.html", title: "Capabilities & pass-through", group: "Concepts" },
+    { id: "mesa",         file: "mesa.html",         title: "MESA",                     group: "Concepts" },
+    { id: "panel",        file: "panel.html",        title: "Panel guide",              group: "Guides" },
     { id: "tools",        file: "tools.html",        title: "Tools reference",          group: "Reference" },
+    { id: "admin-api",    file: "admin-api.html",    title: "Admin API",                group: "Reference" },
     { id: "security",     file: "security.html",     title: "Security",                 group: "Reference" },
-    { id: "operations",   file: "operations.html",   title: "Operations & API",         group: "Reference" }
+    { id: "operations",   file: "operations.html",   title: "Operations",               group: "Reference" }
   ];
   var REPO = "https://github.com/sfox38/atm";
 
@@ -65,13 +69,7 @@
     var h = document.getElementById("site-header");
     if (!h) return;
     var mark =
-      '<svg class="mark" viewBox="0 0 32 32" fill="none" aria-hidden="true">' +
-        '<rect x="2.5" y="4.5" width="27" height="23" rx="5" fill="var(--accent)"/>' +
-        '<rect x="2.5" y="4.5" width="27" height="23" rx="5" stroke="var(--accent-hover)" stroke-width="1"/>' +
-        '<rect x="7.5" y="11" width="9" height="7" rx="1.6" fill="none" stroke="#fff" stroke-width="1.7"/>' +
-        '<path d="M10.2 11v-1.5a1.8 1.8 0 0 1 3.6 0V11" fill="none" stroke="#fff" stroke-width="1.7"/>' +
-        '<path d="M20 12.2h4.4M20 15.4h4.4M20 18.6h2.8" stroke="#fff" stroke-width="1.7" stroke-linecap="round"/>' +
-      '</svg>';
+      '<img class="mark" src="assets/atm-logo.png" alt="" width="30" height="30" />';
     h.innerHTML =
       '<button class="icon-btn menu-btn" id="menu-btn" aria-label="Open navigation" aria-expanded="false">' + SVG.menu + '</button>' +
       '<a class="brand" href="' + rel("index.html") + '">' + mark +

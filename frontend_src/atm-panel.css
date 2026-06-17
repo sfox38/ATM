@@ -613,6 +613,16 @@ select.input {
 .banner-info  { background: var(--atm-info-bg);    border-color: var(--atm-info);    color: var(--atm-text); }
 .banner-error { background: var(--atm-error-bg);   border-color: var(--atm-error);   color: var(--atm-error); }
 
+/* Reconnect reminder banner: info banner with a flexible text column + dismiss. */
+.reconnect-banner { display: flex; align-items: flex-start; gap: 12px; }
+.reconnect-banner-text { flex: 1; min-width: 0; }
+.reconnect-banner-dismiss {
+  flex: none; background: none; border: none; cursor: pointer;
+  font-size: 20px; line-height: 1; color: var(--atm-text-2);
+  padding: 0 2px; margin: -2px -2px 0 0;
+}
+.reconnect-banner-dismiss:hover { color: var(--atm-text); }
+
 /* ============================================================
    Timestamps
    ============================================================ */

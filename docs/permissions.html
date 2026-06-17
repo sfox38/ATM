@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Permissions &middot; ATM docs</title>
   <meta name="description" content="ATM's permission tree: four states, two-pass resolution, inheritance, and the indirect-control risks to watch for." />
-  <link rel="icon" href="assets/favicon.svg" type="image/svg+xml" />
+  <link rel="icon" href="assets/atm-logo.png" type="image/png" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400..800&family=Hanken+Grotesk:wght@400..700&family=Roboto+Mono:wght@400;500&display=swap" rel="stylesheet" />
@@ -184,18 +184,7 @@
         </dl>
 
         <h2>Working in the panel</h2>
-
-        <h3>Select by area</h3>
-        <p>The <strong>Select by Area</strong> button bulk-applies a state to every entity in a Home Assistant area at once. Pick the area, pick the state (read, write, deny, or remove the grant), and ATM sets them all in one step, useful for scoping a token to a room without clicking through the tree.</p>
-
-        <h3>The effective-permission emulator</h3>
-        <p>The emulator shows what ATM will actually decide for any entity. Type an entity ID (or click one in the tree or summary) and ATM runs the full two-pass resolver, then shows the result, which ancestor decided it, and the hint text if one is set. If a result surprises you, the path output names the ancestor that is overriding it.</p>
-
-        <h3>The permission summary</h3>
-        <p>A compact, sortable table of every node set to something other than GREY. It lists the node type, friendly name, ID, and current state. Clicking a row loads that entity into the emulator. An empty summary means no grants exist and the token has no access to anything.</p>
-
-        <h3>Entity hints</h3>
-        <p>After granting access to an entity, you can attach an optional hint. Hints are surfaced to the connected AI through the context endpoint to clarify what an entity represents, for example <em>"This lamp is on Rachel's desk, not the ceiling light."</em></p>
+        <p>The panel has tools that make scoping faster than clicking every node: bulk select by area or label, an effective-permission emulator that runs the two-pass resolver for any entity, a sortable summary of every node set to something other than GREY, and per-entity hints (token-local or global) that clarify what an entity is for the connected AI. These all live in the <a href="panel.html">Panel guide</a>.</p>
 
         <nav class="pager" id="pager" aria-label="Page navigation"></nav>
       </div>

@@ -4,8 +4,8 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Tools reference &middot; ATM docs</title>
-  <meta name="description" content="Every ATM tool: the 20 native HA MCP tools plus 16 ATM tools, each scoped to the token's permission tree and capabilities." />
-  <link rel="icon" href="assets/favicon.svg" type="image/svg+xml" />
+  <meta name="description" content="Every ATM tool: the 20 native HA MCP tools plus 63 ATM tools, each scoped to the token's permission tree and capabilities." />
+  <link rel="icon" href="assets/atm-logo.png" type="image/png" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400..800&family=Hanken+Grotesk:wght@400..700&family=Roboto+Mono:wght@400;500&display=swap" rel="stylesheet" />
@@ -24,17 +24,18 @@
         <header class="page-head">
           <p class="breadcrumb"><a href="index.html">Docs</a> / Reference / Tools</p>
           <h1>Tools reference</h1>
-          <p class="lede">ATM implements all 20 native Home Assistant MCP tools with identical names and responses, then adds 16 of its own. Every tool is scoped to the token's permission tree; the ones below note the capability they additionally require.</p>
+          <p class="lede">ATM implements all 20 native Home Assistant MCP tools with identical names and responses, then adds 63 of its own, 83 in all. Every tool is scoped to the token's permission tree; the ones below note the capability they additionally require.</p>
         </header>
 
         <div class="tool-toolbar" role="search">
           <label class="tool-search">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
-            <input type="text" id="tool-search-input" placeholder="Search 60+ tools by name or keyword..." aria-label="Search tools" autocomplete="off" />
+            <input type="text" id="tool-search-input" placeholder="Search all 83 tools by name or keyword..." aria-label="Search tools" autocomplete="off" />
           </label>
           <button class="filter-chip" data-cap="all" aria-pressed="true">All</button>
           <button class="filter-chip" data-cap="read" aria-pressed="false">Reads</button>
           <button class="filter-chip" data-cap="discovery" aria-pressed="false">Discovery</button>
+          <button class="filter-chip" data-cap="mesa" aria-pressed="false">MESA</button>
           <button class="filter-chip" data-cap="service" aria-pressed="false">Service</button>
           <button class="filter-chip" data-cap="control" aria-pressed="false">Native control</button>
           <button class="filter-chip" data-cap="write" aria-pressed="false">Writes</button>
@@ -43,134 +44,21 @@
 
         <p id="no-results" class="no-results is-hidden">No tools match your search.</p>
 
-        <!-- ===== Query & entity access ===== -->
-        <section class="tool-group" data-cap="read">
-          <div class="tool-group-head"><h2>Query &amp; entity access</h2></div>
+        <!-- ===== Automations & scripts ===== -->
+        <section class="tool-group" data-cap="write">
+          <div class="tool-group-head"><h2>Automations &amp; scripts</h2>
+          <p>These tools write YAML directly and do <strong>not</strong> consult the permission tree. See <a href="capabilities.html#automation-write">automation and script write</a>.</p></div>
 
-          <article class="tool" data-cap="read" data-search="get_state single entity">
-            <div class="tool-head"><span class="tool-name">get_state</span><span class="badge badge-neutral">tree-scoped</span></div>
-            <p class="tool-desc">Current state of a single entity. Requires READ or WRITE on the entity. Sensitive attributes are always scrubbed.</p>
-            <dl><dt>params</dt><dd><code>entity_id</code> (string, required)</dd><dt>returns</dt><dd><code>state</code>, <code>attributes</code>, and <code>last_changed</code></dd></dl>
+          <article class="tool" data-cap="write" data-search="create_automation edit_automation delete_automation automations.yaml">
+            <div class="tool-head"><span class="tool-name">create_automation</span><span class="tool-name">edit_automation</span><span class="tool-name">delete_automation</span><span class="badge badge-cap">Automation write</span></div>
+            <p class="tool-desc">Create, edit, or delete automations in <code>automations.yaml</code>.</p>
+            <dl><dt>create</dt><dd><code>alias</code>, <code>trigger</code>, <code>action</code> (required); <code>condition</code>, <code>mode</code></dd><dt>edit / delete</dt><dd><code>automation_id</code> (the slug); edit replaces the entire config</dd></dl>
           </article>
 
-          <article class="tool" data-cap="read" data-search="get_states all entities">
-            <div class="tool-head"><span class="tool-name">get_states</span><span class="badge badge-neutral">tree-scoped</span></div>
-            <p class="tool-desc">All entity states the token can read. Pass-through tokens receive every non-ATM entity.</p>
-          </article>
-
-          <article class="tool" data-cap="read" data-search="get_history state history time">
-            <div class="tool-head"><span class="tool-name">get_history</span><span class="badge badge-neutral">tree-scoped</span></div>
-            <p class="tool-desc">Historical state changes for an entity. Accepts relative times (<code>24h</code>, <code>7d</code>, <code>2w</code>, <code>1m</code>). Ranges over 7 days are clamped; the queried range comes back in <code>X-ATM-History-Start/End</code> headers.</p>
-            <dl><dt>params</dt><dd><code>entity_id</code> (required), <code>start_time</code>, <code>end_time</code> (ISO or relative)</dd></dl>
-          </article>
-
-          <article class="tool" data-cap="read" data-search="get_statistics long term numeric">
-            <div class="tool-head"><span class="tool-name">get_statistics</span><span class="badge badge-neutral">tree-scoped</span></div>
-            <p class="tool-desc">Long-term statistics for numeric entities, aggregated by 5-minute, hour, day, week, or month.</p>
-            <dl><dt>params</dt><dd><code>entity_id</code> (required), <code>start_time</code>, <code>end_time</code>, <code>period</code></dd><dt>returns</dt><dd><code>min</code>, <code>max</code>, <code>mean</code>, <code>sum</code>, <code>state</code> per period</dd></dl>
-          </article>
-
-          <article class="tool" data-cap="read" data-search="GetLiveContext yaml snapshot llm">
-            <div class="tool-head"><span class="tool-name">GetLiveContext</span><span class="badge badge-neutral">tree-scoped</span></div>
-            <p class="tool-desc">YAML snapshot of accessible entity states, optimized for LLM context. Filtered by the token's permissions; pass-through tokens get the same output as the native server.</p>
-          </article>
-
-          <article class="tool" data-cap="read" data-search="GetDateTime date time timezone">
-            <div class="tool-head"><span class="tool-name">GetDateTime</span><span class="badge badge-success">no capability</span></div>
-            <p class="tool-desc">Current date, time, and timezone. Always available, no permission required.</p>
-          </article>
-        </section>
-
-        <!-- ===== Service execution ===== -->
-        <section class="tool-group" data-cap="service">
-          <div class="tool-group-head"><h2>Service execution</h2></div>
-
-          <article class="tool" data-cap="service" data-search="call_service call any service domain">
-            <div class="tool-head"><span class="tool-name">call_service</span><span class="badge badge-neutral">tree-scoped</span></div>
-            <p class="tool-desc">Call any Home Assistant service. <code>device_id</code> and <code>area_id</code> are flattened to an explicit entity list first; denied entities are silently dropped, and if all resolve to denied the call returns 403. Response data is scanned and inaccessible entity IDs are replaced with <code>&lt;redacted&gt;</code>. Physical-control and restart services need their capability flags.</p>
-            <dl><dt>params</dt><dd><code>service</code> (<code>domain/service</code>, required), <code>entity_id</code>, <code>device_id</code>, <code>area_id</code>, <code>data</code></dd></dl>
-          </article>
-
-          <article class="tool" data-cap="service" data-search="dry_run_service preview predicted outcome mesa">
-            <div class="tool-head"><span class="tool-name">dry_run_service</span><span class="badge badge-cap">cap_search</span></div>
-            <p class="tool-desc">Preview a service call without running it. Resolves and flattens targets, reports the MESA verdict per entity, and returns a single <code>predicted_outcome</code> of <code>allowed</code>, <code>pending_approval</code>, or <code>denied</code>, folding the capability gate and MESA together. Same parameter shape as <code>call_service</code>.</p>
-          </article>
-        </section>
-
-        <!-- ===== Discovery & diagnostics ===== -->
-        <section class="tool-group" data-cap="discovery">
-          <div class="tool-group-head"><h2>Discovery &amp; diagnostics</h2>
-          <p>Read-only, scoped to accessible entities. Per-object lookups return an identical "not found" for a missing object and one the token cannot see, so they cannot probe for existence.</p></div>
-
-          <article class="tool" data-cap="discovery" data-search="search_entities filter find">
-            <div class="tool-head"><span class="tool-name">search_entities</span><span class="badge badge-cap">cap_search</span></div>
-            <p class="tool-desc">Filter accessible entities by query, domain, area, device class, state, and staleness. Each row carries <code>control_mode</code> when its MESA nature is non-default, so restricted entities are visible without a follow-up call.</p>
-            <dl><dt>params</dt><dd><code>query</code>, <code>domain</code>, <code>area</code>, <code>device_class</code>, <code>state</code>, <code>unavailable</code>, <code>stale_hours</code>, <code>limit</code> (all optional)</dd></dl>
-          </article>
-
-          <article class="tool" data-cap="discovery" data-search="get_overview home summary counts mesa_mode">
-            <div class="tool-head"><span class="tool-name">get_overview</span><span class="badge badge-cap">cap_search</span></div>
-            <p class="tool-desc">Compact home summary: total accessible entities, counts by domain and area, the unavailable count, and the deployment <code>mesa_mode</code>.</p>
-          </article>
-
-          <article class="tool" data-cap="discovery" data-search="describe_area floor entities grouped">
-            <div class="tool-head"><span class="tool-name">describe_area</span><span class="badge badge-cap">cap_search</span></div>
-            <p class="tool-desc">One area, its floor, and accessible entities grouped by domain. Takes an area name, alias, or area_id.</p>
-          </article>
-
-          <article class="tool" data-cap="discovery" data-search="describe_entity comprehension summary control_mode">
-            <div class="tool-head"><span class="tool-name">describe_entity</span><span class="badge badge-cap">cap_search</span></div>
-            <p class="tool-desc">Comprehension summary of one entity: state, area, the services in its domain, what references it, and its MESA <code>control_mode</code> when MESA is active.</p>
-          </article>
-
-          <article class="tool" data-cap="discovery" data-search="find_available_actions services domain gates">
-            <div class="tool-head"><span class="tool-name">find_available_actions</span><span class="badge badge-cap">cap_search</span></div>
-            <p class="tool-desc">The services in an entity's domain and whether the token can invoke each one now, accounting for write access, physical and dual gates, and the entity's MESA <code>control_mode</code>.</p>
-          </article>
-
-          <article class="tool" data-cap="discovery" data-search="get_relationships references automations scripts scenes">
-            <div class="tool-head"><span class="tool-name">get_relationships</span><span class="badge badge-cap">cap_search</span></div>
-            <p class="tool-desc">Reverse references (automations, scripts, scenes that reference the entity) and forward references, scoped to what the token can access.</p>
-          </article>
-
-          <article class="tool" data-cap="discovery" data-search="whatif predict automations fire hypothetical">
-            <div class="tool-head"><span class="tool-name">whatif</span><span class="badge badge-cap">cap_search</span></div>
-            <p class="tool-desc">Predict which automations would fire if an accessible entity changed to a hypothetical state, without changing anything. State and numeric_state triggers are evaluated best-effort.</p>
-          </article>
-
-          <article class="tool" data-cap="discovery" data-search="compare_state two times recorder">
-            <div class="tool-head"><span class="tool-name">compare_state</span><span class="badge badge-cap">cap_search</span></div>
-            <p class="tool-desc">Compare accessible entities' states between two times, backed by the recorder.</p>
-          </article>
-
-          <article class="tool" data-cap="discovery" data-search="recent_activity changed minutes">
-            <div class="tool-head"><span class="tool-name">recent_activity</span><span class="badge badge-cap">cap_search</span></div>
-            <p class="tool-desc">Accessible entities that changed in the last N minutes, newest first.</p>
-          </article>
-
-          <article class="tool" data-cap="discovery" data-search="list_areas list_floors list_zones list_devices get_device registry enumeration">
-            <div class="tool-head"><span class="tool-name">list_areas</span><span class="tool-name">list_floors</span><span class="tool-name">list_zones</span><span class="tool-name">list_devices</span><span class="tool-name">get_device</span><span class="badge badge-cap">cap_registry_read</span></div>
-            <p class="tool-desc">Registry enumeration restricted to areas, floors, zones, and devices that contain at least one accessible entity. <code>get_device</code> returns one device plus its accessible entities.</p>
-          </article>
-
-          <article class="tool" data-cap="discovery" data-search="list_scenes list_helpers">
-            <div class="tool-head"><span class="tool-name">list_scenes</span><span class="tool-name">list_helpers</span><span class="badge badge-cap">cap_registry_read</span></div>
-            <p class="tool-desc">Enumerate accessible scenes and helpers.</p>
-          </article>
-
-          <article class="tool" data-cap="discovery" data-search="get_automation_traces execution traces">
-            <div class="tool-head"><span class="tool-name">get_automation_traces</span><span class="badge badge-cap">cap_traces</span></div>
-            <p class="tool-desc">Execution traces for an accessible automation. Optional <code>run_id</code> and <code>summary</code> (highlights the error and last step).</p>
-          </article>
-
-          <article class="tool" data-cap="discovery" data-search="get_system_health version integrations">
-            <div class="tool-head"><span class="tool-name">get_system_health</span><span class="badge badge-cap">cap_diagnostics</span></div>
-            <p class="tool-desc">Home Assistant version and per-integration system health.</p>
-          </article>
-
-          <article class="tool" data-cap="discovery" data-search="check_config validate_config validate configuration">
-            <div class="tool-head"><span class="tool-name">check_config</span><span class="tool-name">validate_config</span><span class="badge badge-cap">cap_diagnostics</span></div>
-            <p class="tool-desc"><code>check_config</code> validates the HA configuration files. <code>validate_config</code> validates an automation or script config without saving and reports, per referenced entity, whether it exists and is accessible.</p>
+          <article class="tool" data-cap="write" data-search="create_script edit_script delete_script scripts.yaml">
+            <div class="tool-head"><span class="tool-name">create_script</span><span class="tool-name">edit_script</span><span class="tool-name">delete_script</span><span class="badge badge-cap">Script write</span></div>
+            <p class="tool-desc">Create, edit, or delete scripts in <code>scripts.yaml</code>.</p>
+            <dl><dt>create</dt><dd><code>script_id</code>, <code>alias</code>, <code>sequence</code> (required); <code>mode</code>, <code>variables</code>, <code>fields</code></dd><dt>edit / delete</dt><dd><code>script_id</code> (the slug); edit replaces the entire config</dd></dl>
           </article>
         </section>
 
@@ -179,74 +67,170 @@
           <div class="tool-group-head"><h2>Configuration &amp; templates</h2></div>
 
           <article class="tool" data-cap="read" data-search="get_config configuration data">
-            <div class="tool-head"><span class="tool-name">get_config</span><span class="badge badge-cap">cap_config_read</span></div>
+            <div class="tool-head"><span class="tool-name">get_config</span><span class="badge badge-cap">Config read</span></div>
             <p class="tool-desc">Read HA configuration data, including integrations, packages, and automation settings.</p>
           </article>
 
-          <article class="tool" data-cap="read" data-search="render_template jinja2">
-            <div class="tool-head"><span class="tool-name">render_template</span><span class="badge badge-cap">cap_template_render</span></div>
-            <p class="tool-desc">Render a Jinja2 template in a permission-scoped environment; templates can only reach entities the token can read.</p>
-            <dl><dt>params</dt><dd><code>template</code> (string, required)</dd></dl>
-          </article>
-
           <article class="tool" data-cap="read" data-search="get_logs system log entries">
-            <div class="tool-head"><span class="tool-name">get_logs</span><span class="badge badge-cap">cap_log_read</span></div>
+            <div class="tool-head"><span class="tool-name">get_logs</span><span class="badge badge-cap">Log read</span></div>
             <p class="tool-desc">Recent HA system log entries. ATM's own entries are excluded and token values are scrubbed from messages and tracebacks.</p>
             <dl><dt>params</dt><dd><code>limit</code> (default 50, max 100), <code>level</code> (<code>INFO</code> / <code>WARNING</code> / <code>ERROR</code>)</dd></dl>
           </article>
-        </section>
 
-        <!-- ===== Realtime ===== -->
-        <section class="tool-group" data-cap="read">
-          <div class="tool-group-head"><h2>Realtime subscriptions</h2></div>
-          <article class="tool" data-cap="read" data-search="watch_entity blocking 30s">
-            <div class="tool-head"><span class="tool-name">watch_entity</span><span class="badge badge-cap">cap_config_read</span></div>
-            <p class="tool-desc">Bounded blocking subscription (max 30 seconds) that waits for an accessible entity to change state, then returns it.</p>
+          <article class="tool" data-cap="read" data-search="render_template jinja2">
+            <div class="tool-head"><span class="tool-name">render_template</span><span class="badge badge-cap">Template render</span></div>
+            <p class="tool-desc">Render a Jinja2 template in a permission-scoped environment; templates can only reach entities the token can read.</p>
+            <dl><dt>params</dt><dd><code>template</code> (string, required)</dd></dl>
           </article>
         </section>
 
-        <!-- ===== Token introspection ===== -->
-        <section class="tool-group" data-cap="read">
-          <div class="tool-group-head"><h2>Token introspection</h2>
-          <p>Each token can always inspect its own state. No capability required, and you only ever see your own data.</p></div>
+        <!-- ===== Discovery & diagnostics ===== -->
+        <section class="tool-group" data-cap="discovery">
+          <div class="tool-group-head"><h2>Discovery &amp; diagnostics</h2>
+          <p>Read-only, scoped to accessible entities. Per-object lookups return an identical "not found" for a missing object and one the token cannot see, so they cannot probe for existence.</p></div>
 
-          <article class="tool" data-cap="read" data-search="get_capability_summary persona tools gate map">
-            <div class="tool-head"><span class="tool-name">get_capability_summary</span><span class="badge badge-success">no capability</span></div>
-            <p class="tool-desc">This token's persona, effective capabilities, Confirm-gated capabilities, write scope, rate limits, and a tool-level gate map (<code>tools.usable</code> / <code>tools.needs_approval</code> / <code>tools.unavailable</code>).</p>
+          <article class="tool" data-cap="discovery" data-search="check_config validate_config validate configuration">
+            <div class="tool-head"><span class="tool-name">check_config</span><span class="tool-name">validate_config</span><span class="badge badge-cap">Diagnostics</span></div>
+            <p class="tool-desc"><code>check_config</code> validates the HA configuration files. <code>validate_config</code> validates an automation or script config without saving and reports, per referenced entity, whether it exists and is accessible.</p>
           </article>
 
-          <article class="tool" data-cap="read" data-search="get_audit_summary own audit entries">
-            <div class="tool-head"><span class="tool-name">get_audit_summary</span><span class="badge badge-success">no capability</span></div>
-            <p class="tool-desc">This token's own recent audit entries (request_id, time, method, resource, outcome), newest first, with an optional outcome filter.</p>
+          <article class="tool" data-cap="discovery" data-search="compare_state two times recorder">
+            <div class="tool-head"><span class="tool-name">compare_state</span><span class="badge badge-cap">Search &amp; discovery</span></div>
+            <p class="tool-desc">Compare accessible entities' states between two times, backed by the recorder.</p>
           </article>
 
-          <article class="tool" data-cap="read" data-search="get_approval_status pending approvals confirm">
-            <div class="tool-head"><span class="tool-name">get_approval_status</span><span class="badge badge-success">no capability</span></div>
-            <p class="tool-desc">Check a Confirm-gated action you submitted. With an <code>approval_id</code>, returns its status and result; without one, lists all of this token's pending approvals, useful after a reconnect.</p>
+          <article class="tool" data-cap="discovery" data-search="describe_area floor entities grouped">
+            <div class="tool-head"><span class="tool-name">describe_area</span><span class="badge badge-cap">Search &amp; discovery</span></div>
+            <p class="tool-desc">One area, its floor, and accessible entities grouped by domain. Takes an area name, alias, or area_id.</p>
+          </article>
+
+          <article class="tool" data-cap="discovery" data-search="describe_entity comprehension summary control_mode">
+            <div class="tool-head"><span class="tool-name">describe_entity</span><span class="badge badge-cap">Search &amp; discovery</span></div>
+            <p class="tool-desc">Comprehension summary of one entity: state, area, the services in its domain, what references it, and its MESA <code>control_mode</code> when MESA is active.</p>
+          </article>
+
+          <article class="tool" data-cap="discovery" data-search="find_available_actions services domain gates">
+            <div class="tool-head"><span class="tool-name">find_available_actions</span><span class="badge badge-cap">Search &amp; discovery</span></div>
+            <p class="tool-desc">The services in an entity's domain and whether the token can invoke each one now, accounting for write access, physical and dual gates, and the entity's MESA <code>control_mode</code>.</p>
+          </article>
+
+          <article class="tool" data-cap="discovery" data-search="get_automation_traces execution traces">
+            <div class="tool-head"><span class="tool-name">get_automation_traces</span><span class="badge badge-cap">Automation traces</span></div>
+            <p class="tool-desc">Execution traces for an accessible automation. Optional <code>run_id</code> and <code>summary</code> (highlights the error and last step).</p>
+          </article>
+
+          <article class="tool" data-cap="discovery" data-search="get_overview home summary counts mesa_mode">
+            <div class="tool-head"><span class="tool-name">get_overview</span><span class="badge badge-cap">Search &amp; discovery</span></div>
+            <p class="tool-desc">Compact home summary: total accessible entities, counts by domain and area, the unavailable count, and the deployment <code>mesa_mode</code>.</p>
+          </article>
+
+          <article class="tool" data-cap="discovery" data-search="get_relationships references automations scripts scenes">
+            <div class="tool-head"><span class="tool-name">get_relationships</span><span class="badge badge-cap">Search &amp; discovery</span></div>
+            <p class="tool-desc">Reverse references (automations, scripts, scenes that reference the entity) and forward references, scoped to what the token can access.</p>
+          </article>
+
+          <article class="tool" data-cap="discovery" data-search="get_system_health version integrations">
+            <div class="tool-head"><span class="tool-name">get_system_health</span><span class="badge badge-cap">Diagnostics</span></div>
+            <p class="tool-desc">Home Assistant version and per-integration system health.</p>
+          </article>
+
+          <article class="tool" data-cap="discovery" data-search="list_areas list_floors list_zones list_devices get_device registry enumeration">
+            <div class="tool-head"><span class="tool-name">list_areas</span><span class="tool-name">list_floors</span><span class="tool-name">list_zones</span><span class="tool-name">list_devices</span><span class="tool-name">get_device</span><span class="badge badge-cap">Registry read</span></div>
+            <p class="tool-desc">Registry enumeration restricted to areas, floors, zones, and devices that contain at least one accessible entity. <code>get_device</code> returns one device plus its accessible entities.</p>
+          </article>
+
+          <article class="tool" data-cap="discovery" data-search="list_scenes list_helpers">
+            <div class="tool-head"><span class="tool-name">list_scenes</span><span class="tool-name">list_helpers</span><span class="badge badge-cap">Registry read</span></div>
+            <p class="tool-desc">Enumerate accessible scenes and helpers.</p>
+          </article>
+
+          <article class="tool" data-cap="discovery" data-search="recent_activity changed minutes">
+            <div class="tool-head"><span class="tool-name">recent_activity</span><span class="badge badge-cap">Search &amp; discovery</span></div>
+            <p class="tool-desc">Accessible entities that changed in the last N minutes, newest first.</p>
+          </article>
+
+          <article class="tool" data-cap="discovery" data-search="search_entities filter find">
+            <div class="tool-head"><span class="tool-name">search_entities</span><span class="badge badge-cap">Search &amp; discovery</span></div>
+            <p class="tool-desc">Filter accessible entities by query, domain, area, device class, state, and staleness. Each row carries <code>control_mode</code> when its MESA nature is non-default, so restricted entities are visible without a follow-up call.</p>
+            <dl><dt>params</dt><dd><code>query</code>, <code>domain</code>, <code>area</code>, <code>device_class</code>, <code>state</code>, <code>unavailable</code>, <code>stale_hours</code>, <code>limit</code> (all optional)</dd></dl>
+          </article>
+
+          <article class="tool" data-cap="discovery" data-search="whatif predict automations fire hypothetical">
+            <div class="tool-head"><span class="tool-name">whatif</span><span class="badge badge-cap">Search &amp; discovery</span></div>
+            <p class="tool-desc">Predict which automations would fire if an accessible entity changed to a hypothetical state, without changing anything. State and numeric_state triggers are evaluated best-effort.</p>
+          </article>
+        </section>
+
+        <!-- ===== Files, YAML, integrations & system ===== -->
+        <section class="tool-group" data-cap="system">
+          <div class="tool-group-head"><h2>Files, YAML, integrations &amp; system</h2></div>
+
+          <article class="tool" data-cap="system" data-search="get_yaml_config set_yaml_config configuration.yaml">
+            <div class="tool-head"><span class="tool-name">get_yaml_config</span><span class="tool-name">set_yaml_config</span><span class="badge badge-cap">Raw YAML edit</span></div>
+            <p class="tool-desc">Read and edit <code>configuration.yaml</code> directly. Confirm-eligible.</p>
+          </article>
+
+          <article class="tool" data-cap="system" data-search="list_backups create_backup no restore">
+            <div class="tool-head"><span class="tool-name">list_backups</span><span class="tool-name">create_backup</span><span class="badge badge-cap">Backup</span></div>
+            <p class="tool-desc">List and create backups. Restore is intentionally never exposed. Confirm-eligible.</p>
+          </article>
+
+          <article class="tool" data-cap="system" data-search="list_files read_file write_file www themes custom_templates">
+            <div class="tool-head"><span class="tool-name">list_files</span><span class="tool-name">read_file</span><span class="tool-name">write_file</span><span class="badge badge-cap">Filesystem access</span></div>
+            <p class="tool-desc">Read and write files under <code>www/</code>, <code>themes/</code>, and <code>custom_templates/</code>. Confirm-eligible.</p>
+          </article>
+
+          <article class="tool" data-cap="system" data-search="list_integrations set_integration_enabled enable disable">
+            <div class="tool-head"><span class="tool-name">list_integrations</span><span class="tool-name">set_integration_enabled</span><span class="badge badge-cap">Integration management</span></div>
+            <p class="tool-desc">List integrations and enable or disable them. Confirm-eligible.</p>
+          </article>
+
+          <article class="tool" data-cap="system" data-search="restart_ha restart home assistant">
+            <div class="tool-head"><span class="tool-name">restart_ha</span><span class="badge badge-cap">HA restart / stop</span></div>
+            <p class="tool-desc">Restart Home Assistant. Pass-through-exempt: even pass-through tokens must have this flag enabled.</p>
+          </article>
+        </section>
+
+        <!-- ===== MESA profiles ===== -->
+        <section class="tool-group" data-cap="mesa">
+          <div class="tool-group-head"><h2 id="mesa-tools">MESA profiles</h2>
+          <p>Token-scoped reads of the per-entity safety profiles. All four require <strong>Config read</strong>, only ever see entities the token can read, and return an identical "not found" for a missing or out-of-scope entity, so they cannot probe for existence. See <a href="mesa.html">MESA</a>.</p></div>
+
+          <article class="tool" data-cap="read mesa" data-search="mesa_explain_profile why resolved conflict inheritance">
+            <div class="tool-head"><span class="tool-name">mesa_explain_profile</span><span class="badge badge-cap">Config read</span></div>
+            <p class="tool-desc">Field-by-field explanation of why an accessible entity resolved the way it did, including any conflicts between levels.</p>
+          </article>
+
+          <article class="tool" data-cap="read mesa" data-search="mesa_get_caller_context caller">
+            <div class="tool-head"><span class="tool-name">mesa_get_caller_context</span><span class="badge badge-cap">Config read</span></div>
+            <p class="tool-desc">The MESA context for the current caller.</p>
+          </article>
+
+          <article class="tool" data-cap="read mesa" data-search="mesa_get_profile entity stored effective profile">
+            <div class="tool-head"><span class="tool-name">mesa_get_profile</span><span class="badge badge-cap">Config read</span></div>
+            <p class="tool-desc">The stored and effective profile for one accessible entity.</p>
+          </article>
+
+          <article class="tool" data-cap="read mesa" data-search="mesa_query_profiles list filter profiles domain tag area">
+            <div class="tool-head"><span class="tool-name">mesa_query_profiles</span><span class="badge badge-cap">Config read</span></div>
+            <p class="tool-desc">List the profiles in scope, filterable by domain, tag, area, and origin, with pagination. Counts and cursors are relative to the token's scope.</p>
           </article>
         </section>
 
         <!-- ===== Native control tools ===== -->
         <section class="tool-group" data-cap="control">
           <div class="tool-group-head"><h2>Native control tools</h2>
-          <p>Identical to the native HA MCP server: same names, parameters, and <code>action_done</code> responses. Targeting parameters (<code>area</code>, <code>floor</code>, <code>name</code>, <code>domain</code>) resolve to an explicit entity list, then filter to WRITE access. If nothing matches, they return "No accessible entities matched." without revealing why.</p></div>
+          <p>Identical to the native HA MCP server: same names, parameters, and <code>action_done</code> responses. Targeting parameters resolve to an explicit entity list, then filter to WRITE access: <code>area</code>, <code>floor</code>, and <code>name</code> are strings, while <code>domain</code> and <code>device_class</code> are arrays of strings. If nothing matches, they return "No accessible entities matched." without revealing why.</p></div>
 
-          <article class="tool" data-cap="control" data-search="HassTurnOn HassTurnOff on off">
-            <div class="tool-head"><span class="tool-name">HassTurnOn</span><span class="tool-name">HassTurnOff</span><span class="badge badge-neutral">tree-scoped</span></div>
-            <p class="tool-desc">Turn entities on or off by area, name, floor, or domain.</p>
-            <dl><dt>params</dt><dd><code>area</code>, <code>floor</code>, <code>name</code>, <code>domain</code>, <code>device_class</code> (all optional)</dd></dl>
+          <article class="tool" data-cap="control" data-search="HassBroadcast announcement assist satellite">
+            <div class="tool-head"><span class="tool-name">HassBroadcast</span><span class="badge badge-cap">Broadcast</span></div>
+            <p class="tool-desc">Send an announcement through Assist satellite devices.</p>
+            <dl><dt>params</dt><dd><code>message</code> (string, required)</dd></dl>
           </article>
 
-          <article class="tool" data-cap="control" data-search="HassLightSet brightness color temperature">
-            <div class="tool-head"><span class="tool-name">HassLightSet</span><span class="badge badge-neutral">tree-scoped</span></div>
-            <p class="tool-desc">Set brightness, color, or color temperature of accessible lights.</p>
-            <dl><dt>params</dt><dd><code>area</code>, <code>floor</code>, <code>name</code>, <code>brightness</code> (0-100), <code>color</code>, <code>temperature</code> (kelvin)</dd></dl>
-          </article>
-
-          <article class="tool" data-cap="control" data-search="HassFanSetSpeed percentage">
-            <div class="tool-head"><span class="tool-name">HassFanSetSpeed</span><span class="badge badge-neutral">tree-scoped</span></div>
-            <p class="tool-desc">Set fan speed by percentage.</p>
-            <dl><dt>params</dt><dd><code>percentage</code> (0-100, required), plus <code>area</code> / <code>floor</code> / <code>name</code></dd></dl>
+          <article class="tool" data-cap="control" data-search="HassCancelAllTimers timers area canceled">
+            <div class="tool-head"><span class="tool-name">HassCancelAllTimers</span><span class="badge badge-neutral">tree-scoped</span></div>
+            <p class="tool-desc">Cancel all running timers in an area (or everywhere if <code>area</code> is omitted). Always returns <code>speech_slots: { "canceled": N }</code>, even when N is 0.</p>
           </article>
 
           <article class="tool" data-cap="control" data-search="HassClimateSetTemperature target temperature">
@@ -255,14 +239,16 @@
             <dl><dt>params</dt><dd><code>temperature</code> (required), plus <code>area</code> / <code>floor</code> / <code>name</code></dd></dl>
           </article>
 
-          <article class="tool" data-cap="control" data-search="HassSetPosition cover blinds position">
-            <div class="tool-head"><span class="tool-name">HassSetPosition</span><span class="badge badge-cap">cap_physical_control</span></div>
-            <p class="tool-desc">Set the position of covers, blinds, or similar devices (0-100). Cover mutation needs the physical-control capability.</p>
+          <article class="tool" data-cap="control" data-search="HassFanSetSpeed percentage">
+            <div class="tool-head"><span class="tool-name">HassFanSetSpeed</span><span class="badge badge-neutral">tree-scoped</span></div>
+            <p class="tool-desc">Set fan speed by percentage.</p>
+            <dl><dt>params</dt><dd><code>percentage</code> (0-100, required), plus <code>area</code> / <code>floor</code> / <code>name</code></dd></dl>
           </article>
 
-          <article class="tool" data-cap="control" data-search="HassSetVolume HassSetVolumeRelative media player volume">
-            <div class="tool-head"><span class="tool-name">HassSetVolume</span><span class="tool-name">HassSetVolumeRelative</span><span class="badge badge-neutral">tree-scoped</span></div>
-            <p class="tool-desc">Set or adjust media player volume. <code>HassSetVolume</code> takes <code>volume_level</code> (0-100); <code>HassSetVolumeRelative</code> takes <code>volume_step</code> (<code>"up"</code>, <code>"down"</code>, or a signed percentage).</p>
+          <article class="tool" data-cap="control" data-search="HassLightSet brightness color temperature">
+            <div class="tool-head"><span class="tool-name">HassLightSet</span><span class="badge badge-neutral">tree-scoped</span></div>
+            <p class="tool-desc">Set brightness, color, or color temperature of accessible lights.</p>
+            <dl><dt>params</dt><dd><code>area</code>, <code>floor</code>, <code>name</code>, <code>brightness</code> (0-100), <code>color</code>, <code>temperature</code> (kelvin)</dd></dl>
           </article>
 
           <article class="tool" data-cap="control" data-search="HassMediaPause HassMediaUnpause HassMediaNext HassMediaPrevious mute unmute playback">
@@ -276,38 +262,72 @@
             <dl><dt>params</dt><dd><code>search_query</code> (required), <code>media_class</code>, plus <code>area</code> / <code>floor</code> / <code>name</code></dd></dl>
           </article>
 
-          <article class="tool" data-cap="control" data-search="HassCancelAllTimers timers area canceled">
-            <div class="tool-head"><span class="tool-name">HassCancelAllTimers</span><span class="badge badge-neutral">tree-scoped</span></div>
-            <p class="tool-desc">Cancel all running timers in an area (or everywhere if <code>area</code> is omitted). Always returns <code>speech_slots: { "canceled": N }</code>, even when N is 0.</p>
+          <article class="tool" data-cap="control" data-search="HassSetPosition cover blinds position">
+            <div class="tool-head"><span class="tool-name">HassSetPosition</span><span class="badge badge-cap">Physical control</span></div>
+            <p class="tool-desc">Set the position of covers, blinds, or similar devices (0-100). Cover mutation needs the physical-control capability.</p>
+          </article>
+
+          <article class="tool" data-cap="control" data-search="HassSetVolume HassSetVolumeRelative media player volume">
+            <div class="tool-head"><span class="tool-name">HassSetVolume</span><span class="tool-name">HassSetVolumeRelative</span><span class="badge badge-neutral">tree-scoped</span></div>
+            <p class="tool-desc">Set or adjust media player volume. <code>HassSetVolume</code> takes <code>volume_level</code> (0-100); <code>HassSetVolumeRelative</code> takes <code>volume_step</code> (<code>"up"</code>, <code>"down"</code>, or a signed percentage).</p>
           </article>
 
           <article class="tool" data-cap="control" data-search="HassStopMoving stop cover">
-            <div class="tool-head"><span class="tool-name">HassStopMoving</span><span class="badge badge-cap">cap_physical_control</span></div>
+            <div class="tool-head"><span class="tool-name">HassStopMoving</span><span class="badge badge-cap">Physical control</span></div>
             <p class="tool-desc">Stop a moving cover or similar device.</p>
           </article>
 
-          <article class="tool" data-cap="control" data-search="HassBroadcast announcement assist satellite">
-            <div class="tool-head"><span class="tool-name">HassBroadcast</span><span class="badge badge-cap">cap_broadcast</span></div>
-            <p class="tool-desc">Send an announcement through Assist satellite devices.</p>
-            <dl><dt>params</dt><dd><code>message</code> (string, required)</dd></dl>
+          <article class="tool" data-cap="control" data-search="HassTurnOn HassTurnOff on off">
+            <div class="tool-head"><span class="tool-name">HassTurnOn</span><span class="tool-name">HassTurnOff</span><span class="badge badge-neutral">tree-scoped</span></div>
+            <p class="tool-desc">Turn entities on or off by area, name, floor, or domain.</p>
+            <dl><dt>params</dt><dd><code>area</code>, <code>floor</code>, <code>name</code> (strings), <code>domain</code>, <code>device_class</code> (string arrays), all optional</dd></dl>
           </article>
         </section>
 
-        <!-- ===== Automations & scripts ===== -->
-        <section class="tool-group" data-cap="write">
-          <div class="tool-group-head"><h2>Automations &amp; scripts</h2>
-          <p>These tools write YAML directly and do <strong>not</strong> consult the permission tree. See <a href="capabilities.html#automation-write">automation and script write</a>.</p></div>
+        <!-- ===== Query & entity access ===== -->
+        <section class="tool-group" data-cap="read">
+          <div class="tool-group-head"><h2>Query &amp; entity access</h2></div>
 
-          <article class="tool" data-cap="write" data-search="create_automation edit_automation delete_automation automations.yaml">
-            <div class="tool-head"><span class="tool-name">create_automation</span><span class="tool-name">edit_automation</span><span class="tool-name">delete_automation</span><span class="badge badge-cap">cap_automation_write</span></div>
-            <p class="tool-desc">Create, edit, or delete automations in <code>automations.yaml</code>.</p>
-            <dl><dt>create</dt><dd><code>alias</code>, <code>trigger</code>, <code>action</code> (required); <code>condition</code>, <code>mode</code></dd><dt>edit / delete</dt><dd><code>automation_id</code> (the slug); edit replaces the entire config</dd></dl>
+          <article class="tool" data-cap="read" data-search="get_history state history time">
+            <div class="tool-head"><span class="tool-name">get_history</span><span class="badge badge-neutral">tree-scoped</span></div>
+            <p class="tool-desc">Historical state changes for an entity. Accepts relative times (<code>24h</code>, <code>7d</code>, <code>2w</code>, <code>1m</code>). Ranges over 7 days are clamped; the queried range comes back in <code>X-ATM-History-Start/End</code> headers.</p>
+            <dl><dt>params</dt><dd><code>entity_id</code> (required), <code>start_time</code>, <code>end_time</code> (ISO or relative)</dd></dl>
           </article>
 
-          <article class="tool" data-cap="write" data-search="create_script edit_script delete_script scripts.yaml">
-            <div class="tool-head"><span class="tool-name">create_script</span><span class="tool-name">edit_script</span><span class="tool-name">delete_script</span><span class="badge badge-cap">cap_script_write</span></div>
-            <p class="tool-desc">Create, edit, or delete scripts in <code>scripts.yaml</code>.</p>
-            <dl><dt>create</dt><dd><code>script_id</code>, <code>alias</code>, <code>sequence</code> (required); <code>mode</code>, <code>variables</code>, <code>fields</code></dd><dt>edit / delete</dt><dd><code>script_id</code> (the slug); edit replaces the entire config</dd></dl>
+          <article class="tool" data-cap="read" data-search="get_state single entity">
+            <div class="tool-head"><span class="tool-name">get_state</span><span class="badge badge-neutral">tree-scoped</span></div>
+            <p class="tool-desc">Current state of a single entity. Requires READ or WRITE on the entity. Sensitive attributes are always scrubbed.</p>
+            <dl><dt>params</dt><dd><code>entity_id</code> (string, required)</dd><dt>returns</dt><dd><code>state</code>, <code>attributes</code>, and <code>last_changed</code></dd></dl>
+          </article>
+
+          <article class="tool" data-cap="read" data-search="get_states all entities">
+            <div class="tool-head"><span class="tool-name">get_states</span><span class="badge badge-neutral">tree-scoped</span></div>
+            <p class="tool-desc">All entity states the token can read. Pass-through tokens receive every non-ATM entity.</p>
+          </article>
+
+          <article class="tool" data-cap="read" data-search="get_statistics long term numeric">
+            <div class="tool-head"><span class="tool-name">get_statistics</span><span class="badge badge-neutral">tree-scoped</span></div>
+            <p class="tool-desc">Long-term statistics for numeric entities, aggregated by 5-minute, hour, day, week, or month.</p>
+            <dl><dt>params</dt><dd><code>entity_id</code> (required), <code>start_time</code>, <code>end_time</code>, <code>period</code></dd><dt>returns</dt><dd><code>min</code>, <code>max</code>, <code>mean</code>, <code>sum</code>, <code>state</code> per period</dd></dl>
+          </article>
+
+          <article class="tool" data-cap="read" data-search="GetDateTime date time timezone">
+            <div class="tool-head"><span class="tool-name">GetDateTime</span><span class="badge badge-success">no capability</span></div>
+            <p class="tool-desc">Current date, time, and timezone. Always available, no permission required.</p>
+          </article>
+
+          <article class="tool" data-cap="read" data-search="GetLiveContext yaml snapshot llm">
+            <div class="tool-head"><span class="tool-name">GetLiveContext</span><span class="badge badge-neutral">tree-scoped</span></div>
+            <p class="tool-desc">YAML snapshot of accessible entity states, optimized for LLM context. Filtered by the token's permissions; pass-through tokens get the same output as the native server.</p>
+          </article>
+        </section>
+
+        <!-- ===== Realtime ===== -->
+        <section class="tool-group" data-cap="read">
+          <div class="tool-group-head"><h2>Realtime subscriptions</h2></div>
+          <article class="tool" data-cap="read" data-search="watch_entity blocking 30s">
+            <div class="tool-head"><span class="tool-name">watch_entity</span><span class="badge badge-cap">Config read</span></div>
+            <p class="tool-desc">Bounded blocking subscription (max 30 seconds) that waits for an accessible entity to change state, then returns it.</p>
           </article>
         </section>
 
@@ -315,55 +335,67 @@
         <section class="tool-group" data-cap="write">
           <div class="tool-group-head"><h2>Scenes, helpers &amp; dashboards</h2></div>
 
-          <article class="tool" data-cap="write" data-search="create_scene edit_scene delete_scene">
-            <div class="tool-head"><span class="tool-name">create_scene</span><span class="tool-name">edit_scene</span><span class="tool-name">delete_scene</span><span class="badge badge-cap">cap_scene_write</span></div>
-            <p class="tool-desc">Manage scenes. Confirm-eligible.</p>
-          </article>
-
           <article class="tool" data-cap="write" data-search="create_helper edit_helper delete_helper input_ counter timer">
-            <div class="tool-head"><span class="tool-name">create_helper</span><span class="tool-name">edit_helper</span><span class="tool-name">delete_helper</span><span class="badge badge-cap">cap_helper_write</span></div>
+            <div class="tool-head"><span class="tool-name">create_helper</span><span class="tool-name">edit_helper</span><span class="tool-name">delete_helper</span><span class="badge badge-cap">Helper write</span></div>
             <p class="tool-desc">Manage helpers (input_*, counter, timer). Confirm-eligible.</p>
           </article>
 
+          <article class="tool" data-cap="write" data-search="create_scene edit_scene delete_scene">
+            <div class="tool-head"><span class="tool-name">create_scene</span><span class="tool-name">edit_scene</span><span class="tool-name">delete_scene</span><span class="badge badge-cap">Scene write</span></div>
+            <p class="tool-desc">Manage scenes. Confirm-eligible.</p>
+          </article>
+
           <article class="tool" data-cap="write" data-search="list_dashboards create_dashboard edit_dashboard delete_dashboard lovelace">
-            <div class="tool-head"><span class="tool-name">list_dashboards</span><span class="tool-name">create_dashboard</span><span class="tool-name">edit_dashboard</span><span class="tool-name">delete_dashboard</span><span class="badge badge-cap">cap_lovelace_write</span></div>
+            <div class="tool-head"><span class="tool-name">list_dashboards</span><span class="tool-name">create_dashboard</span><span class="tool-name">edit_dashboard</span><span class="tool-name">delete_dashboard</span><span class="badge badge-cap">Dashboard write</span></div>
             <p class="tool-desc">List and manage Lovelace dashboards. Confirm-eligible.</p>
           </article>
         </section>
 
-        <!-- ===== Files, YAML, integrations & system ===== -->
-        <section class="tool-group" data-cap="system">
-          <div class="tool-group-head"><h2>Files, YAML, integrations &amp; system</h2></div>
+        <!-- ===== Service execution ===== -->
+        <section class="tool-group" data-cap="service">
+          <div class="tool-group-head"><h2>Service execution</h2></div>
 
-          <article class="tool" data-cap="system" data-search="list_files read_file write_file www themes custom_templates">
-            <div class="tool-head"><span class="tool-name">list_files</span><span class="tool-name">read_file</span><span class="tool-name">write_file</span><span class="badge badge-cap">cap_filesystem</span></div>
-            <p class="tool-desc">Read and write files under <code>www/</code>, <code>themes/</code>, and <code>custom_templates/</code>. Confirm-eligible.</p>
+          <article class="tool" data-cap="service" data-search="call_service call any service domain">
+            <div class="tool-head"><span class="tool-name">call_service</span><span class="badge badge-neutral">tree-scoped</span></div>
+            <p class="tool-desc">Call any Home Assistant service. <code>device_id</code> and <code>area_id</code> are flattened to an explicit entity list first; denied entities are silently dropped, and if all resolve to denied the call returns 403. Response data is scanned and inaccessible entity IDs are replaced with <code>&lt;redacted&gt;</code>. Physical-control and restart services need their capability flags.</p>
+            <dl><dt>params</dt><dd><code>domain</code> and <code>service</code> (two separate fields, both required, e.g. <code>light</code> and <code>turn_on</code>), <code>entity_id</code>, <code>device_id</code>, <code>area_id</code>, <code>data</code></dd></dl>
           </article>
 
-          <article class="tool" data-cap="system" data-search="get_yaml_config set_yaml_config configuration.yaml">
-            <div class="tool-head"><span class="tool-name">get_yaml_config</span><span class="tool-name">set_yaml_config</span><span class="badge badge-cap">cap_yaml_edit</span></div>
-            <p class="tool-desc">Read and edit <code>configuration.yaml</code> directly. Confirm-eligible.</p>
+          <article class="tool" data-cap="service" data-search="dry_run_service preview predicted outcome mesa">
+            <div class="tool-head"><span class="tool-name">dry_run_service</span><span class="badge badge-cap">Search &amp; discovery</span></div>
+            <p class="tool-desc">Preview a service call without running it. Resolves and flattens targets, reports the MESA verdict per entity, and returns a single <code>predicted_outcome</code> of <code>allowed</code>, <code>pending_approval</code>, or <code>denied</code>, folding the capability gate and MESA together. Same parameter shape as <code>call_service</code>.</p>
+          </article>
+        </section>
+
+        <!-- ===== Token introspection ===== -->
+        <section class="tool-group" data-cap="read">
+          <div class="tool-group-head"><h2>Token introspection</h2>
+          <p>Each token can always inspect its own state. No capability required, and you only ever see your own data.</p></div>
+
+          <article class="tool" data-cap="read" data-search="get_approval_status pending approvals confirm">
+            <div class="tool-head"><span class="tool-name">get_approval_status</span><span class="badge badge-success">no capability</span></div>
+            <p class="tool-desc">Check a Confirm-gated action you submitted. With an <code>approval_id</code>, returns its status and result; without one, lists all of this token's pending approvals, useful after a reconnect.</p>
           </article>
 
-          <article class="tool" data-cap="system" data-search="list_integrations set_integration_enabled enable disable">
-            <div class="tool-head"><span class="tool-name">list_integrations</span><span class="tool-name">set_integration_enabled</span><span class="badge badge-cap">cap_integration_write</span></div>
-            <p class="tool-desc">List integrations and enable or disable them. Confirm-eligible.</p>
+          <article class="tool" data-cap="read" data-search="get_audit_summary own audit entries">
+            <div class="tool-head"><span class="tool-name">get_audit_summary</span><span class="badge badge-success">no capability</span></div>
+            <p class="tool-desc">This token's own recent audit entries (request_id, time, method, resource, outcome), newest first, with an optional outcome filter.</p>
           </article>
 
-          <article class="tool" data-cap="system" data-search="list_backups create_backup no restore">
-            <div class="tool-head"><span class="tool-name">list_backups</span><span class="tool-name">create_backup</span><span class="badge badge-cap">cap_backup</span></div>
-            <p class="tool-desc">List and create backups. Restore is intentionally never exposed. Confirm-eligible.</p>
-          </article>
-
-          <article class="tool" data-cap="system" data-search="restart_ha restart home assistant">
-            <div class="tool-head"><span class="tool-name">restart_ha</span><span class="badge badge-cap">cap_restart</span></div>
-            <p class="tool-desc">Restart Home Assistant. Pass-through-exempt: even pass-through tokens must have this flag enabled.</p>
+          <article class="tool" data-cap="read" data-search="get_capability_summary persona tools gate map">
+            <div class="tool-head"><span class="tool-name">get_capability_summary</span><span class="badge badge-success">no capability</span></div>
+            <p class="tool-desc">This token's persona, effective capabilities, Confirm-gated capabilities, write scope, rate limits, and a tool-level gate map (<code>tools.usable</code> / <code>tools.needs_approval</code> / <code>tools.unavailable</code>).</p>
           </article>
         </section>
 
         <div class="callout note">
           <svg class="callout-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9.2"/><path d="M12 11v5"/><circle cx="12" cy="7.6" r="0.4" fill="currentColor"/></svg>
-          <div class="callout-body"><p class="callout-title">Tool availability follows capabilities</p><p>A token only sees the tools its capabilities unlock. After changing a capability, reconnect the MCP client to refresh the tool list. Several caps gate tools that are still rolling out; the changelog in SPEC.md tracks current availability.</p></div>
+          <div class="callout-body"><p class="callout-title">Helpers, dashboards, and backups run over a vetted command set</p><p>These tools hold no long-lived token and open no socket. ATM dispatches a fixed allowlist of Home Assistant WebSocket commands in-process (helper create / update / delete, Lovelace dashboard CRUD, and backup info / generate), validates each payload against the command's own schema, and runs it as an admin. Commands outside the allowlist are refused, and <code>restore_backup</code> is deliberately not included.</p></div>
+        </div>
+
+        <div class="callout warn">
+          <svg class="callout-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-9-9"/><path d="M16 4.5 21 3l-1.5 5"/></svg>
+          <div class="callout-body"><p class="callout-title">Reconnect after changing capabilities</p><p>A token only sees the tools its capabilities unlock, so after you change a capability your MCP client must reconnect to receive the updated tool list. In Claude Code, open <code>/mcp</code> and select <strong>Reconnect</strong>.</p></div>
         </div>
 
         <nav class="pager" id="pager" aria-label="Page navigation"></nav>

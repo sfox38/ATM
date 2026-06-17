@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Connect an AI client &middot; ATM docs</title>
   <meta name="description" content="Create a token, point your MCP client at /api/atm/mcp, and install the optional ATM agent skill." />
-  <link rel="icon" href="assets/favicon.svg" type="image/svg+xml" />
+  <link rel="icon" href="assets/atm-logo.png" type="image/png" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400..800&family=Hanken+Grotesk:wght@400..700&family=Roboto+Mono:wght@400;500&display=swap" rel="stylesheet" />
@@ -26,6 +26,11 @@
           <h1>Connect an AI client</h1>
           <p class="lede">ATM exposes an MCP endpoint at <code>/api/atm/mcp</code>. The examples below use Claude Code, but any MCP-capable client connects the same way: a URL and a bearer token.</p>
         </header>
+
+        <div class="callout tip">
+          <svg class="callout-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18h6M10 21h4M12 3a6 6 0 0 0-3.5 10.9c.5.4.9 1 1 1.6h5c.1-.6.5-1.2 1-1.6A6 6 0 0 0 12 3z"/></svg>
+          <div class="callout-body"><p class="callout-title">First time? Use the guided setup</p><p>The <a href="quickstart.html">Quick start</a> walks you through creating a token, granting one device, and testing the connection in a few minutes. This page is the reference for connecting any client by hand, including per-agent commands and the agent skill.</p></div>
+        </div>
 
         <h2>The five steps</h2>
         <div class="steps">
@@ -48,23 +53,23 @@
           <div class="step"><div class="step-body">
             <h3>Add the MCP server</h3>
             <p>Run this in your terminal, substituting your Home Assistant address and the token you copied.</p>
-            <pre class="code" data-lang="bash" data-label="Local address"><code>claude mcp add --transport http home-assistant \
+            <pre class="code" data-lang="bash" data-label="Local address"><code>claude mcp add --transport http atm-home-assistant \
   http://your-ha-address:8123/api/atm/mcp \
   --header "Authorization: Bearer atm_your_token_here"</code></pre>
             <p>If you reach Home Assistant through Nabu Casa or a custom domain, use that URL instead.</p>
-            <pre class="code" data-lang="bash" data-label="Remote address"><code>claude mcp add --transport http home-assistant \
+            <pre class="code" data-lang="bash" data-label="Remote address"><code>claude mcp add --transport http atm-home-assistant \
   https://your-instance.ui.nabu.casa/api/atm/mcp \
   --header "Authorization: Bearer atm_your_token_here"</code></pre>
           </div></div>
 
           <div class="step"><div class="step-body">
             <h3>Verify the connection</h3>
-            <p>Start a new Claude Code session and run <code>/mcp</code>. The <code>home-assistant</code> server should show as connected. Ask the client to list your entities or check a light to confirm.</p>
+            <p>Start a new Claude Code session and run <code>/mcp</code>. The <code>atm-home-assistant</code> server should show as connected. Ask the client to list your entities or check a light to confirm.</p>
           </div></div>
 
           <div class="step"><div class="step-body">
-            <h3>Install the agent skill <span class="badge badge-neutral">optional</span></h3>
-            <p>The agent skill teaches a connected client how to work with ATM's scoped permissions, the human-approval gate, and the per-entity safety layer, so it behaves correctly from the first turn. See below for both ways to get it.</p>
+            <h3>The agent skill <span class="badge badge-neutral">optional</span></h3>
+            <p>You do not have to brief the client yourself. On connection, ATM already sends it a short, token-aware primer (see below) that links to the full guide it can fetch on demand. Installing the skill is an optional extra that loads the complete guidance from the first turn.</p>
           </div></div>
 
         </div>
@@ -100,10 +105,6 @@
           <svg class="callout-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-9-9"/><path d="M16 4.5 21 3l-1.5 5"/></svg>
           <div class="callout-body"><p class="callout-title">Reconnect after changing capabilities</p><p>After enabling or disabling a capability flag, your MCP client must reconnect to receive the updated tool list. In Claude Code, open <code>/mcp</code> and select <strong>Reconnect</strong>.</p></div>
         </div>
-
-        <h2>Using third-party MCP servers</h2>
-        <p>Third-party MCP servers such as ha-mcp run as standalone processes and call Home Assistant's native REST API at <code>/api/</code>. Home Assistant's authentication only accepts long-lived access tokens; it has no knowledge of ATM tokens. As a result, an ATM token cannot replace an LLAT for these servers.</p>
-        <p>If you need scoped, audited, revocable access, point the client at ATM's own MCP endpoint instead. ATM's 20 native HA MCP tools cover the same everyday operations and apply your permission tree on every call. For clients that specifically require a third-party server's extended tool set with no restrictions, use an LLAT directly.</p>
 
         <nav class="pager" id="pager" aria-label="Page navigation"></nav>
       </div>

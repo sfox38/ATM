@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>ATM &middot; Advanced Token Management for Home Assistant</title>
   <meta name="description" content="ATM is a security-focused, drop-in replacement for Home Assistant's MCP server. Every AI agent gets its own scoped, rate-limited, audited, instantly revocable token." />
-  <link rel="icon" href="assets/favicon.svg" type="image/svg+xml" />
+  <link rel="icon" href="assets/atm-logo.png" type="image/png" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400..800&family=Hanken+Grotesk:wght@400..700&family=Roboto+Mono:wght@400;500&display=swap" rel="stylesheet" />
@@ -119,14 +119,14 @@
                 <tr><th scope="col">Capability</th><th scope="col">LLAT + native MCP</th><th scope="col">ATM token</th></tr>
               </thead>
               <tbody>
-                <tr><td>MCP tool compatibility</td><td>20 native tools</td><td>Same 20 tools, identical names and responses, plus 16 more</td></tr>
+                <tr><td>MCP tool compatibility</td><td>20 native tools</td><td>Same 20 tools, identical names and responses, plus 63 more</td></tr>
                 <tr><td>Entity filtering</td><td>Binary: expose or hide, same for all clients</td><td>Four permission states, per token</td></tr>
                 <tr><td>Per-client control</td><td><span class="no">No, all clients share one exposed set</span></td><td><span class="yes">Yes, independent permissions per token</span></td></tr>
                 <tr><td>Read-only access</td><td><span class="no">No</span></td><td><span class="yes">Yes, READ allows reads and blocks writes</span></td></tr>
                 <tr><td>Audit trail</td><td><span class="no">None</span></td><td><span class="yes">Every request logged with outcome and entity</span></td></tr>
                 <tr><td>Rate limiting</td><td><span class="no">None</span></td><td><span class="yes">Per token, configurable</span></td></tr>
                 <tr><td>Expiry</td><td><span class="no">None</span></td><td><span class="yes">Optional, auto-archived on expiry</span></td></tr>
-                <tr><td>Revocation</td><td>Revoke the LLAT on the HA profile page</td><td><span class="yes">Instant, terminates open connections immediately</span></td></tr>
+                <tr><td>Revocation</td><td>Revoke the LLAT on the HA profile page</td><td><span class="yes">Instant; the token's next request is rejected</span></td></tr>
                 <tr><td>Sensitive attribute scrubbing</td><td><span class="no">None</span></td><td><span class="yes">Always applied</span></td></tr>
                 <tr><td>Client reconfiguration</td><td><code>/api/mcp</code></td><td><code>/api/atm/mcp</code> (URL change only)</td></tr>
               </tbody>
@@ -138,7 +138,7 @@
         <!-- ===================== WHAT YOU GET ===================== -->
         <section class="reveal">
           <h2>Three layers between an agent and your home</h2>
-          <p class="lede">Every request runs the same gauntlet, in order. ATM resolves and flattens the target to explicit entities, checks the token's permissions and capabilities, and only then lets the per-entity safety layer have the final say.</p>
+          <p class="lede">Every request runs the same gauntlet, in order. ATM resolves and flattens the target to explicit entities, checks the token's permissions and capabilities, and only then lets MESA, the semantic safety net, have the final say, a backstop that holds even over a token that was granted too much.</p>
 
           <div class="grid-3">
             <div class="card">
@@ -155,9 +155,9 @@
             </div>
             <div class="card">
               <div class="card-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 12.5l2 2 4-4.5"/><path d="M12 3 4 6v5c0 4.5 3.2 7.6 8 9 4.8-1.4 8-4.5 8-9V6z"/></svg></div>
-              <h3>Per-entity safety</h3>
-              <p>MESA runs last, on the flattened entity list. Some entities are read-only or need a human's confirmation by nature, no matter what the token allows.</p>
-              <a class="card-go" href="capabilities.html#mesa">Pass-through &amp; MESA <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg></a>
+              <h3>Semantic safety profiles</h3>
+              <p>MESA stores a semantic profile for each entity: what it is, how sensitive it is, and how it should be treated by your AI agent, not just allow or deny. Describe your home's nature once, and every agent inherits the safe treatment: a lock or camera stays read-only or confirmation-only because of what it is, no matter which token is asking.</p>
+              <a class="card-go" href="mesa.html">MESA <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg></a>
             </div>
           </div>
         </section>
@@ -173,11 +173,11 @@
               <p>Add ATM through HACS or by hand, restart, and add the integration. One ATM instance per Home Assistant.</p>
               <span class="card-go">Installation <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg></span>
             </a>
-            <a class="card card-link" href="connect.html">
+            <a class="card card-link" href="quickstart.html">
               <span class="card-ix">02 &middot; Connect</span>
-              <h3>Connect an AI client</h3>
-              <p>Create a token, point your MCP client at <code>/api/atm/mcp</code>, and install the optional agent skill.</p>
-              <span class="card-go">Connect a client <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg></span>
+              <h3>Quick start</h3>
+              <p>The guided setup creates your first token, gives it one device, connects your agent, and tests it.</p>
+              <span class="card-go">Quick start <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg></span>
             </a>
             <a class="card card-link" href="permissions.html">
               <span class="card-ix">03 &middot; Scope</span>
@@ -188,7 +188,7 @@
             <a class="card card-link" href="tools.html">
               <span class="card-ix">04 &middot; Operate</span>
               <h3>Know the tools</h3>
-              <p>Thirty-six tools, from <code>get_state</code> to <code>create_automation</code>, each scoped to the token and its capabilities.</p>
+              <p>Eighty-three tools, from <code>get_state</code> to <code>create_automation</code>, each scoped to the token and its capabilities.</p>
               <span class="card-go">Tools reference <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg></span>
             </a>
           </div>

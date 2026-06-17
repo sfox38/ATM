@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Security &middot; ATM docs</title>
   <meta name="description" content="How ATM handles tokens, enforces permissions, scrubs secrets, and shuts the door: token design, the kill switch, request limits, and lifecycle." />
-  <link rel="icon" href="assets/favicon.svg" type="image/svg+xml" />
+  <link rel="icon" href="assets/atm-logo.png" type="image/png" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400..800&family=Hanken+Grotesk:wght@400..700&family=Roboto+Mono:wght@400;500&display=swap" rel="stylesheet" />
@@ -24,7 +24,7 @@
         <header class="page-head">
           <p class="breadcrumb"><a href="index.html">Docs</a> / Reference / Security</p>
           <h1>Security</h1>
-          <p class="lede">ATM exists to be the careful layer between an AI agent and your home. These are the guarantees it makes about tokens, enforcement, and the secrets that should never leave Home Assistant.</p>
+          <p class="lede">ATM is the security layer between an AI agent and your home. These are the guarantees it makes about tokens, enforcement, and the secrets that should never leave Home Assistant.</p>
         </header>
 
         <h2>Token design</h2>
@@ -51,7 +51,7 @@
           <li>Service calls with <code>device_id</code> or <code>area_id</code> are always flattened to an explicit entity list first; denied entities are dropped. If all resolve to denied, ATM returns 403 rather than calling HA with an empty list.</li>
           <li>Service response data is scanned for entity IDs the token cannot access, and for fields whose key name looks like a secret (<code>token</code>, <code>password</code>, <code>api_key</code>, <code>secret</code>, and similar). Both become <code>&lt;redacted&gt;</code>.</li>
           <li>If an entity ID in a service call does not exist in the registry, ATM returns 403. Entity creation through service calls is never permitted.</li>
-          <li>Physical-control services require <code>cap_physical_control</code> in addition to WRITE, even for pass-through tokens.</li>
+          <li>Physical-control services require the <strong>Physical control</strong> capability in addition to WRITE, even for pass-through tokens.</li>
           <li>Mutating a helper or a scene checks the target, not just the capability. <code>edit_helper</code> and <code>delete_helper</code> resolve the helper back to its entity and require it to be WRITE-accessible; <code>edit_scene</code> and <code>delete_scene</code> require every current member of the existing scene to be WRITE-accessible. A capability alone cannot reach a helper or scene outside the token's permission tree, and a guessed id returns the same "not found" as a real one.</li>
         </ul>
 
@@ -61,25 +61,25 @@
         <h2 id="sensitive-attributes">Sensitive attribute scrubbing</h2>
         <p>Four named attributes are removed from every state response, for every token type and permission level.</p>
         <dl class="kv">
-          <div class="kv-row"><dt>entity_picture</dt><dd>Image and icon URLs, often carrying auth tokens or private asset paths.</dd></div>
-          <div class="kv-row"><dt>stream_url</dt><dd>Direct stream URLs (for example from cameras) that may contain credentials or expose internal topology.</dd></div>
           <div class="kv-row"><dt>access_token</dt><dd>Authentication tokens embedded in entity state by some integrations.</dd></div>
+          <div class="kv-row"><dt>entity_picture</dt><dd>Image and icon URLs, often carrying auth tokens or private asset paths.</dd></div>
           <div class="kv-row"><dt>still_image_url</dt><dd>Static image URLs that may contain sensitive identifiers or auth parameters.</dd></div>
+          <div class="kv-row"><dt>stream_url</dt><dd>Direct stream URLs (for example from cameras) that may contain credentials or expose internal topology.</dd></div>
         </dl>
         <p>Beyond that fixed list, any attribute or response field whose <em>key name</em> contains a secret-like marker (<code>token</code>, <code>password</code>, <code>secret</code>, <code>api_key</code>, <code>authorization</code>, <code>credential</code>, <code>session</code>) is dropped or redacted as well. This catches secrets that third-party integrations surface under their own attribute names. Over-redaction is the deliberate trade-off here.</p>
         <p>This applies to high-permission scoped tokens and pass-through tokens alike. Permission grants control which <em>actions</em> a token can take, not which <em>secrets</em> it can read. Scrubbing happens on the proxy views, on the MCP tools, and inside service-response filtering.</p>
 
         <h2 id="log-redaction">Log redaction</h2>
-        <p>The <code>cap_log_read</code> tools (<code>get_logs</code> and <code>/api/atm/logs</code>) return Home Assistant system-log records. Before any record leaves ATM, its message and traceback are run through a redactor that removes ATM tokens, JWTs and long-lived access tokens (anything shaped like a Home Assistant token), and credentials embedded in URLs (<code>?token=&hellip;</code>, <code>https://user:pass@host</code>). A leaked token in a log line is never handed back to a caller.</p>
+        <p>The <strong>Log read</strong> tools (<code>get_logs</code> and <code>/api/atm/logs</code>) return Home Assistant system-log records. Before any record leaves ATM, its message and traceback are run through a redactor that removes ATM tokens, JWTs and long-lived access tokens (anything shaped like a Home Assistant token), and credentials embedded in URLs (<code>?token=&hellip;</code>, <code>https://user:pass@host</code>). A leaked token in a log line is never handed back to a caller.</p>
 
         <h2 id="residual-exposure">What scrubbing cannot guarantee</h2>
         <div class="callout note">
           <svg class="callout-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 9v4"/><path d="M12 17h.01"/><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z"/></svg>
           <div class="callout-body"><p class="callout-title">A handful of capabilities are sensitive grants by design</p><p>A few read capabilities open broad channels, and the redaction above is best-effort pattern matching on top of them, not a guarantee. Grant them only to tokens you trust:</p>
           <ul>
-            <li><strong>cap_log_read</strong> exposes system logs. Logs are free-form text from every integration; the redactor catches token-shaped and URL-credential patterns, but cannot recognise every possible secret.</li>
-            <li><strong>cap_service_response</strong> returns whatever a called service replies with. ATM redacts entity IDs and secret-named fields, but a service can return sensitive data under an ordinary key name.</li>
-            <li><strong>cap_diagnostics</strong> (and the device tools) reveal installation topology: Home Assistant version, integration health, device manufacturer, model, and firmware. Useful for troubleshooting, broader than controlling a single entity.</li>
+            <li><strong>Diagnostics</strong> (and the device tools) reveal installation topology: Home Assistant version, integration health, device manufacturer, model, and firmware. Useful for troubleshooting, broader than controlling a single entity.</li>
+            <li><strong>Log read</strong> exposes system logs. Logs are free-form text from every integration; the redactor catches token-shaped and URL-credential patterns, but cannot recognise every possible secret.</li>
+            <li><strong>Service response data</strong> returns whatever a called service replies with. ATM redacts entity IDs and secret-named fields, but a service can return sensitive data under an ordinary key name.</li>
           </ul>
           </div>
         </div>

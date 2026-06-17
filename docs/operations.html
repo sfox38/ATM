@@ -3,9 +3,9 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Operations &amp; API &middot; ATM docs</title>
+  <title>Operations &middot; ATM docs</title>
   <meta name="description" content="Run ATM day to day: rate limiting, per-token sensors, global settings, the audit log, HA events, and the full route reference." />
-  <link rel="icon" href="assets/favicon.svg" type="image/svg+xml" />
+  <link rel="icon" href="assets/atm-logo.png" type="image/png" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400..800&family=Hanken+Grotesk:wght@400..700&family=Roboto+Mono:wght@400;500&display=swap" rel="stylesheet" />
@@ -22,13 +22,13 @@
       <div class="content prose">
 
         <header class="page-head">
-          <p class="breadcrumb"><a href="index.html">Docs</a> / Reference / Operations &amp; API</p>
-          <h1>Operations &amp; API</h1>
-          <p class="lede">What ATM exposes once it is running: per-token rate limits and sensors, global settings, the audit log, the events it fires, and the full set of routes.</p>
+          <p class="breadcrumb"><a href="index.html">Docs</a> / Reference / Operations</p>
+          <h1>Operations</h1>
+          <p class="lede">What ATM exposes once it is running: per-token rate limits and sensors, global settings, the audit log, the events it fires, and the token-facing proxy routes. The admin API has its own <a href="admin-api.html">reference</a>.</p>
         </header>
 
         <h2>Rate limiting</h2>
-        <p>Every token has a sliding-window rate limit. The defaults are 60 requests per minute with a burst of 10 per second, both configurable per token. Setting <code>rate_limit_requests</code> to 0 disables rate limiting for that token.</p>
+        <p>Every token has a sliding-window rate limit. The defaults are 60 requests per minute with a burst of 10 per second, both configurable per token. Setting <code>rate_limit_requests</code> to 0 disables rate limiting for that token. Pass-through tokens get the same default limits and are rate limited like any other token; the create dialog hides the inputs while pass-through is selected, so adjust them afterward on the token's detail page.</p>
         <p>A rate-limited request returns HTTP 429 with a <code>Retry-After</code> header. Successful responses carry the current limit state.</p>
         <pre class="code" data-lang="http" data-label="Response headers"><code>X-RateLimit-Limit: 60
 X-RateLimit-Remaining: 47
@@ -41,12 +41,12 @@ X-RateLimit-Reset: 1712345678</code></pre>
           <table>
             <thead><tr><th scope="col">Entity</th><th scope="col">Reports</th></tr></thead>
             <tbody>
-              <tr><td><code>sensor.atm_claude_code_status</code></td><td><code>active</code>, <code>expired</code>, or <code>revoked</code></td></tr>
-              <tr><td><code>sensor.atm_claude_code_request_count</code></td><td>Total requests made with this token</td></tr>
               <tr><td><code>sensor.atm_claude_code_denied_count</code></td><td>Requests blocked by permission rules</td></tr>
-              <tr><td><code>sensor.atm_claude_code_rate_limit_hits</code></td><td>Times this token has been rate limited</td></tr>
-              <tr><td><code>sensor.atm_claude_code_last_access</code></td><td>Timestamp of the most recent request</td></tr>
               <tr><td><code>sensor.atm_claude_code_expires_in</code></td><td>Days until expiry, or <code>No expiry</code></td></tr>
+              <tr><td><code>sensor.atm_claude_code_last_access</code></td><td>Timestamp of the most recent request</td></tr>
+              <tr><td><code>sensor.atm_claude_code_rate_limit_hits</code></td><td>Times this token has been rate limited</td></tr>
+              <tr><td><code>sensor.atm_claude_code_request_count</code></td><td>Total requests made with this token</td></tr>
+              <tr><td><code>sensor.atm_claude_code_status</code></td><td><code>active</code>, <code>expired</code>, or <code>revoked</code></td></tr>
             </tbody>
           </table>
         </div>
@@ -57,19 +57,29 @@ X-RateLimit-Reset: 1712345678</code></pre>
           <table>
             <thead><tr><th scope="col">Setting</th><th scope="col">Default</th><th scope="col">Effect</th></tr></thead>
             <tbody>
-              <tr><td>Kill switch</td><td>Off</td><td>When on, proxy and MCP routes are unregistered entirely</td></tr>
-              <tr><td>Disable all logging</td><td>Off</td><td>Suppresses all auditing</td></tr>
-              <tr><td>Log allowed requests</td><td>On</td><td>Record successful requests</td></tr>
-              <tr><td>Log denied requests</td><td>On</td><td>Record blocked requests and unsupported MCP methods</td></tr>
-              <tr><td>Log rate-limited requests</td><td>On</td><td>Record rate-limited requests</td></tr>
-              <tr><td>Log entity names</td><td>On</td><td>Include entity IDs in audit entries</td></tr>
-              <tr><td>Log client IP</td><td>On</td><td>Include caller IP in audit entries</td></tr>
-              <tr><td>Notify on rate limit</td><td>Off</td><td>Raise an HA notification when a token is rate limited</td></tr>
               <tr><td>Audit log flush interval</td><td>15 min</td><td>How often the in-memory log is snapshotted to disk; set to "Never" to disable persistence</td></tr>
+              <tr><td>Disable all logging</td><td>Off</td><td>Suppresses all auditing</td></tr>
+              <tr><td>Kill switch</td><td>Off</td><td>When on, proxy and MCP routes are unregistered entirely</td></tr>
+              <tr><td>Log allowed requests</td><td>On</td><td>Record successful requests</td></tr>
+              <tr><td>Log client IP</td><td>On</td><td>Include caller IP in audit entries</td></tr>
+              <tr><td>Log denied requests</td><td>On</td><td>Record blocked requests and unsupported MCP methods</td></tr>
+              <tr><td>Log entity names</td><td>On</td><td>Include entity IDs in audit entries</td></tr>
+              <tr><td>Log rate-limited requests</td><td>On</td><td>Record rate-limited requests</td></tr>
               <tr><td>Maximum log entries</td><td>10,000</td><td>Capacity of the buffer and on-disk snapshot; reducing it trims the oldest entries immediately</td></tr>
+              <tr><td>MESA mode</td><td>Advisory</td><td>Per-entity safety enforcement: off, advisory, or enforced. See <a href="mesa.html">MESA</a></td></tr>
+              <tr><td>Notify on approval</td><td>On</td><td>Raise an HA notification, with a deep link, when an action needs admin approval</td></tr>
+              <tr><td>Notify on rate limit</td><td>Off</td><td>Raise an HA notification when a token is rate limited</td></tr>
+              <tr><td>Theme</td><td>Auto</td><td>This changes how the panel looks for you and does not sync to other admins or devices</td></tr>
             </tbody>
           </table>
         </div>
+
+        <h2 id="advanced-token-options">Advanced token options</h2>
+        <p>Two per-token options sit outside the capability matrix, in the panel's <strong>Tool Announcement</strong> card on the token detail page (and settable through <a href="admin-api.html#tokens">PATCH</a>).</p>
+        <dl class="kv">
+          <div class="kv-row"><dt>Always announce all tools</dt><dd>Off by default: a token's <code>tools/list</code> advertises only the tools its capabilities unlock and hides the rest. Turn it on to advertise the full tool list regardless of gating. Calls are still gated, so this changes what a client sees, not what it can do.</dd></div>
+          <div class="kv-row"><dt>Limit to Assist-exposed entities</dt><dd>Pass-through tokens only, off by default. A pass-through token normally sees every non-ATM entity; enable this to additionally narrow it to the entities exposed to Home Assistant Assist. It is ignored for scoped tokens, which scope by the permission tree, so the toggle is disabled unless pass-through mode is on.</dd></div>
+        </dl>
 
         <h2>Audit log</h2>
         <p>ATM keeps a circular buffer of requests, viewable in the panel's audit tab or through the admin API. Each entry records a request ID (matching <code>X-ATM-Request-ID</code>), timestamp, token ID and name, method, resource path, outcome, and client IP.</p>
@@ -80,10 +90,10 @@ X-RateLimit-Reset: 1712345678</code></pre>
             <tbody>
               <tr><td><span class="badge badge-success">allowed</span></td><td>The request succeeded.</td></tr>
               <tr><td><span class="badge badge-error">denied</span></td><td>Blocked by permission rules, the blocklist, or a RED / NO_ACCESS result. Includes permission-based 404s.</td></tr>
-              <tr><td><span class="badge badge-neutral">not_found</span></td><td>The entity is genuinely absent from both HA state and the registry. Identical to <code>denied</code> for the caller, but distinguished here so you can tell a missing entity from a permission wall.</td></tr>
-              <tr><td><span class="badge badge-cap">rate_limited</span></td><td>The token exceeded its rate limit.</td></tr>
-              <tr><td><span class="badge badge-info">not_implemented</span></td><td>The client called an MCP method ATM does not support. A protocol gap, not a permission block; does not increment the denied counter.</td></tr>
               <tr><td><span class="badge badge-info">invalid_request</span></td><td>The request was structurally malformed and rejected before permission checks, for example a template with a syntax error.</td></tr>
+              <tr><td><span class="badge badge-neutral">not_found</span></td><td>The entity is genuinely absent from both HA state and the registry. Identical to <code>denied</code> for the caller, but distinguished here so you can tell a missing entity from a permission wall.</td></tr>
+              <tr><td><span class="badge badge-info">not_implemented</span></td><td>The client called an MCP method ATM does not support. A protocol gap, not a permission block; does not increment the denied counter.</td></tr>
+              <tr><td><span class="badge badge-cap">rate_limited</span></td><td>The token exceeded its rate limit.</td></tr>
             </tbody>
           </table>
         </div>
@@ -96,36 +106,18 @@ X-RateLimit-Reset: 1712345678</code></pre>
           <table>
             <thead><tr><th scope="col">Event</th><th scope="col">Fired when</th></tr></thead>
             <tbody>
-              <tr><td><code>atm_token_revoked</code></td><td>A token is revoked</td></tr>
-              <tr><td><code>atm_token_expired</code></td><td>A token's expiry passes and it is first accessed</td></tr>
-              <tr><td><code>atm_token_rotated</code></td><td>A token's raw value is rotated</td></tr>
+              <tr><td><code>atm_approval_resolved</code></td><td>A pending approval is approved, rejected, expired, or cancelled</td></tr>
               <tr><td><code>atm_rate_limited</code></td><td>A token exceeds its rate limit (once per token per minute)</td></tr>
+              <tr><td><code>atm_token_expired</code></td><td>A token's expiry passes and it is first accessed</td></tr>
+              <tr><td><code>atm_token_revoked</code></td><td>A token is revoked</td></tr>
+              <tr><td><code>atm_token_rotated</code></td><td>A token's raw value is rotated</td></tr>
             </tbody>
           </table>
         </div>
 
-        <h2>Route reference</h2>
+        <h2 id="route-reference">Route reference</h2>
         <h3>Admin API</h3>
-        <p>Requires a Home Assistant session and the admin role.</p>
-        <pre class="code" data-lang="http" data-label="Admin API"><code>GET/POST   /api/atm/admin/tokens                       List or create tokens
-GET/PATCH  /api/atm/admin/tokens/{id}                  Get or update a token
-DELETE     /api/atm/admin/tokens/{id}                  Revoke a token
-GET/PUT    /api/atm/admin/tokens/{id}/permissions      Read or replace the tree
-PATCH      /api/atm/admin/tokens/{id}/permissions/domains/{node}
-PATCH      /api/atm/admin/tokens/{id}/permissions/devices/{node}
-PATCH      /api/atm/admin/tokens/{id}/permissions/entities/{node}
-GET        /api/atm/admin/tokens/{id}/resolve/{entity}  Explain effective permission
-POST       /api/atm/admin/tokens/{id}/rotate           Generate a new raw value
-GET        /api/atm/admin/tokens/{id}/scope            Readable / writable entities
-GET        /api/atm/admin/tokens/{id}/stats            Request counters
-GET        /api/atm/admin/tokens/{id}/audit            Audit log for one token
-GET        /api/atm/admin/tokens/archived              List archived tokens
-DELETE     /api/atm/admin/tokens/archived/{id}         Delete an archived record
-GET        /api/atm/admin/entities                     Entity tree
-GET        /api/atm/admin/info                         Integration version info
-GET        /api/atm/admin/audit                        Global audit log
-GET/PATCH  /api/atm/admin/settings                     Global settings
-DELETE     /api/atm/admin/wipe                         Wipe all tokens and settings</code></pre>
+        <p>The admin routes (tokens, permissions, approvals, MESA profiles, entity hints, settings, and the rest) now have their own <a href="admin-api.html">Admin API reference</a>, complete with payload schemas. They require a Home Assistant session and the admin role.</p>
 
         <h3>Proxy API</h3>
         <p>Requires an ATM token in the <code>Authorization: Bearer</code> header.</p>

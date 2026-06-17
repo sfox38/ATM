@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>MESA &middot; ATM docs</title>
+  <meta name="description" content="MESA is ATM's per-entity safety layer: it runs last on the flattened entity list and governs each entity's control nature, no matter what a token allows." />
+  <link rel="icon" href="assets/atm-logo.png" type="image/png" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400..800&family=Hanken+Grotesk:wght@400..700&family=Roboto+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="assets/atm-docs.css" />
+</head>
+<body data-page="mesa" data-toc>
+  <a class="skip-link" href="#main">Skip to content</a>
+  <header class="site-header" id="site-header"></header>
+  <div class="sidebar-backdrop" data-close-nav></div>
+
+  <div class="layout" id="layout">
+    <aside class="sidebar" id="sidebar"></aside>
+    <main class="main" id="main">
+      <div class="content prose">
+
+        <header class="page-head">
+          <p class="breadcrumb"><a href="index.html">Docs</a> / Concepts / MESA</p>
+          <h1>MESA</h1>
+          <p class="lede">MESA is the third and last gate between an agent and your home. The permission tree decides which entities a token can touch and capabilities decide whether it can do the powerful things at all; MESA decides, per entity, whether an action is safe by the entity's own nature, no matter what the token allows.</p>
+        </header>
+
+        <h2>What MESA is</h2>
+        <p>MESA is developed independently of ATM. MESA (a semantic safety layer) attaches a small profile to an entity, a domain, an area, or the whole deployment, describing how that entity should be treated: free to control, read-only, or in need of a human's confirmation. ATM imports the mesa-core library and does not reimplement it; this page covers how MESA is wired into ATM and how to use it. For the profile schema, the resolver, and the rest of the model, see the <a href="https://github.com/sfox38/mesa-core" target="_blank" rel="noopener">mesa-core repository</a>.</p>
+
+        <div class="callout note">
+          <svg class="callout-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9.2"/><path d="M12 11v5"/><circle cx="12" cy="7.6" r="0.4" fill="currentColor"/></svg>
+          <div class="callout-body"><p class="callout-title">Orthogonal to the token</p><p>MESA is per-entity nature policy, independent of the per-token tree. It applies to every token, including pass-through tokens, and to the native control tools, because it asks a different question: not "may this token act here" but "is acting on this entity safe at all".</p></div>
+        </div>
+
+        <h2 id="why-profiles">Why a profile, not a flag</h2>
+        <p>A permission says <em>this token may not touch that entity</em>. A semantic profile says something more durable: <em>what the entity is</em>. It records the entity's nature, the tags that describe its role, how private its data is, and how it should be operated, and ATM derives the safe treatment from that. Describing your home this way, instead of as a pile of per-token allow and deny rules, pays off in several ways.</p>
+        <ul>
+          <li><strong>Describe once, applies to everyone.</strong> A profile lives on the entity, the domain, or the area, never on a token. Every agent you connect, scoped or pass-through, inherits the same treatment, so you never re-encode "the front door is dangerous" in each token's tree.</li>
+          <li><strong>Meaning, not just allow or deny.</strong> A profile records <em>why</em> an entity is sensitive (an exterior lock, a camera that sees a bedroom, a child's room), so the right control mode follows from the nature and the decision is explainable rather than a bare flag.</li>
+          <li><strong>Safe by inheritance.</strong> Profiles cascade from deployment defaults to domain to area to entity. Say "all locks need confirmation" once and every lock you add next year is covered, with no new rule to remember; risky domains start conservative out of the box.</li>
+          <li><strong>A shared vocabulary.</strong> Tags come from a canonical set, not free text, so profiles stay consistent and machine-checkable across the whole install instead of drifting into one-off notes.</li>
+          <li><strong>It tells the agent why.</strong> An entity's control mode and nature are surfaced to the AI before it acts, so a well-behaved agent asks for confirmation or backs off on its own, rather than failing into a wall and retrying.</li>
+          <li><strong>It stays honest.</strong> ATM validates profiles against the automations that reference your entities, flagging conflicts and orphaned declarations as your configuration changes, so the model does not quietly rot.</li>
+        </ul>
+
+        <h2>Where MESA runs</h2>
+        <p>Every service-call path resolves and flattens its target to explicit entity IDs, applies the token's capability gates, and only then hands the entity list to MESA. MESA never sees an entity ATM has already denied; it has the final say on what survives. When MESA is off or no runtime is loaded, it reverts to allow-all and changes nothing.</p>
+        <p>MESA governs <strong>writes</strong>. Reads are scoped by the permission tree, not by MESA, so a read-only or confirm entity is still readable if the token can read it.</p>
+
+        <h2>An entity's control mode</h2>
+        <p>Each entity resolves to one effective <code>control_mode</code>, surfaced in <code>describe_entity</code>, <code>search_entities</code>, and <code>find_available_actions</code> so an agent can see it without trial and error.</p>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th scope="col">control_mode</th><th scope="col">What it means for a write</th></tr></thead>
+            <tbody>
+              <tr><td><span class="badge badge-success">autonomous</span></td><td>The agent may control the entity directly, subject to the token and capabilities.</td></tr>
+              <tr><td><span class="badge badge-cap">confirm</span></td><td>The action is held for a human. Under enforced mode it becomes a pending approval; under advisory mode it runs but the agent is told why it was risky.</td></tr>
+              <tr><td><span class="badge badge-neutral">read_only</span></td><td>Control is refused by the entity's nature. This holds even in advisory mode; read_only is a property of the entity, not a policy preference.</td></tr>
+              <tr><td><span class="badge badge-error">prohibited</span></td><td>Control is refused outright.</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h2>Deployment mode</h2>
+        <p>A single deployment setting, <code>mesa_mode</code>, decides how strict MESA is overall. It is set in the panel's <strong>Settings</strong> tab and reported by <code>get_overview</code>.</p>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th scope="col">mesa_mode</th><th scope="col">Effect</th></tr></thead>
+            <tbody>
+              <tr><td><span class="badge badge-neutral">off</span></td><td>MESA is disabled entirely. Every entity is allow-all as far as MESA is concerned.</td></tr>
+              <tr><td><span class="badge badge-cap">advisory</span> <span class="badge badge-success">default</span></td><td>MESA warns but does not block, and the warning is surfaced to the agent. The one exception is read_only, which always blocks because it is entity nature.</td></tr>
+              <tr><td><span class="badge badge-error">enforced</span></td><td>MESA blocks prohibited and read_only entities and routes every confirm entity through the admin approval gate.</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>The default is <strong>advisory</strong> on purpose: MESA ships conservative baselines for inherently risky domains (locks and alarms start out prohibited), so enforced is opt-in rather than a surprise wall on day one. A profile can also carry its own <code>enforcement_mode</code>, so you can enforce specific entities, domains, or areas while the deployment stays advisory.</p>
+
+        <h2 id="mesa-and-approvals">Confirm and the approval gate</h2>
+        <p>A <code>confirm</code> entity under enforced mode produces the same kind of <a href="capabilities.html">pending approval</a> as a capability set to confirm: the action is saved, a notification is raised, and the in-panel <strong>Approvals</strong> queue holds it until an admin approves or rejects. On approval, MESA re-evaluates before the action runs, so an entity that became read-only or prohibited in the meantime is still refused. Under advisory mode nothing is held; the call proceeds and the agent receives an advisory note explaining the entity was marked confirm.</p>
+
+        <h2>Using MESA in the panel</h2>
+        <p>The <strong>MESA</strong> tab is where you author profiles. Profiles exist at four levels and the most specific one wins, with the rest inherited:</p>
+        <dl class="kv">
+          <div class="kv-row"><dt>Entity</dt><dd>A profile for one entity_id. The most specific level.</dd></div>
+          <div class="kv-row"><dt>Domain</dt><dd>A baseline for a whole domain (for example, all locks).</dd></div>
+          <div class="kv-row"><dt>Area</dt><dd>A baseline for everything in an area.</dd></div>
+          <div class="kv-row"><dt>Deployment defaults</dt><dd>The fallback applied when nothing more specific matches.</dd></div>
+        </dl>
+        <p>The editor enforces a few guardrails so a profile is always valid:</p>
+        <ul>
+          <li>Profile keys are drawn from the live registry, so you describe entities, domains, and areas that actually exist.</li>
+          <li>Tags come from a canonical vocabulary with autocomplete; free text is not accepted, and a profile holds up to six tags.</li>
+          <li>Leaving an editor with unsaved changes prompts before discarding them.</li>
+        </ul>
+        <p>An <strong>Issues</strong> view validates your profiles against the automations that reference them and lists orphaned declarations, so a profile that no longer matches anything is easy to spot. The full panel walkthrough is in the <a href="panel.html#mesa-tab">Panel guide</a>.</p>
+
+        <figure class="screenshot-placeholder">
+          <!-- SCREENSHOT: mesa-tab -->
+          <div class="shot-box">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="8.5" cy="10" r="1.6"/><path d="m21 16-4.5-4.5L9 19"/></svg>
+            <span class="shot-label">Screenshot: MESA tab, profiles list</span>
+          </div>
+          <figcaption>The MESA tab, listing profiles by control mode.</figcaption>
+        </figure>
+
+        <figure class="screenshot-placeholder">
+          <!-- SCREENSHOT: mesa-editor -->
+          <div class="shot-box">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="8.5" cy="10" r="1.6"/><path d="m21 16-4.5-4.5L9 19"/></svg>
+            <span class="shot-label">Screenshot: profile editor (mode + tags)</span>
+          </div>
+          <figcaption>The profile editor, with control mode and canonical tags.</figcaption>
+        </figure>
+
+        <h2 id="mesa-tools">The MESA tools</h2>
+        <p>An agent can read MESA profiles through four retrieval tools, all gated by <strong>Config read</strong> (profiles are configuration metadata, the same sensitivity class as <code>get_config</code>). They are token-scoped: the handlers and resolver only ever see entities the token can read, and every count, cursor, and fingerprint is relative to that scope, so there is no way to enumerate entities outside it. An out-of-scope or nonexistent entity returns the same "not found" envelope.</p>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th scope="col">Tool</th><th scope="col">Returns</th></tr></thead>
+            <tbody>
+              <tr><td><code>mesa_explain_profile</code></td><td>Why an entity resolved the way it did, field by field, including conflicts.</td></tr>
+              <tr><td><code>mesa_get_caller_context</code></td><td>The MESA context for the current caller.</td></tr>
+              <tr><td><code>mesa_get_profile</code></td><td>The stored and effective profile for one entity.</td></tr>
+              <tr><td><code>mesa_query_profiles</code></td><td>Profiles in scope, filterable and paginated.</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>These appear in the <a href="tools.html#mesa-tools">Tools reference</a> alongside the rest of the surface.</p>
+
+        <div class="callout tip">
+          <svg class="callout-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18h6M10 21h4M12 3a6 6 0 0 0-3.5 10.9c.5.4.9 1 1 1.6h5c.1-.6.5-1.2 1-1.6A6 6 0 0 0 12 3z"/></svg>
+          <div class="callout-body"><p class="callout-title">Scoped token plus MESA is the recommended pairing</p><p>The permission tree scopes what an agent sees, which keeps context cheap and reads secure; MESA governs the nature of writes on top. <a href="capabilities.html#mesa">Pass-through and MESA</a> explains why pass-through plus MESA, though possible, is usually not the better trade.</p></div>
+        </div>
+
+        <nav class="pager" id="pager" aria-label="Page navigation"></nav>
+      </div>
+    </main>
+    <aside class="toc" id="toc"></aside>
+  </div>
+
+  <footer class="site-footer" id="site-footer"></footer>
+  <script src="assets/site.js"></script>
+</body>
+</html>

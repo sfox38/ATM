@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Admin API &middot; ATM docs</title>
+  <meta name="description" content="The full ATM admin API: every route for tokens, permissions, approvals, MESA profiles, entity hints, and settings, with request and response payload schemas." />
+  <link rel="icon" href="assets/atm-logo.png" type="image/png" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400..800&family=Hanken+Grotesk:wght@400..700&family=Roboto+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="assets/atm-docs.css" />
+</head>
+<body data-page="admin-api" data-toc>
+  <a class="skip-link" href="#main">Skip to content</a>
+  <header class="site-header" id="site-header"></header>
+  <div class="sidebar-backdrop" data-close-nav></div>
+
+  <div class="layout" id="layout">
+    <aside class="sidebar" id="sidebar"></aside>
+    <main class="main" id="main">
+      <div class="content prose">
+
+        <header class="page-head">
+          <p class="breadcrumb"><a href="index.html">Docs</a> / Reference / Admin API</p>
+          <h1>Admin API</h1>
+          <p class="lede">The panel is a client of this API; everything it does, you can do over HTTP. These are the admin routes under <code>/api/atm/admin/</code> and the request and response bodies they expect.</p>
+        </header>
+
+        <div class="callout note">
+          <svg class="callout-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4.5" y="10.5" width="15" height="10" rx="2.5"/><path d="M8 10.5V8a4 4 0 0 1 8 0v2.5"/></svg>
+          <div class="callout-body"><p class="callout-title">Home Assistant session, admin only</p><p>Every admin route requires a valid Home Assistant session and the admin role. An ATM token can never authenticate here, not even a pass-through token. See <a href="security.html">Security</a>.</p></div>
+        </div>
+
+        <h2>Conventions</h2>
+        <dl class="kv">
+          <div class="kv-row"><dt>Bodies</dt><dd>JSON, <code>Content-Type: application/json</code>. Bodies over 1&nbsp;MB are rejected with 413.</dd></div>
+          <div class="kv-row"><dt>Request ID</dt><dd>Every response carries <code>X-ATM-Request-ID</code>, matching the audit log entry.</dd></div>
+          <div class="kv-row"><dt>Errors</dt><dd>Error responses are <code>{ "error": code, "message": text }</code>, with an optional <code>suggestions</code> array. Codes: <code>unauthorized</code> (401), <code>forbidden</code> (403), <code>not_found</code> (404), <code>invalid_request</code> (400), <code>request_too_large</code> (413).</dd></div>
+        </dl>
+
+        <h2 id="tokens">Tokens</h2>
+        <pre class="code" data-lang="http" data-label="Tokens"><code>GET     /api/atm/admin/tokens                 List tokens
+POST    /api/atm/admin/tokens                 Create a token
+GET     /api/atm/admin/tokens/{id}            Get one token
+PATCH   /api/atm/admin/tokens/{id}            Update a token
+DELETE  /api/atm/admin/tokens/{id}            Revoke a token
+POST    /api/atm/admin/tokens/{id}/rotate     Generate a new raw value
+GET     /api/atm/admin/tokens/{id}/stats      Request counters
+GET     /api/atm/admin/tokens/{id}/connection last_used_at + request_count
+GET     /api/atm/admin/tokens/{id}/audit      Audit log for one token
+GET     /api/atm/admin/tokens/archived        List archived tokens
+DELETE  /api/atm/admin/tokens/archived/{id}   Delete an archived record</code></pre>
+
+        <p><strong>Create</strong> (<code>POST /tokens</code>) takes a name and optional lifetime and limits. The response is the full token record plus a one-time <code>token</code> field (the raw value, never returned again).</p>
+        <pre class="code" data-lang="json" data-label="Create token body"><code>{
+  "name": "claude-code",          // required, 3-32 chars: letters, digits, _ or -
+  "expires_at": "2026-07-01T00:00:00Z", // optional ISO-8601, omit for no expiry
+  "pass_through": false,          // optional
+  "confirm_pass_through": false,  // required to be true when pass_through is true
+  "rate_limit_requests": 60,      // optional, 0 disables rate limiting
+  "rate_limit_burst": 10          // optional
+}</code></pre>
+
+        <p><strong>Update</strong> (<code>PATCH /tokens/{id}</code>) accepts any subset of these fields. Capability fields each take <code>"deny"</code>, <code>"allow"</code>, or <code>"confirm"</code>. Enabling pass-through requires <code>confirm_pass_through: true</code> in the same request, or the call returns 400.</p>
+        <pre class="code" data-lang="json" data-label="Patch token body (all optional)"><code>{
+  "persona": "voice_assistant",
+  "pass_through": false,
+  "confirm_pass_through": false,
+  "rate_limit_requests": 60,
+  "rate_limit_burst": 10,
+  "cap_config_read": "allow",
+  "cap_template_render": "allow",
+  "cap_log_read": "deny",
+  "cap_search": "allow",
+  "cap_registry_read": "allow",
+  "cap_traces": "deny",
+  "cap_diagnostics": "deny",
+  "cap_broadcast": "deny",
+  "cap_service_response": "allow",
+  "cap_automation_write": "deny",
+  "cap_script_write": "deny",
+  "cap_scene_write": "deny",
+  "cap_helper_write": "deny",
+  "cap_physical_control": "confirm",
+  "cap_restart": "deny",
+  "cap_integration_write": "deny",
+  "cap_lovelace_write": "deny",
+  "cap_backup": "deny",
+  "cap_filesystem": "deny",
+  "cap_yaml_edit": "deny",
+  "use_assist_exposure": false,
+  "announce_all_tools": false
+}</code></pre>
+        <p>Setting a <code>persona</code> applies that persona's full preset across every capability in one request; see <a href="capabilities.html#personas">Personas</a>. <code>use_assist_exposure</code> and <code>announce_all_tools</code> are advanced options described in <a href="operations.html#advanced-token-options">Operations</a>.</p>
+
+        <h2 id="permissions">Permissions</h2>
+        <pre class="code" data-lang="http" data-label="Permissions"><code>GET    /api/atm/admin/tokens/{id}/permissions                    Read the tree
+PUT    /api/atm/admin/tokens/{id}/permissions                    Replace the tree
+PATCH  /api/atm/admin/tokens/{id}/permissions/domains/{node}     Set one domain node
+PATCH  /api/atm/admin/tokens/{id}/permissions/devices/{node}     Set one device node
+PATCH  /api/atm/admin/tokens/{id}/permissions/entities/{node}    Set one entity node
+GET    /api/atm/admin/tokens/{id}/resolve/{entity}               Explain effective permission
+GET    /api/atm/admin/tokens/{id}/scope                          Readable / writable lists</code></pre>
+        <p>A node PATCH sets a single node's state, with an optional per-token hint (max 200 characters; <code>null</code> clears it). The PUT replaces the whole tree; nodes use the same shape.</p>
+        <pre class="code" data-lang="json" data-label="Permission node body"><code>{
+  "state": "GREEN",   // GREY | YELLOW | GREEN | RED
+  "hint": "Rachel's desk lamp, not the ceiling light"  // optional, <= 200 chars, null clears
+}</code></pre>
+        <p><code>resolve</code> returns the decision and the ancestor that made it: <code>{ entity_id, resolution_path: [{level, state}], effective, effective_hint }</code>.</p>
+
+        <h2 id="entity-hints">Entity hints</h2>
+        <p>Global hints apply to every token that can see the entity. A per-token permission-node hint (above) always takes precedence over the global one. Both are capped at 200 characters.</p>
+        <pre class="code" data-lang="http" data-label="Entity hints"><code>GET  /api/atm/admin/entity-hints               The global entity_id -> hint map
+PUT  /api/atm/admin/entity-hints/{entity_id}   Set or clear one global hint</code></pre>
+        <pre class="code" data-lang="json" data-label="Global hint body"><code>{ "hint": "Garage side door" }   // null clears the hint</code></pre>
+
+        <h2 id="entities">Entities</h2>
+        <pre class="code" data-lang="http" data-label="Entities"><code>GET  /api/atm/admin/entities                   The entity tree (domains, devices, entities)
+GET  /api/atm/admin/entities?force_reload=1    Rebuild the cached tree</code></pre>
+
+        <h2 id="approvals">Approvals</h2>
+        <pre class="code" data-lang="http" data-label="Approvals"><code>GET     /api/atm/admin/approvals                List approvals (filter by status, token_id)
+GET     /api/atm/admin/approvals/{id}           Get one approval
+POST    /api/atm/admin/approvals/{id}/approve   Approve and run the held action
+POST    /api/atm/admin/approvals/{id}/reject    Reject with an optional reason
+DELETE  /api/atm/admin/approvals/{id}           Cancel a pending approval</code></pre>
+        <p>List accepts <code>?status=pending|approved|rejected|expired|cancelled</code>, <code>?token_id=</code>, <code>?limit=</code>, and <code>?offset=</code>, and returns <code>{ approvals: [...], total, limit, offset }</code>. Approve and reject take small optional bodies.</p>
+        <pre class="code" data-lang="json" data-label="Approve / reject bodies"><code>// POST .../approve
+{ "note": "looks fine" }      // optional
+
+// POST .../reject
+{ "reason": "not this one" }  // optional</code></pre>
+
+        <h2 id="mesa">MESA profiles</h2>
+        <p>Profiles exist at the entity, domain, and area levels, plus a canonical-tag vocabulary and a validation view. The profile document shape is defined by <a href="https://github.com/sfox38/mesa-core" target="_blank" rel="noopener">mesa-core</a>; see <a href="mesa.html">MESA</a> for how it fits into ATM.</p>
+        <pre class="code" data-lang="http" data-label="MESA"><code>GET     /api/atm/admin/mesa/profiles               List entity profiles (domain, tag, area, origin, cursor)
+GET     /api/atm/admin/mesa/profiles/{entity_id}   Stored + effective profile for one entity
+PUT     /api/atm/admin/mesa/profiles/{entity_id}   Create or replace an entity profile
+DELETE  /api/atm/admin/mesa/profiles/{entity_id}   Remove an entity profile
+GET     /api/atm/admin/mesa/domains                List domain profiles
+GET/PUT/DELETE  /api/atm/admin/mesa/domains/{domain}   One domain profile
+GET     /api/atm/admin/mesa/areas                  List area profiles
+GET/PUT/DELETE  /api/atm/admin/mesa/areas/{area_id}    One area profile
+GET     /api/atm/admin/mesa/vocabulary             Canonical tags and roots
+GET     /api/atm/admin/mesa/issues                 Validation issues + orphans (?refresh=1)</code></pre>
+        <pre class="code" data-lang="json" data-label="MESA profile document (PUT)"><code>{
+  "semantic_profile": { },        // mesa-core schema; see the mesa-core repo
+  "privacy_classification": { }
+}</code></pre>
+
+        <h2 id="settings-system">Settings and system</h2>
+        <pre class="code" data-lang="http" data-label="Settings & system"><code>GET    /api/atm/admin/settings   Read global settings
+PATCH  /api/atm/admin/settings   Update global settings (any subset)
+GET    /api/atm/admin/audit      Global audit log (limit, offset, token_id, outcome, ip)
+GET    /api/atm/admin/info       Version info
+DELETE /api/atm/admin/wipe       Wipe all tokens and settings</code></pre>
+        <p>Settings are described in <a href="operations.html#global-settings">Operations</a>. A PATCH may include any subset of them.</p>
+        <pre class="code" data-lang="json" data-label="Global settings"><code>{
+  "kill_switch": false,
+  "disable_all_logging": false,
+  "log_allowed": true,
+  "log_denied": true,
+  "log_rate_limited": true,
+  "log_entity_names": true,
+  "log_client_ip": true,
+  "notify_on_rate_limit": false,
+  "notify_on_approval": true,
+  "audit_flush_interval": 900,
+  "audit_log_maxlen": 10000,
+  "mesa_mode": "advisory"        // off | advisory | enforced
+}</code></pre>
+        <p>The wipe route is intentionally guarded: it requires an exact confirmation string.</p>
+        <pre class="code" data-lang="json" data-label="Wipe body"><code>{ "confirm": "WIPE" }</code></pre>
+
+        <div class="callout warn">
+          <svg class="callout-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.3 3.8 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.8a2 2 0 0 0-3.4 0z"/><path d="M12 9v4"/><circle cx="12" cy="17" r="0.4" fill="currentColor"/></svg>
+          <div class="callout-body"><p class="callout-title">PATCH is read-modify-write under a lock</p><p>Token and record PATCH handlers load, modify, and save atomically, so two admins editing the same token at once cannot clobber each other.</p></div>
+        </div>
+
+        <p>The token-scoped proxy routes (states, services, history, and so on) are listed in <a href="operations.html#route-reference">Operations</a>.</p>
+
+        <nav class="pager" id="pager" aria-label="Page navigation"></nav>
+      </div>
+    </main>
+    <aside class="toc" id="toc"></aside>
+  </div>
+
+  <footer class="site-footer" id="site-footer"></footer>
+  <script src="assets/site.js"></script>
+</body>
+</html>

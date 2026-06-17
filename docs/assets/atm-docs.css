@@ -221,7 +221,7 @@ a:hover { color: var(--accent-hover); text-decoration-color: currentColor; }
   border-radius: var(--radius-xs);
 }
 
-::selection { background: var(--accent-tint); color: var(--ink); }
+::selection { background: color-mix(in srgb, var(--accent) 40%, transparent); color: var(--ink); }
 
 .skip-link {
   position: fixed;
@@ -354,7 +354,7 @@ strong { font-weight: 700; color: var(--ink); }
   text-decoration: none;
 }
 .brand:hover { color: var(--ink); }
-.brand .mark { width: 30px; height: 30px; flex: none; }
+.brand .mark { width: 30px; height: 30px; flex: none; display: block; object-fit: contain; }
 .brand .brand-sub {
   font-family: var(--font-mono);
   font-size: 0.62rem;
@@ -836,6 +836,8 @@ td .no  { color: var(--ink-3); }
 .badge-success { background: var(--success-bg); color: var(--success); }
 .badge-error { background: var(--error-bg); color: var(--error); }
 .badge-neutral { background: var(--st-grey-bg); color: var(--ink-2); }
+/* Secondary API-field id shown under a capability's friendly name in the flags table. */
+.cap-slug { display: inline-block; margin-top: 5px; font-size: 0.72rem; color: var(--ink-3); }
 
 /* permission state pills */
 .state {
@@ -910,7 +912,7 @@ td .no  { color: var(--ink-3); }
   backdrop-filter: blur(8px);
 }
 .tool-search {
-  flex: 1; min-width: 200px;
+  flex: 1 1 100%; min-width: 200px;
   display: flex; align-items: center; gap: 9px;
   padding: 9px 14px;
   background: var(--surface);
@@ -993,6 +995,39 @@ td .no  { color: var(--ink-3); }
   font-family: var(--font-body);
 }
 .diagram figcaption b { color: var(--ink); }
+
+/* Screenshot placeholders: empty, clearly-marked slots for real captures later.
+   Kept understated (neutral tokens, no amber wash) so they read as TODO, not chrome. */
+.screenshot-placeholder { margin: 1.9rem 0; }
+.screenshot-placeholder .shot-box {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  min-height: 190px;
+  padding: clamp(20px, 4vw, 40px);
+  text-align: center;
+  background:
+    repeating-linear-gradient(135deg, var(--surface-2), var(--surface-2) 12px, var(--surface) 12px, var(--surface) 24px);
+  border: 2px dashed var(--border-strong);
+  border-radius: var(--radius-lg);
+  color: var(--ink-3);
+}
+.screenshot-placeholder .shot-box svg { width: 30px; height: 30px; opacity: 0.65; }
+.screenshot-placeholder .shot-label {
+  font-family: var(--font-mono);
+  font-size: var(--step--1);
+  color: var(--ink-2);
+  letter-spacing: 0.01em;
+}
+.screenshot-placeholder figcaption {
+  margin-top: 12px;
+  font-size: 0.88rem;
+  color: var(--ink-2);
+  text-align: center;
+  font-family: var(--font-body);
+}
 
 /* svg theming hooks */
 .dgm-surface { fill: var(--surface); }
