@@ -152,7 +152,7 @@ const CAPS: CapDef[] = [
   {
     key: "cap_yaml_edit",
     label: "Raw YAML edit",
-    description: "Edit configuration.yaml directly. High blast radius; Confirm strongly recommended.",
+    description: "Read and edit configuration.yaml directly. High blast radius; Confirm strongly recommended. Reading returns the file verbatim, so inline secrets are exposed; keep secrets in secrets.yaml via !secret.",
     tier: "irreversible",
     confirmAvailable: true,
   },

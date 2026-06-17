@@ -1088,7 +1088,11 @@ _SYSTEM_TOOL_DEFS: list[dict] = [
     },
     {
         "name": "get_yaml_config",
-        "description": "Read the raw contents of configuration.yaml.",
+        "description": (
+            "Read the raw contents of configuration.yaml. Returns the file verbatim, so any "
+            "inline secrets are visible; keep secrets in secrets.yaml and reference them with "
+            "!secret rather than inlining them."
+        ),
         "cap": "cap_yaml_edit",
         "inputSchema": {"type": "object", "properties": {}},
     },
@@ -5737,7 +5741,7 @@ async def _dispatch_mcp(
                     return _jsonrpc_error(msg_id, -32602, "Unknown prompt."), "prompts/get", "/api/atm/mcp", "denied"
                 resp = _jsonrpc_result(msg_id, {
                     "description": f"Default prompt for Home Assistant {api_inst.api.name} API",
-                    "messages": [{"role": "assistant", "content": {"type": "text",
+                    "messages": [{"role": "user", "content": {"type": "text",
                         "text": _UNTRUSTED_DATA_BOUNDARY + "\n\n" + api_inst.api_prompt}}],
                 })
             except Exception:
@@ -5752,7 +5756,7 @@ async def _dispatch_mcp(
             prompt_text = _UNTRUSTED_DATA_BOUNDARY + "\n\n" + _build_context_plain(token, hass)
             resp = _jsonrpc_result(msg_id, {
                 "description": "Describes the Home Assistant entities and capabilities accessible to this token",
-                "messages": [{"role": "assistant", "content": {"type": "text", "text": prompt_text}}],
+                "messages": [{"role": "user", "content": {"type": "text", "text": prompt_text}}],
             })
         _log(data, token, request_id=request_id, method="prompts/get",
              resource="/api/atm/mcp", outcome="allowed", client_ip=client_ip)
