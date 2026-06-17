@@ -1,6 +1,0 @@
-This directory is a vendored copy of mesa-core. Do not edit by hand.
-Regenerate with scripts/sync_mesa_core.py.
-
-source_version: 1.0.0
-synced_on: 2026-06-15
-source_path: /Users/foxy/Documents/Programming_projects/MESA/mesa-core/mesa_core

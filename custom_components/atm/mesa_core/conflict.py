@@ -8,6 +8,7 @@ baseline.
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -39,6 +40,11 @@ _OB_RULE_D_FIELDS = (
     "enforcement_mode",
     "control_reason",
     "human_reason",
+)
+
+# Array-valued Rule D fields are unioned across layers, not replaced (see
+# ConflictResolver.resolve_limit_union), so they are handled separately.
+_OB_UNION_FIELDS = (
     "declared_limits",
     "temporal_constraints",
 )
@@ -128,6 +134,11 @@ class _Candidate:
         if hasattr(value, "value"):
             value = value.value
         return {"level": self.layer.level, "origin": self.origin.value, "value": value}
+
+
+def _canonical(value: Any) -> str:
+    """Order-insensitive serialisation, for detecting whether entries differ."""
+    return json.dumps(value, sort_keys=True, default=str)
 
 
 def _is_confirmed(profile: SemanticProfile, path: str) -> bool:
@@ -411,6 +422,86 @@ class ConflictResolver:
         )
         return True, winner.value
 
+    # -- Rule D (array union): declared_limits / temporal_constraints -----------
+
+    def resolve_limit_union(
+        self,
+        layers: list[Layer],
+        path: str,
+        attr: str,
+        resolution: Resolution,
+    ) -> tuple[bool, list[dict[str, Any]] | None]:
+        """Union an array-valued safety field across layers instead of replacing it.
+
+        ``declared_limits`` and ``temporal_constraints`` are additive: each entry
+        is an independent constraint, and both consumers (the enforcer and the
+        temporal evaluator) apply every entry, so a union is automatically
+        tightest-wins at evaluation time. Entries are keyed by ``id``; when the
+        same ``id`` is declared at more than one layer the winner is chosen the
+        same way scalar Rule D chooses, trusted tier first, then most specific
+        scope, then origin authority, so a lower-tier profile can never displace
+        a trusted entry and an operator override of one entry stays deliberate.
+        Distinct ids simply compose and are not reported as a conflict.
+        """
+        contributing: list[Layer] = []
+        keyed: dict[Any, list[_Candidate]] = {}
+        for layer in layers:
+            if not layer.profile.declared(path):
+                continue
+            contributing.append(layer)
+            entries = getattr(layer.profile.operational_boundaries, attr)
+            for entry in entries:
+                key = entry.get("id") if isinstance(entry, dict) else None
+                if not key:
+                    # id is REQUIRED (Spec 6.4); an id-less entry never dedups.
+                    key = object()
+                keyed.setdefault(key, []).append(_Candidate(layer, entry))
+        if not contributing:
+            return False, None
+
+        merged: list[dict[str, Any]] = []
+        collision = False
+        for cands in keyed.values():
+            if len(cands) == 1:
+                merged.append(cands[0].value)
+                continue
+            trusted = [c for c in cands if c.origin in TRUSTED_ORIGINS]
+            pool = trusted if trusted else cands
+            winner = max(pool, key=lambda c: (c.scope_rank, c.origin_authority))
+            merged.append(winner.value)
+            if len({_canonical(c.value) for c in cands}) > 1:
+                collision = True
+
+        most_specific = max(contributing, key=lambda layer: SCOPE_RANK.get(layer.level, 0))
+        resolution.explanations.append(
+            FieldExplanation(
+                field_path=path,
+                effective_value=merged,
+                provided_by_level=most_specific.level,
+                provided_by_origin=most_specific.profile.metadata.source.value,
+                conflict=collision,
+                conflict_resolution=(
+                    "Rule D (union): entries merged across layers; same-id collision "
+                    "resolved by trusted tier, then scope, then origin"
+                    if collision
+                    else None
+                ),
+                competing_values=(
+                    [
+                        {
+                            "level": layer.level,
+                            "origin": layer.profile.metadata.source.value,
+                            "value": getattr(layer.profile.operational_boundaries, attr),
+                        }
+                        for layer in contributing
+                    ]
+                    if collision
+                    else None
+                ),
+            )
+        )
+        return True, merged
+
     # -- full merge -------------------------------------------------------------
 
     def resolve(
@@ -438,6 +529,13 @@ class ConflictResolver:
                 attr,
                 "operational_boundaries",
                 resolution,
+            )
+            if declared:
+                setattr(effective.operational_boundaries, attr, value)
+
+        for attr in _OB_UNION_FIELDS:
+            declared, value = self.resolve_limit_union(
+                layers, f"operational_boundaries.{attr}", attr, resolution
             )
             if declared:
                 setattr(effective.operational_boundaries, attr, value)
