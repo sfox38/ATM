@@ -381,7 +381,13 @@ _ENTITY_TOOL_DEFS: list[dict] = [
     },
     {
         "name": "call_service",
-        "description": "Call a Home Assistant service.",
+        "description": (
+            "Call a Home Assistant service on one or more entities. Targets (entity_id, area_id, "
+            "device_id, or 'all') are resolved and flattened to the entities this token can write; "
+            "out-of-scope targets are dropped silently. The call passes the capability gate and "
+            "per-entity MESA policy, so it may return pending_approval or be refused. Preview a risky "
+            "call first with dry_run_service (and whatif to see which automations it would trigger)."
+        ),
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -500,14 +506,14 @@ _SYSTEM_TOOL_DEFS: list[dict] = [
             "The automation_id is preserved - do not include it in 'config'. "
             "Returns the updated configuration. "
             "The config is validated by HA before saving - invalid configs are rejected with an error. "
-            "Use get_config (requires cap_config_read) to list all existing automations and their IDs. "
+            "Use search_entities with domain 'automation' to find automations; an automation's id is in its 'id' state attribute and is returned by create_automation. "
             "ATM-created automations have IDs prefixed with 'atm_'."
         ),
         "cap": "cap_automation_write",
         "inputSchema": {
             "type": "object",
             "properties": {
-                "automation_id": {"type": "string", "description": "ID of the automation to edit, as returned by create_automation or get_config."},
+                "automation_id": {"type": "string", "description": "ID of the automation to edit, as returned by create_automation or read from the automation's 'id' state attribute."},
                 "config": {"type": "object", "description": "Full replacement automation configuration (alias, trigger, action, condition, mode). Do not include 'id'."},
             },
             "required": ["automation_id", "config"],
@@ -517,7 +523,7 @@ _SYSTEM_TOOL_DEFS: list[dict] = [
         "name": "delete_automation",
         "description": (
             "Permanently delete a Home Assistant automation from automations.yaml. "
-            "Use get_config (requires cap_config_read) to list all existing automations and their IDs. "
+            "Use search_entities with domain 'automation' to find automations; an automation's id is in its 'id' state attribute and is returned by create_automation. "
             "ATM-created automations have IDs prefixed with 'atm_'."
         ),
         "cap": "cap_automation_write",
@@ -559,7 +565,7 @@ _SYSTEM_TOOL_DEFS: list[dict] = [
             "The 'config' object entirely replaces the current script configuration. "
             "Returns the updated configuration. "
             "The config is validated by HA before saving - invalid configs are rejected with an error. "
-            "Use get_config (requires cap_config_read) to list all existing scripts and their IDs."
+            "Use search_entities with domain 'script' to find scripts; the script_id is the part after 'script.' in the entity_id."
         ),
         "cap": "cap_script_write",
         "inputSchema": {
@@ -575,7 +581,7 @@ _SYSTEM_TOOL_DEFS: list[dict] = [
         "name": "delete_script",
         "description": (
             "Permanently delete a Home Assistant script from scripts.yaml. "
-            "Use get_config (requires cap_config_read) to list all existing scripts and their IDs."
+            "Use search_entities with domain 'script' to find scripts; the script_id is the part after 'script.' in the entity_id."
         ),
         "cap": "cap_script_write",
         "inputSchema": {
@@ -805,7 +811,7 @@ _SYSTEM_TOOL_DEFS: list[dict] = [
     {
         "name": "describe_entity",
         "description": (
-            "A comprehension summary of one accessible entity: its state, area, the services in its "
+            "A comprehensive summary of one accessible entity: its state, area, the services in its "
             "domain, what references it, and its MESA control_mode when MESA is active. For full "
             "semantic profile data use mesa_get_profile (requires cap_config_read). 'not found' if not accessible."
         ),
@@ -1039,7 +1045,7 @@ _SYSTEM_TOOL_DEFS: list[dict] = [
         "name": "list_files",
         "description": (
             "List files in an allowed config directory (www/, themes/, custom_templates/). "
-            "With no path, returns the allowed directories. Requires cap_filesystem."
+            "With no path, returns the allowed directories."
         ),
         "cap": "cap_filesystem",
         "inputSchema": {
@@ -1052,7 +1058,7 @@ _SYSTEM_TOOL_DEFS: list[dict] = [
     {
         "name": "read_file",
         "description": (
-            "Read a UTF-8 text file under www/, themes/, or custom_templates/. Requires cap_filesystem. "
+            "Read a UTF-8 text file under www/, themes/, or custom_templates/. "
             "Returns 'not found' if the file does not exist or is outside the allowed directories."
         ),
         "cap": "cap_filesystem",
@@ -1068,7 +1074,7 @@ _SYSTEM_TOOL_DEFS: list[dict] = [
         "name": "write_file",
         "description": (
             "Write a UTF-8 text file under www/, themes/, or custom_templates/ (creates parent dirs). "
-            "Requires cap_filesystem (Confirm-eligible). Paths outside the allowed directories are refused."
+            "May require admin approval. Paths outside the allowed directories are refused."
         ),
         "cap": "cap_filesystem",
         "inputSchema": {
@@ -1082,14 +1088,14 @@ _SYSTEM_TOOL_DEFS: list[dict] = [
     },
     {
         "name": "get_yaml_config",
-        "description": "Read the raw contents of configuration.yaml. Requires cap_yaml_edit.",
+        "description": "Read the raw contents of configuration.yaml.",
         "cap": "cap_yaml_edit",
         "inputSchema": {"type": "object", "properties": {}},
     },
     {
         "name": "set_yaml_config",
         "description": (
-            "Replace the entire contents of configuration.yaml. Requires cap_yaml_edit (Confirm-eligible). "
+            "Replace the entire contents of configuration.yaml. May require admin approval. "
             "High blast radius: a broken file prevents Home Assistant from starting. Run check_config and "
             "restart HA afterwards to apply."
         ),
@@ -1106,7 +1112,7 @@ _SYSTEM_TOOL_DEFS: list[dict] = [
         "name": "list_integrations",
         "description": (
             "List Home Assistant config entries (integrations): entry_id, domain, title, state, and whether "
-            "disabled. Use the entry_id with set_integration_enabled. Requires cap_integration_write."
+            "disabled. Use the entry_id with set_integration_enabled."
         ),
         "cap": "cap_integration_write",
         "inputSchema": {"type": "object", "properties": {}},
@@ -1114,8 +1120,8 @@ _SYSTEM_TOOL_DEFS: list[dict] = [
     {
         "name": "set_integration_enabled",
         "description": (
-            "Enable or disable an integration (config entry) by its entry_id. Requires cap_integration_write "
-            "(Confirm-eligible). Disabling unloads the integration and its entities."
+            "Enable or disable an integration (config entry) by its entry_id. May require admin approval. "
+            "Disabling unloads the integration and its entities."
         ),
         "cap": "cap_integration_write",
         "inputSchema": {
@@ -1129,7 +1135,7 @@ _SYSTEM_TOOL_DEFS: list[dict] = [
     },
     {
         "name": "list_backups",
-        "description": "List existing Home Assistant backups (compact, newest first) and the available backup agents. Requires cap_backup.",
+        "description": "List existing Home Assistant backups (compact, newest first) and the available backup agents.",
         "cap": "cap_backup",
         "inputSchema": {
             "type": "object",
@@ -1142,7 +1148,7 @@ _SYSTEM_TOOL_DEFS: list[dict] = [
     {
         "name": "create_backup",
         "description": (
-            "Create a new Home Assistant backup. Requires cap_backup (Confirm-eligible). Defaults to an "
+            "Create a new Home Assistant backup. May require admin approval. Defaults to an "
             "available local backup agent (auto-detected). ATM does not support restoring backups (too "
             "destructive); restore from the Home Assistant UI."
         ),
@@ -1157,7 +1163,7 @@ _SYSTEM_TOOL_DEFS: list[dict] = [
     },
     {
         "name": "list_dashboards",
-        "description": "List Lovelace dashboards. Requires cap_lovelace_write.",
+        "description": "List Lovelace dashboards.",
         "cap": "cap_lovelace_write",
         "inputSchema": {"type": "object", "properties": {}},
     },
@@ -1165,7 +1171,7 @@ _SYSTEM_TOOL_DEFS: list[dict] = [
         "name": "create_dashboard",
         "description": (
             "Create a Lovelace dashboard. config must include url_path and title. "
-            "Requires cap_lovelace_write (Confirm-eligible)."
+            "May require admin approval."
         ),
         "cap": "cap_lovelace_write",
         "inputSchema": {
@@ -1178,7 +1184,7 @@ _SYSTEM_TOOL_DEFS: list[dict] = [
     },
     {
         "name": "edit_dashboard",
-        "description": "Update a Lovelace dashboard by its dashboard_id. Requires cap_lovelace_write (Confirm-eligible).",
+        "description": "Update a Lovelace dashboard by its dashboard_id. May require admin approval.",
         "cap": "cap_lovelace_write",
         "inputSchema": {
             "type": "object",
@@ -1191,7 +1197,7 @@ _SYSTEM_TOOL_DEFS: list[dict] = [
     },
     {
         "name": "delete_dashboard",
-        "description": "Delete a Lovelace dashboard by its dashboard_id. Requires cap_lovelace_write (Confirm-eligible).",
+        "description": "Delete a Lovelace dashboard by its dashboard_id. May require admin approval.",
         "cap": "cap_lovelace_write",
         "inputSchema": {
             "type": "object",
@@ -3876,7 +3882,7 @@ async def _tool_get_relationships(
 async def _tool_describe_entity(
     args: dict, token: TokenRecord, hass: Any, data: ATMData
 ) -> tuple[dict, str, str]:
-    """MCP tool: comprehension summary of one accessible entity."""
+    """MCP tool: comprehensive summary of one accessible entity."""
     if effective_cap(token, "cap_search") == CAP_DENY:
         return _tool_error("Forbidden."), "denied", "describe_entity"
 
