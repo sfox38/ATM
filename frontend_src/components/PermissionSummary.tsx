@@ -205,12 +205,18 @@ export function PermissionSummary({ permissions, entityTree, onEntityClick, mesa
 
   return (
     <table className="perm-summary-table">
+      <colgroup>
+        <col style={{ width: "86px" }} />
+        <col style={{ width: "calc((100% - 166px) * 0.80)" }} />
+        <col style={{ width: "calc((100% - 166px) * 0.20)" }} />
+        <col style={{ width: "80px" }} />
+      </colgroup>
       <thead>
         <tr>
           <SortHeader label="Type" col="type" current={sortCol} dir={sortDir} onSort={handleSort} />
           <SortHeader label="Name" col="friendly" current={sortCol} dir={sortDir} onSort={handleSort} />
           <SortHeader label="ID" col="id" current={sortCol} dir={sortDir} onSort={handleSort} />
-          <SortHeader label="Effective" col="state" current={sortCol} dir={sortDir} onSort={handleSort} />
+          <SortHeader label="State" col="state" current={sortCol} dir={sortDir} onSort={handleSort} />
         </tr>
       </thead>
       <tbody>

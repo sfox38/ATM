@@ -119,9 +119,9 @@ export function TokenListView({ tokens, loading, error, onRefresh, onOpenDetail,
     return (
       <div className="view-root">
         <div className="card wizard-hero">
-          <div className="wizard-hero-title">Set up your first agent</div>
+          <div className="wizard-hero-title">No agents connected yet</div>
           <p className="wizard-hero-sub">
-            ATM lets an AI agent control your Home Assistant through a scoped, revocable token. Let's walk through creating one and connecting your agent, step by step.
+            ATM lets an AI agent control your Home Assistant through a scoped, revocable token. The wizard walks you through creating one and connecting your agent, step by step.
           </p>
           <div className="wizard-hero-actions">
             <button className="btn btn-primary" onClick={onLaunchWizard}>Set up your first agent</button>
