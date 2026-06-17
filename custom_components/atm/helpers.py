@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import hashlib
 import json
 import logging
@@ -367,9 +366,8 @@ async def archive_expired_token(
 ) -> None:
     """Move an expired token to the archive and perform full cleanup.
 
-    Archives the record to storage, terminates SSE connections, destroys
-    rate limiter and counter state, fires the atm_token_expired bus event,
-    and removes sensor entities.
+    Archives the record to storage, destroys rate limiter and counter state,
+    fires the atm_token_expired bus event, and removes sensor entities.
     """
     now = utcnow()
     slug = token_name_slug(token.name)
@@ -377,7 +375,6 @@ async def archive_expired_token(
     archived = await data.store.async_archive_token(token.id, revoked=False, revoked_at=now)
     if archived is None:
         return
-    await terminate_token_connections(token.id, data.sse_connections)
     data.rate_limiter.destroy(token.id)
     data.rate_limit_notified.pop(token.id, None)
     data.token_counters.pop(token.id, None)
@@ -393,46 +390,6 @@ async def archive_expired_token(
             _LOGGER.warning(
                 "Sensor cleanup failed for expired token %s", token.id, exc_info=True,
             )
-
-
-async def terminate_token_connections(
-    token_id: str,
-    sse_connections: dict[str, set[asyncio.Queue]],
-) -> None:
-    """Signal all SSE queues for a token to close and remove them from the registry.
-
-    Puts None (the sentinel) into each queue so the SSE loop exits cleanly.
-    """
-    queues = sse_connections.pop(token_id, set())
-    for queue in queues:
-        try:
-            queue.put_nowait(None)
-        except asyncio.QueueFull:
-            # Queue is at capacity (slow/disconnected client). Evict one message to
-            # make room for the sentinel so the SSE loop exits without blocking.
-            try:
-                queue.get_nowait()
-            except asyncio.QueueEmpty:
-                pass
-            queue.put_nowait(None)
-
-
-def notify_tools_list_changed(
-    token_id: str,
-    sse_connections: dict[str, set[asyncio.Queue]],
-) -> None:
-    """Push a notifications/tools/list_changed MCP notification to all SSE sessions for a token.
-
-    Non-blocking - uses put_nowait and silently drops if a queue is full.
-    Does not remove connections from the registry.
-    """
-    notification = {"jsonrpc": "2.0", "method": "notifications/tools/list_changed"}
-    queues = sse_connections.get(token_id, set())
-    for queue in queues:
-        try:
-            queue.put_nowait(notification)
-        except asyncio.QueueFull:
-            pass
 
 
 class _ContextProxy(dict):

@@ -30,7 +30,7 @@ export function WipeConfirmModal({ onWiped, onClose }: Props) {
         Wipe All ATM Data
       </h3>
       <div className="banner banner-error mb-16">
-        This will permanently delete all active tokens, archived records, permission trees, capability flags, global settings, and the in-memory audit log. All running ATM tokens will be immediately invalidated and open connections terminated. This cannot be undone.
+        This will permanently delete all active tokens, archived records, permission trees, capability flags, global settings, and the in-memory audit log. All running ATM tokens will be immediately invalidated and all clients will lose access. This cannot be undone.
       </div>
       <div className="field">
         <label htmlFor="wipe-confirm-input">Type WIPE to confirm</label>

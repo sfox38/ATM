@@ -16,7 +16,7 @@ from homeassistant.helpers.storage import Store
 from .audit import AuditLog
 from .const import AUDIT_STORAGE_KEY, AUDIT_STORAGE_VERSION, DOMAIN, EXPIRY_CHECK_INTERVAL, FLUSH_INTERVAL, SENSOR_PUSH_INTERVAL
 from .data import ATMData
-from .helpers import archive_expired_token, cancel_expiry_timer, schedule_expiry_timer, terminate_token_connections
+from .helpers import archive_expired_token, cancel_expiry_timer, schedule_expiry_timer
 from .policy_engine import template_blocklist_vars
 from .rate_limiter import RateLimiter
 from .token_store import TokenStore
@@ -110,7 +110,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         store=store,
         rate_limiter=rate_limiter,
         audit=audit,
-        sse_connections={},
     )
     # hass.data is keyed by DOMAIN (not config entry ID). This is intentional: the config
     # flow enforces a single ATM instance via async_abort("already_configured"), so there
@@ -287,12 +286,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    """Tear down ATM: terminate SSE connections, unload sensor platform, remove panel."""
+    """Tear down ATM: unload sensor platform, remove panel."""
     data: ATMData = hass.data.get(DOMAIN)
     if data is not None:
         data.shutting_down = True
-        for token_id in list(data.sse_connections.keys()):
-            await terminate_token_connections(token_id, data.sse_connections)
         await data.audit.async_save()
 
     from .panel import remove_atm_panel

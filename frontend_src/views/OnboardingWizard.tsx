@@ -102,7 +102,7 @@ export function OnboardingWizard({ onCancel, onFinish }: Props) {
     if (!tokenId) return;
     try {
       const c = await api.getTokenConnection(tokenId);
-      if (c.has_live_session || c.request_count > 0) setConnected(true);
+      if (c.request_count > 0) setConnected(true);
     } catch {
       // transient; keep polling
     }

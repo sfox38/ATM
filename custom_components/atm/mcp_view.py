@@ -1,4 +1,4 @@
-"""MCP SSE endpoint for the ATM integration."""
+"""MCP Streamable HTTP endpoint for the ATM integration."""
 
 from __future__ import annotations
 
@@ -52,7 +52,6 @@ from .const import (
     MAX_BATCH_ITEMS,
     MAX_HISTORY_RANGE_DAYS,
     MAX_LOG_ENTRIES,
-    MAX_SSE_CONNECTIONS_PER_TOKEN,
     MAX_SUBSCRIPTION_SECONDS,
     MESA_APPROVED_EXECUTOR,
     MESA_MODE_OFF,
@@ -60,7 +59,6 @@ from .const import (
     PHYSICAL_GATE_SERVICES,
     PROXY_TIMEOUT_SECONDS,
     SENSITIVE_ATTRIBUTES,
-    SSE_HEARTBEAT_INTERVAL,
     TOKEN_LENGTH,
     TOKEN_PREFIX,
 )
@@ -75,7 +73,6 @@ from .mesa_core.trigger_validator import entities_by_role
 from .ws_dispatch import WsDispatchError, async_ws_command
 from .mesa_tools import MESA_TOOL_NAMES, call_mesa_tool, mesa_tool_defs
 from .helpers import (
-    archive_expired_token,
     build_error_response as _error,
     build_permitted_states as _build_permitted_states,
     collect_log_entries as _collect_log_entries,
@@ -109,7 +106,6 @@ from .token_store import TokenRecord
 
 _LOGGER = logging.getLogger(__name__)
 
-_MCP_VERSION_SSE = "2024-11-05"
 _MCP_VERSION_STREAMABLE = "2025-03-26"
 
 _AUTOMATION_YAML = "automations.yaml"
@@ -2542,25 +2538,13 @@ async def execute_approved_tool(
 
 
 def _build_diff_restart_ha(args: dict, token: TokenRecord, hass: Any) -> dict:
-    """Diff payload for restart_ha approvals.
-
-    Includes the count of currently-active SSE clients that will disconnect on restart
-    so admin sees real-time impact.
-    """
-    sse_count = 0
-    try:
-        domain_data = hass.data.get(DOMAIN)
-        if domain_data is not None and hasattr(domain_data, "sse_connections"):
-            sse_count = sum(len(q) for q in domain_data.sse_connections.values())
-    except Exception:  # noqa: BLE001 - diagnostic only
-        pass
+    """Diff payload for restart_ha approvals."""
     return {
         "kind": "system_action",
         "summary": "Restart Home Assistant",
         "target": {"type": "system", "id": "homeassistant", "label": "Home Assistant"},
         "preview": {
-            "active_atm_sse_clients": sse_count,
-            "warning": "All current ATM SSE connections will disconnect on restart.",
+            "warning": "Home Assistant will restart and be briefly unavailable.",
         },
     }
 
@@ -5597,7 +5581,7 @@ async def _dispatch_mcp(
     data: ATMData,
     client_ip: str,
     base_url: str,
-    protocol_version: str = _MCP_VERSION_SSE,
+    protocol_version: str = _MCP_VERSION_STREAMABLE,
 ) -> tuple[dict | None, str, str, str]:
     """Dispatch one MCP method call.
 
@@ -5611,7 +5595,7 @@ async def _dispatch_mcp(
         resp = _jsonrpc_result(msg_id, {
             "protocolVersion": protocol_version,
             "capabilities": {
-                "tools": {"listChanged": True},
+                "tools": {"listChanged": False},
                 "resources": {"subscribe": False},
                 "prompts": {},
             },
@@ -5853,154 +5837,12 @@ async def _handle_streamable_batch(
     return resp
 
 
-class ATMMcpSseView(HomeAssistantView):
-    """GET /api/atm/mcp - SSE endpoint (MCP 2024-11-05 transport).
-    POST /api/atm/mcp - Streamable HTTP transport (MCP 2025-03-26).
-    """
+class ATMMcpView(HomeAssistantView):
+    """POST /api/atm/mcp - MCP Streamable HTTP transport (2025-03-26)."""
 
     url = "/api/atm/mcp"
-    name = "api:atm:mcp:sse"
+    name = "api:atm:mcp"
     requires_auth = False
-
-    async def get(self, request: web.Request) -> web.StreamResponse | web.Response:
-        """Open an SSE stream. Sends an 'endpoint' event with the messages URL, then heartbeats."""
-        hass = self.hass
-        data: ATMData = hass.data[DOMAIN]
-        request_id = generate_request_id()
-        client_ip = _get_client_ip(request)
-
-        if data.shutting_down:
-            return _error("service_unavailable", "Service unavailable.", 503, request_id)
-
-        if data.store.get_settings().kill_switch:
-            return _error("service_unavailable", "Service unavailable.", 503, request_id)
-
-        _401 = _error("unauthorized", "Unauthorized.", 401, request_id)
-        _401.headers["WWW-Authenticate"] = 'Bearer realm="ATM"'
-
-        for key in ("token", "access_token"):
-
-            if key in request.query:
-                return _401
-
-        auth_header = request.headers.get("Authorization", "")
-        if not auth_header.startswith("Bearer "):
-            return _401
-
-        presented = auth_header[7:]
-        if not presented.startswith(TOKEN_PREFIX) or len(presented) != TOKEN_LENGTH:
-            return _401
-
-        token_hash = hashlib.sha256(presented.encode()).hexdigest()
-        token = data.store.get_token_by_hash(token_hash)
-        if token is None:
-            return _401
-
-        if not token.is_valid():
-            if token.is_expired():
-                await archive_expired_token(hass, data, token)
-            return _401
-
-        # SSE connection limit check intentionally runs after full token validation.
-        # Moving it before auth would create a connection-count oracle: an attacker
-        # presenting a valid-format token could distinguish "token exists and is maxed"
-        # (429) from "token doesn't exist or isn't maxed" (401). Since ATM token space
-        # is 2^256 the practical risk is negligible, but the check is cheap so there is
-        # no performance reason to move it earlier. This is a deliberate deviation from
-        # the CLAUDE.md rule 19 wording "before full token validation".
-        #
-        # The rate-limit check runs BEFORE the queue/session are registered so a
-        # rejected connection allocates nothing. Doing it after registration (as a
-        # previous version did) leaked a connection slot on every 429 because the
-        # early return skipped cleanup, eventually locking the token out of SSE.
-        data.store.update_last_used(token.id, utcnow())
-
-        rl_result = data.rate_limiter.check(token.id, token.rate_limit_requests, token.rate_limit_burst)
-        if not rl_result.allowed:
-            _fire_rate_limit_events(hass, data, token)
-            _log(data, token, request_id=request_id, method="GET", resource="/api/atm/mcp",
-                 outcome="rate_limited", client_ip=client_ip)
-            resp = _error("rate_limited", "Rate limit exceeded.", 429, request_id)
-            resp.headers["Retry-After"] = str(rl_result.retry_after)
-            return resp
-
-        # The lock serialises the count-check-and-add to prevent two concurrent
-        # connections from both passing the limit check (TOCTOU race).
-        async with data.sse_connect_lock:
-            current_count = len(data.sse_connections.get(token.id, set()))
-            if current_count >= MAX_SSE_CONNECTIONS_PER_TOKEN:
-                _log(data, token, request_id=request_id, method="GET", resource="/api/atm/mcp",
-                     outcome="rate_limited", client_ip=client_ip)
-                resp = _error("rate_limited", "Too many SSE connections for this token.", 429, request_id)
-                resp.headers["Retry-After"] = "60"
-                return resp
-
-            session_id = str(uuid.uuid4())
-            queue: asyncio.Queue = asyncio.Queue(maxsize=100)
-
-            data.mcp_sessions[session_id] = (queue, token.id)
-            if token.id not in data.sse_connections:
-                data.sse_connections[token.id] = set()
-            data.sse_connections[token.id].add(queue)
-
-        _log(data, token, request_id=request_id, method="GET", resource="/api/atm/mcp",
-             outcome="allowed", client_ip=client_ip)
-
-        def _cleanup() -> None:
-            data.mcp_sessions.pop(session_id, None)
-            conns = data.sse_connections.get(token.id)
-            if conns is not None:
-                conns.discard(queue)
-                if not conns:
-                    data.sse_connections.pop(token.id, None)
-
-        # Re-check token after queue insertion to close the TOCTOU window where
-        # a DELETE/archive could have run between auth check and queue add.
-        # Must happen BEFORE response.prepare() - once headers are sent the
-        # connection is bound to SSE and returning a web.Response is invalid.
-        if data.store.get_token_by_id(token.id) is None:
-            _cleanup()
-            return _error("unauthorized", "Unauthorized.", 401, request_id)
-
-        response = web.StreamResponse()
-        response.headers["Content-Type"] = "text/event-stream"
-        response.headers["Cache-Control"] = "no-cache"
-        response.headers["X-Accel-Buffering"] = "no"
-        response.headers["X-ATM-Request-ID"] = request_id
-
-        try:
-            await response.prepare(request)
-
-            base_url = str(request.url.origin())
-            messages_url = f"{base_url}/api/atm/mcp/messages?session_id={session_id}"
-            await response.write(f"event: endpoint\ndata: {messages_url}\n\n".encode())
-
-            session_epoch = data.wipe_epoch
-            try:
-                while True:
-                    try:
-                        msg = await asyncio.wait_for(
-                            queue.get(),
-                            timeout=SSE_HEARTBEAT_INTERVAL.total_seconds(),
-                        )
-                    except asyncio.TimeoutError:
-                        if data.wipe_epoch != session_epoch:
-                            break
-                        if data.store.get_settings().kill_switch:
-                            break
-                        await response.write(b": heartbeat\n\n")
-                        continue
-                    if msg is None:
-                        break
-                    await response.write(
-                        f"event: message\ndata: {json.dumps(msg, default=str)}\n\n".encode()
-                    )
-            except ConnectionResetError:
-                pass
-        finally:
-            _cleanup()
-
-        return response
 
     async def post(self, request: web.Request) -> web.Response:
         """Handle Streamable HTTP transport (MCP 2025-03-26)."""
@@ -6088,73 +5930,6 @@ class ATMMcpSseView(HomeAssistantView):
         return resp
 
 
-class ATMMcpMessagesView(HomeAssistantView):
-    """POST /api/atm/mcp/messages - receive a JSON-RPC message and push the response to the SSE queue."""
-
-    url = "/api/atm/mcp/messages"
-    name = "api:atm:mcp:messages"
-    requires_auth = False
-
-    async def post(self, request: web.Request) -> web.Response:
-        hass = self.hass
-        data: ATMData = hass.data[DOMAIN]
-        request_id = generate_request_id()
-        client_ip = _get_client_ip(request)
-
-        result = await _get_authenticated_token(
-            hass, request, data, request_id, "/api/atm/mcp/messages"
-        )
-        if isinstance(result, web.Response):
-            return result
-        token, _rl = result
-
-        body_result = await _read_json_body(request, request_id)
-        if isinstance(body_result, web.Response):
-            return body_result
-        body = body_result
-
-        session_id = request.query.get("session_id", "")
-        session_entry = data.mcp_sessions.get(session_id)
-        if session_entry is None:
-            return _error("invalid_request", "Invalid or expired session.", 400, request_id)
-
-        queue, owner_token_id = session_entry
-        if owner_token_id != token.id:
-            return _error("unauthorized", "Unauthorized.", 401, request_id)
-
-        if body.get("jsonrpc") != "2.0":
-            if body.get("id") is not None:
-                try:
-                    queue.put_nowait(_jsonrpc_error(_sanitize_jsonrpc_id(body.get("id")), -32600, "Invalid Request."))
-                except asyncio.QueueFull:
-                    return _error("service_unavailable", "SSE queue full; client is not reading.", 503, request_id)
-            return web.Response(
-                status=202,
-                headers={"X-ATM-Request-ID": request_id},
-            )
-
-        msg_id = _sanitize_jsonrpc_id(body.get("id"))
-        method = body.get("method", "")
-        params = body.get("params") or {}
-
-        response_msg, _log_method, _log_resource, _outcome = await _dispatch_mcp(
-            method, msg_id, params, token, hass, data, client_ip,
-            protocol_version=_MCP_VERSION_SSE,
-            base_url=str(request.url.origin()),
-        )
-
-        if response_msg is not None:
-            try:
-                queue.put_nowait(response_msg)
-            except asyncio.QueueFull:
-                return _error("service_unavailable", "SSE queue full; client is not reading.", 503, request_id)
-
-        return web.Response(
-            status=202,
-            headers={"X-ATM-Request-ID": request_id},
-        )
-
-
 class ATMMcpContextView(HomeAssistantView):
     """GET /api/atm/mcp/context - context document listing accessible entities and capability flags.
 
@@ -6201,8 +5976,7 @@ class ATMMcpContextView(HomeAssistantView):
 
 
 ALL_MCP_VIEWS: list[type[HomeAssistantView]] = [
-    ATMMcpSseView,
-    ATMMcpMessagesView,
+    ATMMcpView,
     ATMMcpContextView,
 ]
 

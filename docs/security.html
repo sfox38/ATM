@@ -88,7 +88,7 @@
         <h3>Rotation</h3>
         <p>Rotation generates a new raw value for an existing token while keeping its permissions, capabilities, rate limits, and audit history intact. The old value is invalidated the moment rotation is confirmed; there is no grace period, and the new value is shown once. Use it when you suspect a value has leaked but do not want to rebuild the tree.</p>
         <h3>Revocation</h3>
-        <p>Revocation permanently retires a token. Before the response returns, ATM archives it, terminates all open SSE connections, destroys its rate-limiter state, removes its sensors, and fires <code>atm_token_revoked</code>. Expired tokens are treated identically to revoked tokens at validation time.</p>
+        <p>Revocation permanently retires a token. Before the response returns, ATM archives it, destroys its rate-limiter state, removes its sensors, and fires <code>atm_token_revoked</code>. Because the MCP transport is stateless, the token's next request re-authenticates and is rejected, so revocation takes effect immediately. Expired tokens are treated identically to revoked tokens at validation time.</p>
 
         <h2>Admin API isolation</h2>
         <div class="callout note">
@@ -102,7 +102,6 @@
         <h2>Request limits</h2>
         <dl class="kv">
           <div class="kv-row"><dt>Request body</dt><dd>Bodies over 1&nbsp;MB are rejected with 413 before any processing.</dd></div>
-          <div class="kv-row"><dt>SSE connections</dt><dd>Limited to 5 per token; a sixth is rejected with 429.</dd></div>
           <div class="kv-row"><dt>History range</dt><dd>Capped at 7 days. Longer requests are clamped to the most recent 7 days, with the real range in <code>X-ATM-History-Start/End</code>. A <code>start_time</code> after <code>end_time</code> returns 400.</dd></div>
           <div class="kv-row"><dt>Request ID</dt><dd>Every response includes an <code>X-ATM-Request-ID</code> that matches the audit log entry.</dd></div>
         </dl>

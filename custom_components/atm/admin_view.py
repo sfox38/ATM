@@ -33,7 +33,7 @@ from .const import (
     TOKEN_NAME_REGEX,
 )
 from .data import ATMData
-from .helpers import cancel_expiry_timer, notify_tools_list_changed, terminate_token_connections
+from .helpers import cancel_expiry_timer
 from .policy_engine import Permission, get_effective_hint, resolve
 from .token_store import PermissionTree, VALID_NODE_STATES, token_name_slug
 
@@ -522,12 +522,6 @@ class ATMAdminTokenView(HomeAssistantView):
                         return _err("invalid_request", f"{rl_field} must not exceed 100000.", 400, rid)
             updated = await data.store.async_patch_token(token_id, **patchable)
 
-        _TOOLS_LIST_FLAGS = {
-            "pass_through", "use_assist_exposure", "announce_all_tools", "persona",
-        } | set(CAPABILITY_NAMES)
-        if patchable.keys() & _TOOLS_LIST_FLAGS:
-            notify_tools_list_changed(token_id, data.sse_connections)
-
         user = request[KEY_HASS_USER]
         data.audit.record(
             request_id=rid,
@@ -543,7 +537,7 @@ class ATMAdminTokenView(HomeAssistantView):
 
     @require_admin
     async def delete(self, request: web.Request, token_id: str) -> web.Response:
-        """Revoke a token. Archives it, terminates its SSE connections, fires the bus event."""
+        """Revoke a token. Archives it and fires the bus event."""
 
         rid = request["atm_rid"]
         hass = self.hass
@@ -561,7 +555,6 @@ class ATMAdminTokenView(HomeAssistantView):
             await data.store.async_archive_token(token_id, revoked=True, revoked_at=now)
             cancel_expiry_timer(data, token_id)
 
-        await terminate_token_connections(token_id, data.sse_connections)
         data.rate_limiter.destroy(token_id)
         data.rate_limit_notified.pop(token_id, None)
         data.token_counters.pop(token_id, None)
@@ -635,9 +628,6 @@ class ATMAdminPermissionsView(HomeAssistantView):
                 return _err("not_found", "Token not found.", 404, rid)
 
             updated = await data.store.async_set_permissions(token_id, new_tree)
-
-        # Write scope can change (a first GREEN grant), which changes tools/list.
-        notify_tools_list_changed(token_id, data.sse_connections)
 
         user = request[KEY_HASS_USER]
         data.audit.record(
@@ -727,9 +717,6 @@ async def _patch_permission_node(
         updated = await data.store.async_patch_permission_node(
             token_id, node_type, node_id, state, hint
         )
-
-    # A GREEN grant changing can flip write scope, which changes tools/list.
-    notify_tools_list_changed(token_id, data.sse_connections)
 
     user = request[KEY_HASS_USER]
     data.audit.record(
@@ -911,14 +898,12 @@ class ATMAdminTokenStatsView(HomeAssistantView):
 
 
 class ATMAdminTokenConnectionView(HomeAssistantView):
-    """GET /api/atm/admin/tokens/{token_id}/connection - live connection signals.
+    """GET /api/atm/admin/tokens/{token_id}/connection - connection signals.
 
     Used by the onboarding wizard to detect when a token's MCP client has
-    connected. ``has_live_session`` reflects the legacy SSE transport
-    (GET /api/atm/mcp); the common Streamable HTTP transport does not register a
-    session, so ``request_count`` is the cross-transport signal: any
-    authenticated MCP request bumps it. The wizard treats the token as connected
-    when ``has_live_session`` is true OR ``request_count`` is above zero.
+    connected. The Streamable HTTP transport is stateless and registers no
+    session, so ``request_count`` is the signal: any authenticated MCP request
+    bumps it. The wizard treats the token as connected once it is above zero.
     """
 
     url = "/api/atm/admin/tokens/{token_id}/connection"
@@ -933,13 +918,10 @@ class ATMAdminTokenConnectionView(HomeAssistantView):
         if token is None:
             return _err("not_found", "Token not found.", 404, rid)
 
-        conns = data.sse_connections.get(token_id)
-        has_live_session = bool(conns)
         counters = data.token_counters.get(token_id, {})
         last_used = token.last_used_at.isoformat() if token.last_used_at else None
 
         return _ok({
-            "has_live_session": has_live_session,
             "last_used_at": last_used,
             "request_count": counters.get("request_count", 0),
         }, request_id=rid)
@@ -1084,17 +1066,11 @@ class ATMAdminSettingsView(HomeAssistantView):
         if "mesa_mode" in patchable and data.mesa is not None:
             data.mesa.set_mode(updated.mesa_mode)
 
-        if "kill_switch" in patchable:
-            new_kill_switch = updated.kill_switch
-            if not old_kill_switch and new_kill_switch:
-                # Kill switch just activated: terminate all open SSE connections.
-                for token_id in list(data.sse_connections.keys()):
-                    await terminate_token_connections(token_id, data.sse_connections)
-            elif old_kill_switch and not new_kill_switch:
-                # Kill switch just deactivated: re-register routes if not already registered.
-                if not data.routes_registered and data.async_register_routes:
-                    await data.async_register_routes()
-                    data.routes_registered = True
+        if "kill_switch" in patchable and old_kill_switch and not updated.kill_switch:
+            # Kill switch just deactivated: re-register routes if not already registered.
+            if not data.routes_registered and data.async_register_routes:
+                await data.async_register_routes()
+                data.routes_registered = True
 
         user = request[KEY_HASS_USER]
         data.audit.record(
@@ -1132,9 +1108,6 @@ class ATMAdminWipeView(HomeAssistantView):
         user = request[KEY_HASS_USER]
 
         async with data.store.async_lock:
-            for token_id in list(data.sse_connections.keys()):
-                await terminate_token_connections(token_id, data.sse_connections)
-
             data.rate_limiter.destroy_all()
             data.rate_limit_notified.clear()
             data.token_counters.clear()
@@ -1145,12 +1118,6 @@ class ATMAdminWipeView(HomeAssistantView):
 
             active_slugs = [token_name_slug(t.name) for t in data.store.list_tokens()]
             await data.store.async_wipe()
-
-        # Clear mcp_sessions after storage wipe so any sessions created during the
-        # async yields above (audit wipe, lock acquisition) are also removed.
-        # Increment wipe_epoch so any ghost SSE heartbeat loops detect the wipe and exit.
-        data.mcp_sessions.clear()
-        data.wipe_epoch += 1
 
         if not data.routes_registered and data.async_register_routes:
             await data.async_register_routes()
@@ -1170,11 +1137,6 @@ class ATMAdminWipeView(HomeAssistantView):
         # be called for token IDs that no longer exist. Since the wipe removes all
         # tokens, there are no valid sensors left regardless.
         data.token_id_sensors.clear()
-
-        # Second pass: terminate any SSE connections established during the race window
-        # between the first termination pass and the storage wipe completing.
-        for token_id in list(data.sse_connections.keys()):
-            await terminate_token_connections(token_id, data.sse_connections)
 
         data.audit.record(
             request_id=rid,
@@ -1211,8 +1173,6 @@ class ATMAdminTokenRotateView(HomeAssistantView):
             return _err("not_found", "Token not found.", 404, rid)
 
         token, raw_token = result
-
-        await terminate_token_connections(token_id, data.sse_connections)
 
         hass.bus.async_fire("atm_token_rotated", {
             "token_id": token.id,

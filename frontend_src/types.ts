@@ -218,7 +218,6 @@ export interface ResolveResult {
 }
 
 export interface TokenConnection {
-  has_live_session: boolean;
   last_used_at: string | null;
   request_count: number;
 }

@@ -311,7 +311,7 @@ export function TokenDetailView({ tokenId, onBack, onRefresh, onOpenMesaProfile,
           title="Revoke Token"
           body={
             <div className="amber-block">
-              <p>Revoking <strong>permanently deactivates this token.</strong> It cannot be re-enabled. All active SSE connections will be terminated immediately and all clients using this token will lose access.</p>
+              <p>Revoking <strong>permanently deactivates this token.</strong> It cannot be re-enabled. All clients using this token will lose access immediately.</p>
             </div>
           }
           checkLabel="I understand this token will be permanently deactivated"
