@@ -19,6 +19,15 @@ import { PermissionSimulator } from "../components/PermissionSimulator";
 import { SelectByPicker } from "../components/SelectByPicker";
 import { ProfileEditor } from "./MesaView";
 
+// Token fields that change which tools the MCP client is shown (tools/list), so a
+// change to any of them means a connected agent must reconnect to see the update.
+// Capabilities gate cap-tied tools; pass_through and announce_all_tools change the
+// announced set wholesale. Persona changes surface here as capability changes.
+const TOOL_GATING_FIELDS: (keyof TokenRecord)[] = [...CAP_NAMES, "pass_through", "announce_all_tools"];
+function toolGatingChanged(a: TokenRecord, b: TokenRecord): boolean {
+  return TOOL_GATING_FIELDS.some((f) => a[f] !== b[f]);
+}
+
 interface Props {
   tokenId: string;
   onBack: () => void;
@@ -105,14 +114,14 @@ function RotatedTokenModal({ rawToken, tokenName, onClose }: { rawToken: string;
 function ToolAnnouncementToggle({ token, onUpdate }: { token: TokenRecord; onUpdate: (t: TokenRecord) => void }) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  async function toggle(value: boolean) {
+  async function patch(body: PatchTokenBody) {
     setSaving(true);
     setError(null);
     try {
-      const updated = await api.patchToken(token.id, { announce_all_tools: value });
+      const updated = await api.patchToken(token.id, body);
       onUpdate(updated);
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Failed to update tool announcement.");
+      setError(e instanceof Error ? e.message : "Failed to update token.");
     } finally {
       setSaving(false);
     }
@@ -130,7 +139,22 @@ function ToolAnnouncementToggle({ token, onUpdate }: { token: TokenRecord; onUpd
             type="checkbox"
             checked={!!token.announce_all_tools}
             disabled={saving}
-            onChange={(e) => toggle(e.target.checked)}
+            onChange={(e) => patch({ announce_all_tools: e.target.checked })}
+          />
+          <span className="toggle-switch-track" />
+        </label>
+      </div>
+      <div className="toggle-row">
+        <div className="toggle-label">
+          <span>Limit to Assist-exposed entities</span>
+          <small>Only applies to pass-through tokens. A pass-through token normally sees every entity in Home Assistant; turn this on to narrow it to only the entities you have exposed to Home Assistant Assist. Scoped tokens use the permission tree instead, so this is disabled unless pass-through mode is enabled.</small>
+        </div>
+        <label className="toggle-switch">
+          <input
+            type="checkbox"
+            checked={!!token.use_assist_exposure}
+            disabled={saving || !token.pass_through}
+            onChange={(e) => patch({ use_assist_exposure: e.target.checked })}
           />
           <span className="toggle-switch-track" />
         </label>
@@ -159,6 +183,9 @@ export function TokenDetailView({ tokenId, onBack, onRefresh }: Props) {
   const [entityTree, setEntityTree] = useState<import("../types").EntityTree | null>(null);
   const [ptToggling, setPtToggling] = useState(false);
   const [showPtModal, setShowPtModal] = useState(false);
+  // Set when a change alters the announced tool list, so we can remind the operator
+  // to reconnect the agent. Only surfaced when the token has actually been used.
+  const [reconnectNeeded, setReconnectNeeded] = useState(false);
   const [selectedEntityId, setSelectedEntityId] = useState("");
   const [selectedDepth, setSelectedDepth] = useState<"entity" | "device" | "domain">("entity");
   // Bumped on every reveal request so clicking the same row re-triggers the
@@ -186,6 +213,16 @@ export function TokenDetailView({ tokenId, onBack, onRefresh }: Props) {
   }, [tokenId]);
 
   useEffect(() => { load(); }, [load]);
+
+  // setToken wrapper for the config editors (persona, capabilities, tool
+  // announcement, pass-through). If the change alters the announced tool list and
+  // the token has been used by a client, raise the reconnect reminder.
+  const applyTokenUpdate = useCallback((updated: TokenRecord) => {
+    if (token && updated.last_used_at && toolGatingChanged(token, updated)) {
+      setReconnectNeeded(true);
+    }
+    setToken(updated);
+  }, [token]);
 
   useEffect(() => {
     api.getEntityTree().then(setEntityTree).catch(() => null);
@@ -258,7 +295,7 @@ export function TokenDetailView({ tokenId, onBack, onRefresh }: Props) {
     try {
       const body: PatchTokenBody = { pass_through: true, confirm_pass_through: true };
       const updated = await api.patchToken(tokenId, body);
-      setToken(updated);
+      applyTokenUpdate(updated);
       setShowPtModal(false);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Failed to enable pass-through.");
@@ -350,6 +387,19 @@ export function TokenDetailView({ tokenId, onBack, onRefresh }: Props) {
       <div className="token-detail-sticky">
         {error && <ErrorMsg msg={error} />}
 
+        {reconnectNeeded && (
+          <div className="banner banner-info reconnect-banner" role="status">
+            <span className="reconnect-banner-text">
+              This token's capabilities have changed. <strong>You must reconnect your AI agent to ATM</strong> in order to use the current tools.
+            </span>
+            <button
+              className="reconnect-banner-dismiss"
+              onClick={() => setReconnectNeeded(false)}
+              aria-label="Dismiss reconnect reminder"
+            >&times;</button>
+          </div>
+        )}
+
         {token.pass_through && (
           <div className="pass-through-header-banner">
             <p>
@@ -430,15 +480,15 @@ export function TokenDetailView({ tokenId, onBack, onRefresh }: Props) {
         <div className="two-col">
           <div>
             <CollapsibleCard title="Persona" summary={personaLabel} defaultOpen persistKey="atm:fold:persona">
-              <PersonaPicker token={token} onUpdate={setToken} />
+              <PersonaPicker token={token} onUpdate={applyTokenUpdate} />
             </CollapsibleCard>
 
             <div className="advanced-section-label">Advanced</div>
             <CollapsibleCard title="Capabilities" summary={capsSummary} persistKey="atm:fold:capabilities">
-              <CapabilityMatrix token={token} onUpdate={setToken} />
+              <CapabilityMatrix token={token} onUpdate={applyTokenUpdate} />
             </CollapsibleCard>
             <CollapsibleCard title="Tool Announcement" summary={announceSummary} persistKey="atm:fold:announce">
-              <ToolAnnouncementToggle token={token} onUpdate={setToken} />
+              <ToolAnnouncementToggle token={token} onUpdate={applyTokenUpdate} />
             </CollapsibleCard>
             <CollapsibleCard title="Rate Limiting" summary={rateSummary} persistKey="atm:fold:ratelimit">
               <RateLimitConfig token={token} onUpdate={setToken} />
@@ -462,7 +512,7 @@ export function TokenDetailView({ tokenId, onBack, onRefresh }: Props) {
             {token.pass_through ? (
               <div className="card">
                 <div className="card-header">Permissions Tree</div>
-                <PassThroughNotice token={token} onUpdate={setToken} />
+                <PassThroughNotice token={token} onUpdate={applyTokenUpdate} />
               </div>
             ) : (
               <div className="card">
