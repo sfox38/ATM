@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Tools reference &middot; ATM docs</title>
-  <meta name="description" content="Every ATM tool: the 20 native HA MCP tools plus 63 ATM tools, each scoped to the token's permission tree and capabilities." />
+  <meta name="description" content="Every ATM tool: the 20 native HA MCP tools plus 65 ATM tools, each scoped to the token's permission tree and capabilities." />
   <link rel="icon" href="assets/atm-logo.png" type="image/png" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -24,13 +24,13 @@
         <header class="page-head">
           <p class="breadcrumb"><a href="index.html">Docs</a> / Reference / Tools</p>
           <h1>Tools reference</h1>
-          <p class="lede">ATM implements all 20 native Home Assistant MCP tools with identical names and responses, then adds 63 of its own, 83 in all. Every tool is scoped to the token's permission tree; the ones below note the capability they additionally require.</p>
+          <p class="lede">ATM implements all 20 native Home Assistant MCP tools with identical names and responses, then adds 65 of its own, 85 in all. Every tool is scoped to the token's permission tree; the ones below note the capability they additionally require.</p>
         </header>
 
         <div class="tool-toolbar" role="search">
           <label class="tool-search">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
-            <input type="text" id="tool-search-input" placeholder="Search all 83 tools by name or keyword..." aria-label="Search tools" autocomplete="off" />
+            <input type="text" id="tool-search-input" placeholder="Search all 85 tools by name or keyword..." aria-label="Search tools" autocomplete="off" />
           </label>
           <button class="filter-chip" data-cap="all" aria-pressed="true">All</button>
           <button class="filter-chip" data-cap="read" aria-pressed="false">Reads</button>
@@ -345,9 +345,9 @@
             <p class="tool-desc">Manage scenes. Confirm-eligible.</p>
           </article>
 
-          <article class="tool" data-cap="write" data-search="list_dashboards create_dashboard edit_dashboard delete_dashboard lovelace">
-            <div class="tool-head"><span class="tool-name">list_dashboards</span><span class="tool-name">create_dashboard</span><span class="tool-name">edit_dashboard</span><span class="tool-name">delete_dashboard</span><span class="badge badge-cap">Dashboard write</span></div>
-            <p class="tool-desc">List and manage Lovelace dashboards. Confirm-eligible.</p>
+          <article class="tool" data-cap="write" data-search="list_dashboards create_dashboard edit_dashboard delete_dashboard get_dashboard_config set_dashboard_config lovelace">
+            <div class="tool-head"><span class="tool-name">list_dashboards</span><span class="tool-name">create_dashboard</span><span class="tool-name">edit_dashboard</span><span class="tool-name">delete_dashboard</span><span class="tool-name">get_dashboard_config</span><span class="tool-name">set_dashboard_config</span><span class="badge badge-cap">Dashboard write</span></div>
+            <p class="tool-desc">List and manage Lovelace dashboards, and read or replace a dashboard's view/card layout. <code>get_dashboard_config</code> redacts out-of-scope entities; <code>set_dashboard_config</code> writes storage-mode dashboards and is versioned. Confirm-eligible.</p>
           </article>
         </section>
 
