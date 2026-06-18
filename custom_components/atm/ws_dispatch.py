@@ -212,3 +212,79 @@ def check_ws_dispatch_compat(hass: HomeAssistant) -> str | None:
         return None
     except Exception as err:  # noqa: BLE001 - advisory probe must never abort setup
         return f"compatibility probe could not run: {err}"
+
+
+# ---------------------------------------------------------------------------
+# Lovelace dashboard view/card config (read + write).
+#
+# The lovelace/config WS command returns an opaque orjson.Fragment that cannot be
+# read back in-process, so these go directly through the lovelace integration's
+# LovelaceConfig objects (the same internal state HA's own handler uses). Kept in
+# this module, the designated home for HA-internals access. Only storage-mode
+# dashboards are writable; YAML-mode dashboards are file-backed.
+# ---------------------------------------------------------------------------
+
+
+def _lovelace_dashboard(hass: Any, url_path: str | None):
+    """Return the LovelaceConfig for a url_path (None = default dashboard), or None.
+
+    Mirrors HA's lovelace/config handler: for the default, prefer the 'lovelace'
+    dashboard (YAML mode) then the storage-mode default keyed None.
+    """
+    try:
+        from homeassistant.components.lovelace.const import (  # noqa: PLC0415
+            DOMAIN as _LL_DOMAIN,
+            LOVELACE_DATA,
+        )
+    except Exception:  # noqa: BLE001 - lovelace not loaded
+        return None
+    data = hass.data.get(LOVELACE_DATA)
+    if data is None:
+        return None
+    dashboards = data.dashboards
+    if url_path is None:
+        return dashboards.get(_LL_DOMAIN) or dashboards.get(None)
+    return dashboards.get(url_path)
+
+
+async def async_get_lovelace_config(hass: Any, url_path: str | None) -> dict[str, Any] | None:
+    """Return a dashboard's stored view/card config, or None if it has none.
+
+    None means the dashboard exists but is auto-generated (no stored config).
+    Raises WsDispatchError when the dashboard or lovelace is unavailable.
+    """
+    config = _lovelace_dashboard(hass, url_path)
+    if config is None:
+        raise WsDispatchError(f"config_not_found: unknown dashboard {url_path!r}")
+    try:
+        from homeassistant.components.lovelace.const import ConfigNotFound  # noqa: PLC0415
+    except Exception as exc:  # noqa: BLE001
+        raise WsDispatchError(f"lovelace unavailable: {exc}") from exc
+    try:
+        return await config.async_load(False)
+    except ConfigNotFound:
+        return None
+    except Exception as exc:  # noqa: BLE001
+        raise WsDispatchError(f"failed to read dashboard config: {exc}") from exc
+
+
+async def async_save_lovelace_config(
+    hass: Any, url_path: str | None, config_data: dict[str, Any]
+) -> None:
+    """Save a dashboard's view/card config. Storage-mode dashboards only.
+
+    Raises WsDispatchError for an unknown dashboard or a YAML-mode dashboard (which
+    is file-backed and cannot be written), rather than HA's opaque 'Not supported'.
+    """
+    config = _lovelace_dashboard(hass, url_path)
+    if config is None:
+        raise WsDispatchError(f"config_not_found: unknown dashboard {url_path!r}")
+    # mode property returns "storage" (MODE_STORAGE) or "yaml" (MODE_YAML).
+    if getattr(config, "mode", None) != "storage":
+        raise WsDispatchError(
+            "only storage-mode dashboards can be written; this dashboard is YAML-mode"
+        )
+    try:
+        await config.async_save(config_data)
+    except Exception as exc:  # noqa: BLE001
+        raise WsDispatchError(f"failed to save dashboard config: {exc}") from exc

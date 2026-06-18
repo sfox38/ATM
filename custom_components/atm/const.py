@@ -43,9 +43,8 @@ VERSION_STORAGE_VERSION = 1
 # Per-resource FIFO retention: the newest N versions per (resource_type,
 # resource_id) are kept; older ones are evicted on write.
 MAX_VERSIONS_PER_RESOURCE = 20
-# Resource types eligible for version history. Dashboards are intentionally
-# excluded: ATM exposes only their registry metadata, not the view/card layout.
-VERSIONED_RESOURCE_TYPES = frozenset({"automation", "script", "scene", "helper"})
+# Resource types eligible for version history.
+VERSIONED_RESOURCE_TYPES = frozenset({"automation", "script", "scene", "helper", "dashboard"})
 
 # MESA (semantic safety layer) integration. Profiles persist in a separate
 # Store from tokens so the two storage versions evolve independently.

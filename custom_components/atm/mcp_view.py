@@ -70,7 +70,12 @@ from .mesa import (
     fire_mesa_blocked_event,
 )
 from .mesa_core.trigger_validator import entities_by_role
-from .ws_dispatch import WsDispatchError, async_ws_command
+from .ws_dispatch import (
+    WsDispatchError,
+    async_get_lovelace_config,
+    async_save_lovelace_config,
+    async_ws_command,
+)
 from .mesa_tools import MESA_TOOL_NAMES, call_mesa_tool, mesa_tool_defs
 from .helpers import (
     build_error_response as _error,
@@ -1209,6 +1214,40 @@ _SYSTEM_TOOL_DEFS: list[dict] = [
                 "dashboard_id": {"type": "string"},
             },
             "required": ["dashboard_id"],
+        },
+    },
+    {
+        "name": "get_dashboard_config",
+        "description": (
+            "Read a Lovelace dashboard's view and card layout. Omit url_path for the "
+            "default dashboard, or pass a url_path from list_dashboards. Entity IDs "
+            "outside this token's read scope come back as \"<redacted>\"; do not write a "
+            "redacted read back with set_dashboard_config."
+        ),
+        "cap": "cap_lovelace_write",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "url_path": {"type": "string", "description": "Dashboard url_path (from list_dashboards). Omit for the default dashboard."},
+            },
+        },
+    },
+    {
+        "name": "set_dashboard_config",
+        "description": (
+            "Replace a Lovelace dashboard's view and card layout. Omit url_path for the "
+            "default dashboard. Storage-mode dashboards only (YAML-mode is rejected). "
+            "Lovelace config is not strictly validated, so a malformed layout is stored "
+            "as-is. May require admin approval."
+        ),
+        "cap": "cap_lovelace_write",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "url_path": {"type": "string", "description": "Dashboard url_path. Omit for the default dashboard."},
+                "config": {"type": "object", "description": "The full dashboard config (views and cards)."},
+            },
+            "required": ["config"],
         },
     },
 ]
@@ -2692,6 +2731,13 @@ async def restore_version(
             if exists:
                 return await _execute_edit_helper({"helper_type": ht, "helper_id": hid, "config": target}, token, hass, data)
             return await _execute_create_helper({"helper_type": ht, "config": target}, token, hass, data)
+        if resource_type == "dashboard":
+            # Dashboards are edit-only: re-apply the layout to the existing dashboard
+            # (resource_id "lovelace" is the default dashboard, url_path None).
+            return await _execute_set_dashboard_config(
+                {"url_path": None if resource_id == "lovelace" else resource_id, "config": target},
+                token, hass, data,
+            )
         return _tool_error(f"Cannot restore resource type '{resource_type}'."), "invalid_request", "restore_version"
     finally:
         _restore_ctx.reset(ctx)
@@ -5400,6 +5446,79 @@ async def _execute_delete_dashboard(
     return _tool_success(f"Dashboard '{dashboard_id}' deleted successfully."), "allowed", f"dashboard:{dashboard_id}"
 
 
+async def _tool_get_dashboard_config(
+    args: dict, token: TokenRecord, hass: Any
+) -> tuple[dict, str, str]:
+    """MCP tool: read a dashboard's view/card layout, entity ids redacted to scope."""
+    if effective_cap(token, "cap_lovelace_write") == CAP_DENY:
+        return _tool_error("Forbidden."), "denied", "get_dashboard_config"
+    url_path = str(args.get("url_path") or "").strip() or None
+    try:
+        config = await async_get_lovelace_config(hass, url_path)
+    except WsDispatchError as exc:
+        return _tool_error(f"Could not read dashboard: {exc}"), "invalid_request", "get_dashboard_config"
+    if config is None:
+        return _tool_error("This dashboard has no stored config (it is auto-generated). Use set_dashboard_config to store one."), "not_found", f"dashboard:{url_path or 'lovelace'}"
+    redacted = filter_service_response(config, token, hass)
+    return _tool_success(json.dumps({"url_path": url_path, "config": redacted}, default=str)), "allowed", f"dashboard:{url_path or 'lovelace'}"
+
+
+def _build_diff_set_dashboard_config(args: dict, token: TokenRecord, hass: Any) -> dict:
+    config = args.get("config") if isinstance(args.get("config"), dict) else {}
+    url_path = str(args.get("url_path") or "").strip() or None
+    label = url_path or "(default dashboard)"
+    views = config.get("views")
+    return {
+        "kind": "yaml_diff",
+        "summary": f"Set dashboard layout '{label}'",
+        "target": {"type": "dashboard", "id": url_path, "label": label},
+        # The current config read is async; the version record captures the real
+        # before/after, so the approval preview shows the new layout only.
+        "before": None,
+        "after": _truncate(json.dumps(config, indent=2, default=str)),
+        "preview": {"url_path": url_path, "views": len(views) if isinstance(views, list) else None},
+    }
+
+
+async def _tool_set_dashboard_config(
+    args: dict, token: TokenRecord, hass: Any, data: ATMData,
+    request_id: str = "", client_ip: str | None = None,
+) -> tuple[dict, str, str]:
+    """MCP tool: replace a dashboard's view/card layout (Confirm-gated)."""
+    blocked = await _gate(
+        "cap_lovelace_write", token, hass, data,
+        tool_name="set_dashboard_config", args=args, request_id=request_id,
+        client_ip=client_ip, diff=_build_diff_set_dashboard_config(args, token, hass),
+    )
+    if blocked is not None:
+        return blocked
+    return await _execute_set_dashboard_config(args, token, hass, data)
+
+
+async def _execute_set_dashboard_config(
+    args: dict, token: TokenRecord, hass: Any, data: ATMData
+) -> tuple[dict, str, str]:
+    config = args.get("config")
+    if not isinstance(config, dict):
+        return _tool_error("config must be an object."), "invalid_request", "set_dashboard_config"
+    url_path = str(args.get("url_path") or "").strip() or None
+    resource_id = url_path or "lovelace"
+    try:
+        before = await async_get_lovelace_config(hass, url_path)
+    except WsDispatchError:
+        before = None
+    try:
+        await async_save_lovelace_config(hass, url_path, config)
+    except WsDispatchError as exc:
+        return _tool_error(f"Failed to save dashboard config: {exc}"), "denied", "set_dashboard_config"
+    await _record_version(
+        data, token, resource_type="dashboard", resource_id=resource_id,
+        action="edit" if before is not None else "create",
+        before=before, after=config, alias=url_path or "(default)",
+    )
+    return _tool_success(json.dumps({"url_path": url_path, "saved": True}, default=str)), "allowed", f"dashboard:{resource_id}"
+
+
 async def _call_tool(
     tool_name: str,
     arguments: dict,
@@ -5570,6 +5689,10 @@ async def _call_tool(
         return await _tool_edit_dashboard(arguments, token, hass, data, request_id, client_ip)
     if tool_name == "delete_dashboard":
         return await _tool_delete_dashboard(arguments, token, hass, data, request_id, client_ip)
+    if tool_name == "get_dashboard_config":
+        return await _tool_get_dashboard_config(arguments, token, hass)
+    if tool_name == "set_dashboard_config":
+        return await _tool_set_dashboard_config(arguments, token, hass, data, request_id, client_ip)
     return _tool_error(f"Unknown tool: {tool_name}"), "denied", tool_name
 
 
@@ -6619,6 +6742,7 @@ _register_executor("create_backup", _execute_create_backup)
 _register_executor("create_dashboard", _execute_create_dashboard)
 _register_executor("edit_dashboard", _execute_edit_dashboard)
 _register_executor("delete_dashboard", _execute_delete_dashboard)
+_register_executor("set_dashboard_config", _execute_set_dashboard_config)
 _register_executor("HassSetPosition", _execute_hass_set_position)
 _register_executor("HassStopMoving", _execute_hass_stop_moving)
 _register_executor("HassTurnOn", _execute_hass_turn_on)
