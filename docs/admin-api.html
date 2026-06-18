@@ -132,6 +132,13 @@ DELETE  /api/atm/admin/approvals/{id}           Cancel a pending approval</code>
 // POST .../reject
 { "reason": "not this one" }  // optional</code></pre>
 
+        <h2 id="versions">Configuration history</h2>
+        <pre class="code" data-lang="http" data-label="Configuration history"><code>GET     /api/atm/admin/versions                              Recent changes across all resources
+GET     /api/atm/admin/versions?resource_type=&amp;resource_id=   One resource's version history
+GET     /api/atm/admin/versions/{id}                          One version, with full before/after
+POST    /api/atm/admin/versions/{id}/restore                 Re-apply a version (admin authority)</code></pre>
+        <p>Every agent-made create, edit, or delete of an automation, script, scene, or helper is snapshotted here. With no query parameters the list returns the most recent versions across all resources (the panel's Changes feed); with both <code>resource_type</code> and <code>resource_id</code> it returns that resource's history, newest first. List rows are compact summaries; fetch a single version for the full <code>before</code> / <code>after</code> config. <strong>Restore</strong> re-applies the chosen version, editing the resource if it still exists or recreating it if it was deleted, and records the change as a <code>rollback</code> attributed to you. Configs are stored raw so a restore can round-trip; the data is admin-only and no more sensitive than the YAML it mirrors.</p>
+
         <h2 id="mesa">MESA profiles</h2>
         <p>Profiles exist at the entity, domain, and area levels, plus a canonical-tag vocabulary and a validation view. The profile document shape is defined by <a href="https://github.com/sfox38/mesa-core" target="_blank" rel="noopener">mesa-core</a>; see <a href="mesa.html">MESA</a> for how it fits into ATM.</p>
         <pre class="code" data-lang="http" data-label="MESA"><code>GET     /api/atm/admin/mesa/profiles               List entity profiles (domain, tag, area, origin, cursor)

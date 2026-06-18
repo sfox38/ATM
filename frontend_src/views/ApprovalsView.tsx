@@ -3,6 +3,7 @@ import type { ApprovalRecord, ApprovalStatus } from "../types";
 import { api } from "../api";
 import { Loading, ErrorMsg } from "../index";
 import { Modal } from "../components/Modal";
+import { BeforeAfter } from "../components/DiffView";
 import { formatDateTime } from "../utils";
 
 interface Props {
@@ -455,21 +456,6 @@ function DiffView({ record }: { record: ApprovalRecord }) {
     return <ServicePreview preview={diff.preview || {}} />;
   }
   return <SystemActionPreview summary={diff.summary} preview={diff.preview || {}} />;
-}
-
-function BeforeAfter({ before, after }: { before: string | null; after: string | null }) {
-  return (
-    <div className="approval-diff-cols">
-      <div className="approval-diff-col">
-        <div className="approval-diff-label">Before</div>
-        <pre className="approval-pre">{before ?? "(none)"}</pre>
-      </div>
-      <div className="approval-diff-col">
-        <div className="approval-diff-label">After</div>
-        <pre className="approval-pre">{after ?? "(none)"}</pre>
-      </div>
-    </div>
-  );
 }
 
 // Render a preview value for the review UI. Nested objects (e.g. service_data)

@@ -1190,6 +1190,7 @@ class ATMAdminWipeView(HomeAssistantView):
             data.rate_limit_notified.clear()
             data.token_counters.clear()
             await data.audit.async_wipe()
+            await data.versions.async_wipe()
 
             for _tid in list(data.expiry_timers):
                 cancel_expiry_timer(data, _tid)
@@ -1959,6 +1960,121 @@ def _issue_to_dict(issue) -> dict:
     return dataclasses.asdict(issue)
 
 
+def _version_summary(r) -> dict:
+    """Compact list projection that omits the (potentially large) before/after configs."""
+    return {
+        "id": r.id,
+        "resource_type": r.resource_type,
+        "resource_id": r.resource_id,
+        "alias": r.alias,
+        "action": r.action,
+        "token_name": r.token_name,
+        "approved_by_user_id": r.approved_by_user_id,
+        "timestamp": r.timestamp,
+        "has_before": r.before is not None,
+        "has_after": r.after is not None,
+    }
+
+
+class ATMAdminVersionsView(HomeAssistantView):
+    """GET /api/atm/admin/versions - configuration version history for one resource.
+
+    Requires resource_type and resource_id query params. Returns compact summaries
+    (no before/after); fetch a single version for the full diff payload.
+    """
+
+    url = "/api/atm/admin/versions"
+    name = "api:atm:admin:versions"
+    requires_auth = True
+
+    @require_admin
+    async def get(self, request: web.Request) -> web.Response:
+        rid = request["atm_rid"]
+        data: ATMData = self.hass.data[DOMAIN]
+        resource_type = request.query.get("resource_type")
+        resource_id = request.query.get("resource_id")
+        if resource_type and resource_id:
+            records = data.versions.list_for(resource_type, resource_id)
+        elif not resource_type and not resource_id:
+            try:
+                limit = int(request.query.get("limit", "50"))
+            except (TypeError, ValueError):
+                limit = 50
+            records = data.versions.list_recent(limit)
+        else:
+            return _err("invalid_request", "Provide both resource_type and resource_id, or neither for the recent feed.", 400, rid)
+        return _ok({
+            "resource_type": resource_type,
+            "resource_id": resource_id,
+            "versions": [_version_summary(r) for r in records],
+            "total": len(records),
+        }, request_id=rid)
+
+
+class ATMAdminVersionView(HomeAssistantView):
+    """GET /api/atm/admin/versions/{version_id} - one version with full before/after."""
+
+    url = "/api/atm/admin/versions/{version_id}"
+    name = "api:atm:admin:version"
+    requires_auth = True
+
+    @require_admin
+    async def get(self, request: web.Request, version_id: str) -> web.Response:
+        rid = request["atm_rid"]
+        data: ATMData = self.hass.data[DOMAIN]
+        record = data.versions.get(version_id)
+        if record is None:
+            return _err("not_found", "Version not found.", 404, rid)
+        return _ok(record.to_dict(), request_id=rid)
+
+
+class ATMAdminVersionRestoreView(HomeAssistantView):
+    """POST /api/atm/admin/versions/{version_id}/restore - re-apply a stored version.
+
+    Existing resources are edited; deleted ones are recreated. Runs with admin
+    authority and records the change as a 'rollback' attributed to the admin.
+    """
+
+    url = "/api/atm/admin/versions/{version_id}/restore"
+    name = "api:atm:admin:version:restore"
+    requires_auth = True
+
+    @require_admin
+    async def post(self, request: web.Request, version_id: str) -> web.Response:
+        from .mcp_view import restore_version  # noqa: PLC0415
+
+        rid = request["atm_rid"]
+        user = request[KEY_HASS_USER]
+        data: ATMData = self.hass.data[DOMAIN]
+        record = data.versions.get(version_id)
+        if record is None:
+            return _err("not_found", "Version not found.", 404, rid)
+        try:
+            tool_result, _outcome, _resource = await restore_version(record, user.id, self.hass, data)
+        except Exception:  # noqa: BLE001
+            _LOGGER.exception("Version restore failed for %s", version_id)
+            return _err("internal_error", "Restore failed.", 500, rid)
+        is_error = bool(tool_result.get("isError"))
+        data.audit.record(
+            request_id=rid,
+            token_id=record.token_id,
+            token_name=record.token_name,
+            method="version/restore",
+            resource=f"version_restore:{record.resource_type}:{record.resource_id}",
+            outcome="denied" if is_error else "allowed",
+            client_ip="",
+            settings=data.store.get_settings(),
+        )
+        if is_error:
+            return _err("invalid_request", "Restore could not be applied to the current configuration.", 400, rid)
+        return _ok({
+            "restored": True,
+            "version_id": version_id,
+            "resource_type": record.resource_type,
+            "resource_id": record.resource_id,
+        }, request_id=rid)
+
+
 ALL_ADMIN_VIEWS: list[type[HomeAssistantView]] = [
     ATMAdminInfoView,
     ATMAdminArchivedTokensView,
@@ -1985,6 +2101,9 @@ ALL_ADMIN_VIEWS: list[type[HomeAssistantView]] = [
     ATMAdminApprovalView,
     ATMAdminApprovalApproveView,
     ATMAdminApprovalRejectView,
+    ATMAdminVersionsView,
+    ATMAdminVersionView,
+    ATMAdminVersionRestoreView,
     ATMAdminMesaProfilesView,
     ATMAdminMesaProfileView,
     ATMAdminMesaDomainsView,

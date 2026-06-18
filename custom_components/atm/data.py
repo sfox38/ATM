@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Callable
 from .audit import AuditLog
 from .rate_limiter import RateLimiter
 from .token_store import TokenStore
+from .version_store import VersionStore
 
 if TYPE_CHECKING:
     from .mesa import MesaRuntime
@@ -25,6 +26,10 @@ class ATMData:
     store: TokenStore
     rate_limiter: RateLimiter
     audit: AuditLog
+    # Configuration version history (SPEC Section 16). Always present: __init__
+    # supplies a persistent store; direct constructions (tests) get an in-memory
+    # default so the field is never missing.
+    versions: VersionStore = field(default_factory=VersionStore)
     # MESA semantic-safety runtime (store, resolver, enforcer, validator).
     # None only if MESA setup failed; views guard accordingly.
     mesa: MesaRuntime | None = None

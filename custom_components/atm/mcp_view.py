@@ -2115,6 +2115,56 @@ async def _tool_create_automation(
     return await _execute_create_automation(args, token, hass, data)
 
 
+# Set by an admin restore (admin_view) around a re-applied executor call, so the
+# executor's own capture is stamped as a "rollback" attributed to the admin rather
+# than a plain create/edit. asyncio-safe: the value is scoped to the restore task.
+_restore_ctx: ContextVar[dict | None] = ContextVar("atm_restore_ctx", default=None)
+
+
+async def _record_version(
+    data: ATMData,
+    token: TokenRecord,
+    *,
+    resource_type: str,
+    resource_id: str,
+    action: str,
+    before: dict | None,
+    after: dict | None,
+    alias: str | None = None,
+) -> None:
+    """Best-effort capture of a config change into the version history.
+
+    Called from each _execute_* at ATM's single execution chokepoint, so it
+    records both directly-allowed and Confirm-approved changes exactly once.
+    Never raises: a version-store failure must not fail the user's actual write.
+    request_id is intentionally not threaded (versions correlate to the audit log
+    by token + resource + timestamp); approved_by_user_id is set only on the admin
+    restore path.
+    """
+    ctx = _restore_ctx.get()
+    approved_by_user_id = None
+    if ctx is not None:
+        # Admin restore: this reused create/edit is really a rollback by an admin.
+        action = "rollback"
+        approved_by_user_id = ctx.get("user_id")
+    try:
+        await data.versions.record(
+            resource_type=resource_type,
+            resource_id=resource_id,
+            action=action,
+            before=before,
+            after=after,
+            alias=alias,
+            token_id=token.id,
+            token_name=token.name,
+            approved_by_user_id=approved_by_user_id,
+        )
+    except Exception:  # noqa: BLE001 - history capture must never break a write
+        _LOGGER.exception(
+            "Failed to record %s version for %s %s", action, resource_type, resource_id
+        )
+
+
 async def _execute_create_automation(
     args: dict, token: TokenRecord, hass: Any, data: ATMData
 ) -> tuple[dict, str, str]:
@@ -2152,6 +2202,10 @@ async def _execute_create_automation(
         _LOGGER.error("create_automation failed: %s", exc)
         return _tool_error("Failed to create automation. Check HA logs for details."), "denied", "create_automation"
 
+    await _record_version(
+        data, token, resource_type="automation", resource_id=automation_id,
+        action="create", before=None, after=config, alias=config.get("alias"),
+    )
     return _tool_success(json.dumps(config, indent=2, default=str)), "allowed", "create_automation"
 
 
@@ -2209,6 +2263,7 @@ async def _execute_edit_automation(
             idx = next((i for i, a in enumerate(items) if a.get("id") == automation_id), None)
             if idx is None:
                 return _tool_error(f"No automation found with id '{automation_id}'."), "denied", "edit_automation"
+            before_cfg = items[idx]
             items[idx] = config
             await hass.async_add_executor_job(_write_automations_yaml, path, items)
         await hass.services.async_call("automation", "reload", blocking=True)
@@ -2216,6 +2271,10 @@ async def _execute_edit_automation(
         _LOGGER.error("edit_automation failed: %s", exc)
         return _tool_error("Failed to edit automation. Check HA logs for details."), "denied", "edit_automation"
 
+    await _record_version(
+        data, token, resource_type="automation", resource_id=automation_id,
+        action="edit", before=before_cfg, after=config, alias=config.get("alias"),
+    )
     return _tool_success(json.dumps(config, indent=2, default=str)), "allowed", "edit_automation"
 
 
@@ -2252,6 +2311,7 @@ async def _execute_delete_automation(
             if await hass.async_add_executor_job(_yaml_file_has_includes, path):
                 return _tool_error("automations.yaml uses !include directives. ATM cannot safely edit it without destroying the include structure."), "denied", "delete_automation"
             items = await hass.async_add_executor_job(_read_automations_yaml, path)
+            removed = next((a for a in items if a.get("id") == automation_id), None)
             filtered = [a for a in items if a.get("id") != automation_id]
             if len(filtered) == len(items):
                 return _tool_error(f"No automation found with id '{automation_id}'."), "denied", "delete_automation"
@@ -2261,6 +2321,11 @@ async def _execute_delete_automation(
         _LOGGER.error("delete_automation failed: %s", exc)
         return _tool_error("Failed to delete automation. Check HA logs for details."), "denied", "delete_automation"
 
+    await _record_version(
+        data, token, resource_type="automation", resource_id=automation_id,
+        action="delete", before=removed, after=None,
+        alias=removed.get("alias") if isinstance(removed, dict) else None,
+    )
     return _tool_success(f"Automation '{automation_id}' deleted successfully."), "allowed", "delete_automation"
 
 
@@ -2320,6 +2385,10 @@ async def _execute_create_script(
         _LOGGER.error("create_script failed: %s", exc)
         return _tool_error("Failed to create script. Check HA logs for details."), "denied", "create_script"
 
+    await _record_version(
+        data, token, resource_type="script", resource_id=script_id,
+        action="create", before=None, after=config, alias=config.get("alias"),
+    )
     return _tool_success(json.dumps({script_id: config}, indent=2, default=str)), "allowed", "create_script"
 
 
@@ -2372,6 +2441,7 @@ async def _execute_edit_script(
             scripts = await hass.async_add_executor_job(_read_scripts_yaml, path)
             if script_id not in scripts:
                 return _tool_error(f"No script found with id '{script_id}'."), "denied", "edit_script"
+            before_cfg = scripts[script_id]
             scripts[script_id] = config
             await hass.async_add_executor_job(_write_scripts_yaml, path, scripts)
         await hass.services.async_call("script", "reload", blocking=True)
@@ -2379,6 +2449,10 @@ async def _execute_edit_script(
         _LOGGER.error("edit_script failed: %s", exc)
         return _tool_error("Failed to edit script. Check HA logs for details."), "denied", "edit_script"
 
+    await _record_version(
+        data, token, resource_type="script", resource_id=script_id,
+        action="edit", before=before_cfg, after=config, alias=config.get("alias"),
+    )
     return _tool_success(json.dumps({script_id: config}, indent=2, default=str)), "allowed", "edit_script"
 
 
@@ -2419,6 +2493,7 @@ async def _execute_delete_script(
             scripts = await hass.async_add_executor_job(_read_scripts_yaml, path)
             if script_id not in scripts:
                 return _tool_error(f"No script found with id '{script_id}'."), "denied", "delete_script"
+            before_cfg = scripts[script_id]
             del scripts[script_id]
             await hass.async_add_executor_job(_write_scripts_yaml, path, scripts)
         await hass.services.async_call("script", "reload", blocking=True)
@@ -2426,6 +2501,11 @@ async def _execute_delete_script(
         _LOGGER.error("delete_script failed: %s", exc)
         return _tool_error("Failed to delete script. Check HA logs for details."), "denied", "delete_script"
 
+    await _record_version(
+        data, token, resource_type="script", resource_id=script_id,
+        action="delete", before=before_cfg, after=None,
+        alias=before_cfg.get("alias") if isinstance(before_cfg, dict) else None,
+    )
     return _tool_success(f"Script '{script_id}' deleted successfully."), "allowed", "delete_script"
 
 
@@ -2528,6 +2608,93 @@ _EXECUTOR_REGISTRY: dict[str, Any] = {}
 def _register_executor(tool_name: str, fn: Any) -> None:
     """Record an executor function for a tool. Called once at module import."""
     _EXECUTOR_REGISTRY[tool_name] = fn
+
+
+def _restore_token(user_id: str) -> TokenRecord:
+    """Synthetic pass-through token used to re-apply a config under admin authority.
+
+    pass_through makes policy_engine.resolve() return WRITE for every entity, so the
+    per-entity scope checks inside the scene/helper executors pass for an admin who
+    has full authority. It is never persisted and never authenticates a request.
+    """
+    return TokenRecord(
+        id=f"__restore__:{user_id}",
+        name="(admin restore)",
+        token_hash="",
+        created_at=utcnow(),
+        created_by=user_id,
+        pass_through=True,
+    )
+
+
+async def _resource_exists(hass: Any, resource_type: str, resource_id: str) -> bool:
+    """Whether a versioned resource currently exists (picks restore edit vs recreate)."""
+    try:
+        if resource_type == "automation":
+            path = os.path.join(hass.config.config_dir, _AUTOMATION_YAML)
+            items = await hass.async_add_executor_job(_read_automations_yaml, path)
+            return any(isinstance(a, dict) and a.get("id") == resource_id for a in items)
+        if resource_type == "script":
+            path = hass.config.path(_SCRIPT_CONFIG_PATH)
+            scripts = await hass.async_add_executor_job(_read_scripts_yaml, path)
+            return resource_id in scripts
+        if resource_type == "scene":
+            path = hass.config.path(_SCENE_CONFIG_PATH)
+            items = await hass.async_add_executor_job(_read_scenes_yaml, path)
+            return any(isinstance(s, dict) and str(s.get("id")) == resource_id for s in items)
+        if resource_type == "helper":
+            ht, _, hid = resource_id.partition(":")
+            return await _read_helper_config(hass, ht, hid) is not None
+    except Exception:  # noqa: BLE001 - existence probe is best-effort
+        return False
+    return False
+
+
+async def restore_version(
+    record: Any, admin_user_id: str, hass: Any, data: ATMData
+) -> tuple[dict, str, str]:
+    """Re-apply a stored config version under admin authority (SPEC Section 16.6).
+
+    Reuses the create/edit executors with a synthetic pass-through admin token so
+    per-entity scope checks pass; an existing resource is edited, a deleted one is
+    recreated (automations/scenes/helpers get a fresh id, scripts keep theirs). The
+    resulting capture is stamped as a 'rollback' attributed to the admin via
+    _restore_ctx. Returns (tool_result, outcome, resource).
+    """
+    target = record.after if record.after is not None else record.before
+    if not isinstance(target, dict):
+        return _tool_error("This version has no configuration to restore."), "invalid_request", "restore_version"
+    # The executors manage ids themselves; a stored config may carry one (e.g. a
+    # deleted helper's full item), so drop it before re-applying.
+    target = {k: v for k, v in target.items() if k != "id"}
+
+    resource_type = record.resource_type
+    resource_id = record.resource_id
+    token = _restore_token(admin_user_id)
+    exists = await _resource_exists(hass, resource_type, resource_id)
+
+    ctx = _restore_ctx.set({"user_id": admin_user_id})
+    try:
+        if resource_type == "automation":
+            if exists:
+                return await _execute_edit_automation({"automation_id": resource_id, "config": target}, token, hass, data)
+            return await _execute_create_automation({"config": target}, token, hass, data)
+        if resource_type == "script":
+            if exists:
+                return await _execute_edit_script({"script_id": resource_id, "config": target}, token, hass, data)
+            return await _execute_create_script({"script_id": resource_id, "config": target}, token, hass, data)
+        if resource_type == "scene":
+            if exists:
+                return await _execute_edit_scene({"scene_id": resource_id, "config": target}, token, hass, data)
+            return await _execute_create_scene({"config": target}, token, hass, data)
+        if resource_type == "helper":
+            ht, _, hid = resource_id.partition(":")
+            if exists:
+                return await _execute_edit_helper({"helper_type": ht, "helper_id": hid, "config": target}, token, hass, data)
+            return await _execute_create_helper({"helper_type": ht, "config": target}, token, hass, data)
+        return _tool_error(f"Cannot restore resource type '{resource_type}'."), "invalid_request", "restore_version"
+    finally:
+        _restore_ctx.reset(ctx)
 
 
 async def execute_approved_tool(
@@ -4372,7 +4539,7 @@ async def _tool_list_scenes(
 
 
 async def _scene_write(
-    config: dict, token: TokenRecord, hass: Any, *, tool_name: str, scene_id: str, replace: bool
+    config: dict, token: TokenRecord, hass: Any, data: ATMData, *, tool_name: str, scene_id: str, replace: bool
 ) -> tuple[dict, str, str]:
     """Shared create/edit body: validate, scope-check members, write scenes.yaml, reload."""
     if not _valid_scene_config(config):
@@ -4398,14 +4565,21 @@ async def _scene_write(
                 # id is not an existence oracle.
                 if idx is None or _unwritable_scene_members(items[idx], token, hass):
                     return _tool_error(f"No scene found with id '{scene_id}', or it controls entities outside your write scope."), "denied", tool_name
+                before_cfg = items[idx]
                 items[idx] = config
             else:
+                before_cfg = None
                 items.append(config)
             await hass.async_add_executor_job(_write_scenes_yaml, path, items)
         await hass.services.async_call("scene", "reload", blocking=True)
     except Exception as exc:  # noqa: BLE001
         _LOGGER.error("%s failed: %s", tool_name, exc)
         return _tool_error(f"Failed to {tool_name.replace('_', ' ')}. Check HA logs for details."), "denied", tool_name
+    await _record_version(
+        data, token, resource_type="scene", resource_id=scene_id,
+        action="edit" if replace else "create",
+        before=before_cfg, after=config, alias=config.get("name"),
+    )
     return _tool_success(json.dumps(config, indent=2, default=str)), "allowed", tool_name
 
 
@@ -4431,7 +4605,7 @@ async def _execute_create_scene(
     if not isinstance(config, dict):
         return _tool_error("config must be an object."), "invalid_request", "create_scene"
     return await _scene_write(
-        config, token, hass, tool_name="create_scene",
+        config, token, hass, data, tool_name="create_scene",
         scene_id="atm_" + uuid.uuid4().hex[:16], replace=False,
     )
 
@@ -4460,7 +4634,7 @@ async def _execute_edit_scene(
         return _tool_error("scene_id is required."), "invalid_request", "edit_scene"
     if not isinstance(config, dict):
         return _tool_error("config must be an object."), "invalid_request", "edit_scene"
-    return await _scene_write(config, token, hass, tool_name="edit_scene", scene_id=scene_id, replace=True)
+    return await _scene_write(config, token, hass, data, tool_name="edit_scene", scene_id=scene_id, replace=True)
 
 
 async def _tool_delete_scene(
@@ -4510,6 +4684,11 @@ async def _execute_delete_scene(
     except Exception as exc:  # noqa: BLE001
         _LOGGER.error("delete_scene failed: %s", exc)
         return _tool_error("Failed to delete scene. Check HA logs for details."), "denied", "delete_scene"
+    await _record_version(
+        data, token, resource_type="scene", resource_id=scene_id,
+        action="delete", before=existing, after=None,
+        alias=existing.get("name") if isinstance(existing, dict) else None,
+    )
     return _tool_success(f"Scene '{scene_id}' deleted successfully."), "allowed", "delete_scene"
 
 
@@ -4578,6 +4757,23 @@ async def _tool_create_helper(
     return await _execute_create_helper(args, token, hass, data)
 
 
+async def _read_helper_config(hass: Any, helper_type: str, helper_id: str) -> dict | None:
+    """Return a helper's current stored config (for version-history `before`), or None.
+
+    Best-effort: a failure to read the prior config must not block the edit/delete,
+    so any dispatch error degrades to no `before` rather than raising.
+    """
+    try:
+        items = await async_ws_command(hass, f"{helper_type}/list", {})
+    except WsDispatchError:
+        return None
+    if not isinstance(items, list):
+        return None
+    return next(
+        (it for it in items if isinstance(it, dict) and it.get("id") == helper_id), None
+    )
+
+
 async def _execute_create_helper(
     args: dict, token: TokenRecord, hass: Any, data: ATMData
 ) -> tuple[dict, str, str]:
@@ -4591,6 +4787,11 @@ async def _execute_create_helper(
         item = await async_ws_command(hass, f"{helper_type}/create", dict(config))
     except WsDispatchError as exc:
         return _tool_error(f"Failed to create helper: {exc}"), "invalid_request", "create_helper"
+    new_id = item.get("id") if isinstance(item, dict) else None
+    await _record_version(
+        data, token, resource_type="helper", resource_id=f"{helper_type}:{new_id}",
+        action="create", before=None, after=config, alias=config.get("name"),
+    )
     return _tool_success(json.dumps({"helper_type": helper_type, "helper": item}, default=str)), "allowed", f"helper:{helper_type}"
 
 
@@ -4624,11 +4825,16 @@ async def _execute_edit_helper(
     entity_id = _resolve_helper_entity_id(hass, helper_type, helper_id)
     if entity_id is None or resolve(entity_id, token, hass) != Permission.WRITE:
         return _tool_error("Helper not found, or it is outside your write scope."), "not_found", f"helper:{helper_type}:{helper_id}"
+    before_cfg = await _read_helper_config(hass, helper_type, helper_id)
     payload = {f"{helper_type}_id": helper_id, **config}
     try:
         item = await async_ws_command(hass, f"{helper_type}/update", payload)
     except WsDispatchError as exc:
         return _tool_error(f"Failed to edit helper: {exc}"), "invalid_request", "edit_helper"
+    await _record_version(
+        data, token, resource_type="helper", resource_id=f"{helper_type}:{helper_id}",
+        action="edit", before=before_cfg, after=config, alias=config.get("name"),
+    )
     return _tool_success(json.dumps({"helper_type": helper_type, "helper": item}, default=str)), "allowed", f"helper:{helper_type}:{helper_id}"
 
 
@@ -4659,10 +4865,16 @@ async def _execute_delete_helper(
     entity_id = _resolve_helper_entity_id(hass, helper_type, helper_id)
     if entity_id is None or resolve(entity_id, token, hass) != Permission.WRITE:
         return _tool_error("Helper not found, or it is outside your write scope."), "not_found", f"helper:{helper_type}:{helper_id}"
+    before_cfg = await _read_helper_config(hass, helper_type, helper_id)
     try:
         await async_ws_command(hass, f"{helper_type}/delete", {f"{helper_type}_id": helper_id})
     except WsDispatchError as exc:
         return _tool_error(f"Failed to delete helper: {exc}"), "invalid_request", "delete_helper"
+    await _record_version(
+        data, token, resource_type="helper", resource_id=f"{helper_type}:{helper_id}",
+        action="delete", before=before_cfg, after=None,
+        alias=before_cfg.get("name") if isinstance(before_cfg, dict) else None,
+    )
     return _tool_success(f"Helper '{helper_id}' deleted successfully."), "allowed", f"helper:{helper_type}:{helper_id}"
 
 

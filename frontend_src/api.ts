@@ -22,6 +22,9 @@ import type {
   TokenCreateResponse,
   TokenRecord,
   TokenStats,
+  VersionListResponse,
+  VersionRecord,
+  VersionRestoreResponse,
 } from "./types";
 
 const BASE = "/api/atm/admin";
@@ -195,6 +198,18 @@ export const api = {
   rejectApproval: (id: string, body: { reason?: string } = {}) =>
     req<ApprovalRecord>("POST", `/approvals/${encodeURIComponent(id)}/reject`, body),
   cancelApproval: (id: string) => req<void>("DELETE", `/approvals/${encodeURIComponent(id)}`),
+
+  listVersions: (params?: { resource_type?: string; resource_id?: string; limit?: number }) => {
+    const p = new URLSearchParams();
+    if (params?.resource_type) p.set("resource_type", params.resource_type);
+    if (params?.resource_id) p.set("resource_id", params.resource_id);
+    if (params?.limit !== undefined) p.set("limit", String(params.limit));
+    const q = p.toString();
+    return req<VersionListResponse>("GET", `/versions${q ? `?${q}` : ""}`);
+  },
+  getVersion: (id: string) => req<VersionRecord>("GET", `/versions/${encodeURIComponent(id)}`),
+  restoreVersion: (id: string) =>
+    req<VersionRestoreResponse>("POST", `/versions/${encodeURIComponent(id)}/restore`),
 };
 
 export { ApiError };

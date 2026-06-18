@@ -14,7 +14,8 @@ from homeassistant.helpers import entity_registry as er_mod
 from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.helpers.storage import Store
 from .audit import AuditLog
-from .const import AUDIT_STORAGE_KEY, AUDIT_STORAGE_VERSION, DOMAIN, EXPIRY_CHECK_INTERVAL, FLUSH_INTERVAL, SENSOR_PUSH_INTERVAL
+from .version_store import VersionStore
+from .const import AUDIT_STORAGE_KEY, AUDIT_STORAGE_VERSION, DOMAIN, EXPIRY_CHECK_INTERVAL, FLUSH_INTERVAL, SENSOR_PUSH_INTERVAL, VERSION_STORAGE_KEY, VERSION_STORAGE_VERSION
 from .data import ATMData
 from .helpers import archive_expired_token, cancel_expiry_timer, schedule_expiry_timer
 from .policy_engine import template_blocklist_vars
@@ -106,10 +107,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     audit = AuditLog(store=audit_store, maxlen=store.get_settings().audit_log_maxlen)
     await audit.async_load()
 
+    versions = VersionStore(store=Store(hass, VERSION_STORAGE_VERSION, VERSION_STORAGE_KEY))
+    await versions.async_load()
+
     data = ATMData(
         store=store,
         rate_limiter=rate_limiter,
         audit=audit,
+        versions=versions,
     )
     # hass.data is keyed by DOMAIN (not config entry ID). This is intentional: the config
     # flow enforces a single ATM instance via async_abort("already_configured"), so there

@@ -34,6 +34,19 @@ AUDIT_STORAGE_VERSION = 1
 # audit_flush_interval is stored and exposed in minutes (not seconds).
 # Valid values: 0 (disable periodic flush), 5, 10, 15, 30, 60.
 
+# Configuration version history (SPEC Section 16). Immutable before/after
+# snapshots of agent-driven create/edit/delete of automations, scripts, scenes,
+# and helpers, with admin-only rollback. Stored separately from tokens so the
+# schema versions evolve independently.
+VERSION_STORAGE_KEY = "atm_versions"
+VERSION_STORAGE_VERSION = 1
+# Per-resource FIFO retention: the newest N versions per (resource_type,
+# resource_id) are kept; older ones are evicted on write.
+MAX_VERSIONS_PER_RESOURCE = 20
+# Resource types eligible for version history. Dashboards are intentionally
+# excluded: ATM exposes only their registry metadata, not the view/card layout.
+VERSIONED_RESOURCE_TYPES = frozenset({"automation", "script", "scene", "helper"})
+
 # MESA (semantic safety layer) integration. Profiles persist in a separate
 # Store from tokens so the two storage versions evolve independently.
 MESA_STORAGE_KEY = "atm_mesa"

@@ -36,15 +36,16 @@ DEFAULT_TIMEOUT = 10.0
 # The only WS commands ATM is permitted to dispatch in-process. async_ws_command
 # refuses anything outside this set, so a future caller cannot turn user input
 # into an arbitrary privileged command run as admin. Adding a command here is a
-# deliberate act. Keep in sync with the callers in mcp_view.py (helper CRUD,
-# backup read/create, lovelace dashboard CRUD). restore_backup is deliberately
-# absent (too destructive).
+# deliberate act. Keep in sync with the callers in mcp_view.py (helper CRUD +
+# list, backup read/create, lovelace dashboard CRUD). restore_backup is
+# deliberately absent (too destructive). The helper "list" read is used to
+# capture the pre-change config for version history (SPEC Section 16).
 _HELPER_DOMAINS = (
     "input_boolean", "input_number", "input_text",
     "input_select", "input_datetime", "counter", "timer",
 )
 ALLOWED_WS_COMMANDS: frozenset[str] = frozenset(
-    [f"{domain}/{op}" for domain in _HELPER_DOMAINS for op in ("create", "update", "delete")]
+    [f"{domain}/{op}" for domain in _HELPER_DOMAINS for op in ("create", "update", "delete", "list")]
     + [
         "backup/agents/info", "backup/info", "backup/generate",
         "lovelace/dashboards/list", "lovelace/dashboards/create",

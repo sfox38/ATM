@@ -343,6 +343,51 @@ export interface ApprovalListParams {
   offset?: number;
 }
 
+export type VersionAction = "create" | "edit" | "delete" | "rollback";
+export type VersionResourceType = "automation" | "script" | "scene" | "helper";
+
+export interface VersionSummary {
+  id: string;
+  resource_type: VersionResourceType;
+  resource_id: string;
+  alias: string | null;
+  action: VersionAction;
+  token_name: string | null;
+  approved_by_user_id: string | null;
+  timestamp: string;
+  has_before: boolean;
+  has_after: boolean;
+}
+
+export interface VersionRecord {
+  id: string;
+  resource_type: VersionResourceType;
+  resource_id: string;
+  alias: string | null;
+  action: VersionAction;
+  before: Record<string, unknown> | null;
+  after: Record<string, unknown> | null;
+  token_id: string | null;
+  token_name: string | null;
+  request_id: string | null;
+  approved_by_user_id: string | null;
+  timestamp: string;
+}
+
+export interface VersionListResponse {
+  resource_type: string | null;
+  resource_id: string | null;
+  versions: VersionSummary[];
+  total: number;
+}
+
+export interface VersionRestoreResponse {
+  restored: boolean;
+  version_id: string;
+  resource_type: string;
+  resource_id: string;
+}
+
 declare global {
   namespace React.JSX {
     interface IntrinsicElements {
