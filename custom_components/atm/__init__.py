@@ -111,6 +111,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     await versions.async_load()
 
     data = ATMData(
+        hass=hass,
         store=store,
         rate_limiter=rate_limiter,
         audit=audit,

@@ -432,6 +432,31 @@ _ENTITY_TOOL_DEFS: list[dict] = [
         },
     },
     {
+        "name": "wait_for_approval",
+        "description": (
+            "Block until a pending approval you created resolves, then return its final status and result. "
+            "Use this instead of repeatedly polling get_approval_status after a tool returns "
+            "'pending_approval': it returns immediately if the approval is already resolved, otherwise it "
+            "waits server-side (up to 'timeout' seconds, capped) for a human to approve, reject, or for it "
+            "to expire. On timeout it returns with the approval still pending so you can call again. Tokens "
+            "only ever see approvals they themselves created."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "approval_id": {
+                    "type": "string",
+                    "description": "The approval_id returned by the tool call that is pending.",
+                },
+                "timeout": {
+                    "type": "integer",
+                    "description": "Max seconds to wait (capped by the server). Default is the server cap.",
+                },
+            },
+            "required": ["approval_id"],
+        },
+    },
+    {
         "name": "get_capability_summary",
         "description": (
             "Introspect this token: its persona, effective capabilities (deny/allow/confirm), which "
@@ -1633,8 +1658,9 @@ def _tool_pending(approval: Any) -> dict:
         "review_url": f"/atm#approvals/{approval.id}",
         "message": (
             "This action requires admin approval. The admin has been notified. "
-            "The result is not returned here; call the get_approval_status tool with "
-            "this approval_id to learn whether it was approved or rejected (and any reason)."
+            "The result is not returned here. Call wait_for_approval with this approval_id "
+            "to block until it resolves, or get_approval_status for a one-shot check, to learn "
+            "whether it was approved or rejected (and any reason). Do not retry the original action."
         ),
     })
     return {"content": [{"type": "text", "text": body}]}
@@ -2202,6 +2228,14 @@ async def _record_version(
         _LOGGER.exception(
             "Failed to record %s version for %s %s", action, resource_type, resource_id
         )
+        return
+    # Let the admin panel's Changes tab refresh instantly instead of waiting for
+    # its poll. Best-effort: a missing hass (tests) just falls back to polling.
+    if data.hass is not None:
+        data.hass.bus.async_fire(
+            "atm_config_changed",
+            {"resource_type": resource_type, "resource_id": resource_id, "action": action},
+        )
 
 
 async def _execute_create_automation(
@@ -2211,7 +2245,10 @@ async def _execute_create_automation(
     if not isinstance(config, dict):
         return _tool_error("config must be an object."), "invalid_request", "create_automation"
 
-    automation_id = "atm_" + uuid.uuid4().hex[:16]
+    # A restore of a deleted automation recreates it under its original id (passed
+    # explicitly) so it returns in place and re-restoring is idempotent (F4);
+    # a fresh create mints a new id.
+    automation_id = str(args.get("automation_id") or "").strip() or "atm_" + uuid.uuid4().hex[:16]
     config = {k: v for k, v in config.items() if k != "id"}
     config["id"] = automation_id
 
@@ -2638,6 +2675,66 @@ async def _tool_get_approval_status(
     return _tool_success(json.dumps(payload, default=str)), "allowed", _approval_resource(record)
 
 
+def _approval_status_payload(record: Any, *, resolved: bool) -> dict:
+    """Status body shared by wait_for_approval (same fields as get_approval_status)."""
+    return {
+        "approval_id": record.id,
+        "status": record.status,
+        "resolved": resolved,
+        "tool_name": record.tool_name,
+        "created_at": record.created_at.isoformat() if record.created_at else None,
+        "expires_at": record.expires_at.isoformat() if record.expires_at else None,
+        "resolved_at": record.resolved_at.isoformat() if record.resolved_at else None,
+        "result": record.result,
+        "rejected_reason": record.rejected_reason,
+    }
+
+
+async def _tool_wait_for_approval(
+    args: dict, token: TokenRecord, hass: Any, data: ATMData
+) -> tuple[dict, str, str]:
+    """MCP tool: block until the token's own approval resolves, or until timeout.
+
+    A bounded server-side wait (not a stream): returns immediately if already
+    resolved, else waits on the atm_approval_resolved event filtered to this
+    approval_id. Own-data only (cross-token lookups 404, matching
+    get_approval_status); no capability required.
+    """
+    from .approvals import STATUS_PENDING, get_approval  # noqa: PLC0415
+
+    approval_id = args.get("approval_id")
+    if not isinstance(approval_id, str) or not approval_id:
+        return _tool_error("Missing approval_id."), "invalid_request", "wait_for_approval"
+    record = get_approval(data.store, approval_id)
+    if record is None or record.token_id != token.id:
+        return _tool_error("Approval not found."), "not_found", "wait_for_approval"
+
+    if record.status != STATUS_PENDING:
+        return _tool_success(json.dumps(_approval_status_payload(record, resolved=True), default=str)), "allowed", _approval_resource(record)
+
+    timeout = _clamp_timeout(args.get("timeout", MAX_SUBSCRIPTION_SECONDS))
+    future: asyncio.Future = hass.loop.create_future()
+
+    @callback
+    def _on_resolved(event: Any) -> None:
+        if event.data.get("approval_id") == approval_id and not future.done():
+            future.set_result(True)
+
+    unsub = hass.bus.async_listen(f"{DOMAIN}_approval_resolved", _on_resolved)
+    try:
+        await asyncio.wait_for(future, timeout)
+    except TimeoutError:
+        # Re-read in case it resolved without an event (e.g. the expiry sweep).
+        latest = get_approval(data.store, approval_id) or record
+        resolved = latest.status != STATUS_PENDING
+        return _tool_success(json.dumps(_approval_status_payload(latest, resolved=resolved), default=str)), "allowed", _approval_resource(latest)
+    finally:
+        unsub()
+
+    latest = get_approval(data.store, approval_id) or record
+    return _tool_success(json.dumps(_approval_status_payload(latest, resolved=True), default=str)), "allowed", _approval_resource(latest)
+
+
 # Executor registry for the admin-approval gate. When an admin approves a pending
 # request, the approve handler looks up the saved tool_name here and invokes the
 # corresponding _execute_X function with the saved args.
@@ -2690,19 +2787,31 @@ async def _resource_exists(hass: Any, resource_type: str, resource_id: str) -> b
 
 
 async def restore_version(
-    record: Any, admin_user_id: str, hass: Any, data: ATMData
+    record: Any, admin_user_id: str, hass: Any, data: ATMData, side: str | None = None
 ) -> tuple[dict, str, str]:
     """Re-apply a stored config version under admin authority (SPEC Section 16.6).
 
+    `side` selects which snapshot to apply: "before" (the config prior to this
+    change) or "after" (the config this change produced). When omitted it falls
+    back to "after", or "before" if there is no after (a delete). The chosen side
+    must hold a config.
+
     Reuses the create/edit executors with a synthetic pass-through admin token so
     per-entity scope checks pass; an existing resource is edited, a deleted one is
-    recreated (automations/scenes/helpers get a fresh id, scripts keep theirs). The
-    resulting capture is stamped as a 'rollback' attributed to the admin via
-    _restore_ctx. Returns (tool_result, outcome, resource).
+    recreated in place under its original id (automations, scenes, and scripts), so
+    the rollback lands on the same timeline and re-restoring is idempotent. Helpers
+    are the exception: HA's storage collection assigns the id, so a recreated helper
+    gets a fresh one. The resulting capture is stamped as a 'rollback' attributed to
+    the admin via _restore_ctx. Returns (tool_result, outcome, resource).
     """
-    target = record.after if record.after is not None else record.before
+    if side == "before":
+        target = record.before
+    elif side == "after":
+        target = record.after
+    else:
+        target = record.after if record.after is not None else record.before
     if not isinstance(target, dict):
-        return _tool_error("This version has no configuration to restore."), "invalid_request", "restore_version"
+        return _tool_error("This version has no configuration to restore on that side."), "invalid_request", "restore_version"
     # The executors manage ids themselves; a stored config may carry one (e.g. a
     # deleted helper's full item), so drop it before re-applying.
     target = {k: v for k, v in target.items() if k != "id"}
@@ -2717,7 +2826,9 @@ async def restore_version(
         if resource_type == "automation":
             if exists:
                 return await _execute_edit_automation({"automation_id": resource_id, "config": target}, token, hass, data)
-            return await _execute_create_automation({"config": target}, token, hass, data)
+            # Recreate in place under the original id so the rollback lands on the
+            # same timeline and a second restore just edits it (F4).
+            return await _execute_create_automation({"config": target, "automation_id": resource_id}, token, hass, data)
         if resource_type == "script":
             if exists:
                 return await _execute_edit_script({"script_id": resource_id, "config": target}, token, hass, data)
@@ -2725,7 +2836,7 @@ async def restore_version(
         if resource_type == "scene":
             if exists:
                 return await _execute_edit_scene({"scene_id": resource_id, "config": target}, token, hass, data)
-            return await _execute_create_scene({"config": target}, token, hass, data)
+            return await _execute_create_scene({"config": target, "scene_id": resource_id}, token, hass, data)
         if resource_type == "helper":
             ht, _, hid = resource_id.partition(":")
             if exists:
@@ -4650,9 +4761,12 @@ async def _execute_create_scene(
     config = args.get("config")
     if not isinstance(config, dict):
         return _tool_error("config must be an object."), "invalid_request", "create_scene"
+    # Restore of a deleted scene recreates it under its original id (F4); a fresh
+    # create mints a new one.
+    scene_id = str(args.get("scene_id") or "").strip() or "atm_" + uuid.uuid4().hex[:16]
     return await _scene_write(
         config, token, hass, data, tool_name="create_scene",
-        scene_id="atm_" + uuid.uuid4().hex[:16], replace=False,
+        scene_id=scene_id, replace=False,
     )
 
 
@@ -4751,9 +4865,9 @@ def _resolve_helper_entity_id(hass: Any, helper_type: str, helper_id: str) -> st
     """Map a storage-helper id back to its entity_id via the registry, or None.
 
     list_helpers exposes entry.unique_id as the editable helper_id, so the reverse
-    lookup matches on (domain == helper_type, unique_id == helper_id). Used to
-    enforce that edit/delete only touch helpers in the token's WRITE scope, not
-    any helper id the agent can guess.
+    lookup matches on (domain == helper_type, unique_id == helper_id). Used by
+    edit/delete as an existence check (the helper must resolve to a real entity);
+    authoring itself is cap-gated, not entity-scoped (F2).
     """
     registry = er.async_get(hass)
     for entry in registry.entities.values():
@@ -4868,9 +4982,12 @@ async def _execute_edit_helper(
         return _tool_error("helper_id is required."), "invalid_request", "edit_helper"
     if not isinstance(config, dict):
         return _tool_error("config must be an object."), "invalid_request", "edit_helper"
+    # Helper authoring is cap-gated (cap_helper_write), not entity-scoped: like
+    # scripts and automations, a token that may write helpers may edit any helper
+    # (F2). We still require the helper to exist.
     entity_id = _resolve_helper_entity_id(hass, helper_type, helper_id)
-    if entity_id is None or resolve(entity_id, token, hass) != Permission.WRITE:
-        return _tool_error("Helper not found, or it is outside your write scope."), "not_found", f"helper:{helper_type}:{helper_id}"
+    if entity_id is None:
+        return _tool_error("Helper not found."), "not_found", f"helper:{helper_type}:{helper_id}"
     before_cfg = await _read_helper_config(hass, helper_type, helper_id)
     payload = {f"{helper_type}_id": helper_id, **config}
     try:
@@ -4908,9 +5025,10 @@ async def _execute_delete_helper(
         return _tool_error(f"helper_type must be one of: {', '.join(sorted(HELPER_TYPES))}."), "invalid_request", "delete_helper"
     if not helper_id:
         return _tool_error("helper_id is required."), "invalid_request", "delete_helper"
+    # Cap-gated, not entity-scoped (F2); existence still required.
     entity_id = _resolve_helper_entity_id(hass, helper_type, helper_id)
-    if entity_id is None or resolve(entity_id, token, hass) != Permission.WRITE:
-        return _tool_error("Helper not found, or it is outside your write scope."), "not_found", f"helper:{helper_type}:{helper_id}"
+    if entity_id is None:
+        return _tool_error("Helper not found."), "not_found", f"helper:{helper_type}:{helper_id}"
     before_cfg = await _read_helper_config(hass, helper_type, helper_id)
     try:
         await async_ws_command(hass, f"{helper_type}/delete", {f"{helper_type}_id": helper_id})
@@ -5553,6 +5671,8 @@ async def _call_tool(
         return await _tool_restart_ha(arguments, token, hass, data, request_id, client_ip)
     if tool_name == "get_approval_status":
         return await _tool_get_approval_status(arguments, token, hass, data)
+    if tool_name == "wait_for_approval":
+        return await _tool_wait_for_approval(arguments, token, hass, data)
     if tool_name == "get_capability_summary":
         return await _tool_get_capability_summary(arguments, token, hass, data)
     if tool_name == "get_audit_summary":

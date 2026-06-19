@@ -12,6 +12,8 @@ from .token_store import TokenStore
 from .version_store import VersionStore
 
 if TYPE_CHECKING:
+    from homeassistant.core import HomeAssistant
+
     from .mesa import MesaRuntime
 
 
@@ -26,6 +28,9 @@ class ATMData:
     store: TokenStore
     rate_limiter: RateLimiter
     audit: AuditLog
+    # The HomeAssistant instance, set in __init__. Optional so direct constructions
+    # (tests) need not supply it; used to fire bus events (e.g. atm_config_changed).
+    hass: HomeAssistant | None = None
     # Configuration version history (SPEC Section 16). Always present: __init__
     # supplies a persistent store; direct constructions (tests) get an in-memory
     # default so the field is never missing.

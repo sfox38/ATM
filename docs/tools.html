@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Tools reference &middot; ATM docs</title>
-  <meta name="description" content="Every ATM tool: the 20 native HA MCP tools plus 65 ATM tools, each scoped to the token's permission tree and capabilities." />
+  <meta name="description" content="Every ATM tool: the 20 native HA MCP tools plus 66 ATM tools, each scoped to the token's permission tree and capabilities." />
   <link rel="icon" href="assets/atm-logo.png" type="image/png" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -24,13 +24,13 @@
         <header class="page-head">
           <p class="breadcrumb"><a href="index.html">Docs</a> / Reference / Tools</p>
           <h1>Tools reference</h1>
-          <p class="lede">ATM implements all 20 native Home Assistant MCP tools with identical names and responses, then adds 65 of its own, 85 in all. Every tool is scoped to the token's permission tree; the ones below note the capability they additionally require.</p>
+          <p class="lede">ATM implements all 20 native Home Assistant MCP tools with identical names and responses, then adds 66 of its own, 86 in all. Every tool is scoped to the token's permission tree; the ones below note the capability they additionally require.</p>
         </header>
 
         <div class="tool-toolbar" role="search">
           <label class="tool-search">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
-            <input type="text" id="tool-search-input" placeholder="Search all 85 tools by name or keyword..." aria-label="Search tools" autocomplete="off" />
+            <input type="text" id="tool-search-input" placeholder="Search all 86 tools by name or keyword..." aria-label="Search tools" autocomplete="off" />
           </label>
           <button class="filter-chip" data-cap="all" aria-pressed="true">All</button>
           <button class="filter-chip" data-cap="read" aria-pressed="false">Reads</button>
@@ -375,6 +375,11 @@
           <article class="tool" data-cap="read" data-search="get_approval_status pending approvals confirm">
             <div class="tool-head"><span class="tool-name">get_approval_status</span><span class="badge badge-success">no capability</span></div>
             <p class="tool-desc">Check a Confirm-gated action you submitted. With an <code>approval_id</code>, returns its status and result; without one, lists all of this token's pending approvals, useful after a reconnect.</p>
+          </article>
+
+          <article class="tool" data-cap="read" data-search="wait_for_approval block long poll pending confirm">
+            <div class="tool-head"><span class="tool-name">wait_for_approval</span><span class="badge badge-success">no capability</span></div>
+            <p class="tool-desc">Block until one of your pending approvals resolves, instead of polling. Returns immediately if already resolved, otherwise waits server-side (up to a capped timeout) for a human to approve or reject, then returns the status and result; on timeout it returns still-pending so you can call again.</p>
           </article>
 
           <article class="tool" data-cap="read" data-search="get_audit_summary own audit entries">

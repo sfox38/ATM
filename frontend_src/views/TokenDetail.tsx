@@ -19,13 +19,16 @@ import { PermissionSimulator } from "../components/PermissionSimulator";
 import { SelectByPicker } from "../components/SelectByPicker";
 import { ProfileEditor } from "./MesaView";
 
-// Token fields that change which tools the MCP client is shown (tools/list), so a
-// change to any of them means a connected agent must reconnect to see the update.
-// Capabilities gate cap-tied tools; pass_through and announce_all_tools change the
-// announced set wholesale. Persona changes surface here as capability changes.
-const TOOL_GATING_FIELDS: (keyof TokenRecord)[] = [...CAP_NAMES, "pass_through", "announce_all_tools"];
+// Whether a token change alters which tools the MCP client is shown (tools/list),
+// which is the only kind of change that requires a connected agent to reconnect.
+// A capability only changes the announced set when it crosses the deny boundary: a
+// cap-tied tool is announced whenever its cap is not "deny", so allow<->confirm
+// (which only changes per-request gating, enforced live) does NOT need a reconnect.
+// pass_through and announce_all_tools change the announced set wholesale. Persona
+// changes surface here as capability changes.
 function toolGatingChanged(a: TokenRecord, b: TokenRecord): boolean {
-  return TOOL_GATING_FIELDS.some((f) => a[f] !== b[f]);
+  const capCrossedDeny = CAP_NAMES.some((c) => (a[c] === "deny") !== (b[c] === "deny"));
+  return capCrossedDeny || a.pass_through !== b.pass_through || a.announce_all_tools !== b.announce_all_tools;
 }
 
 interface Props {

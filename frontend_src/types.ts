@@ -344,7 +344,7 @@ export interface ApprovalListParams {
 }
 
 export type VersionAction = "create" | "edit" | "delete" | "rollback";
-export type VersionResourceType = "automation" | "script" | "scene" | "helper";
+export type VersionResourceType = "automation" | "script" | "scene" | "helper" | "dashboard";
 
 export interface VersionSummary {
   id: string;
@@ -411,6 +411,7 @@ declare global {
         size?: string;
       };
       "ha-menu-button": React.DetailedHTMLProps<React.HTMLAttributes<HTMLElement>, HTMLElement>;
+      "ha-code-editor": React.DetailedHTMLProps<React.HTMLAttributes<HTMLElement>, HTMLElement>;
     }
   }
 }

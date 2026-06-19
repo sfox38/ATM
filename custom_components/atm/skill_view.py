@@ -106,9 +106,11 @@ must approve it. Handle it like this:
 
 - Do not retry. Retrying creates duplicate approval requests and burns your rate
   limit.
-- Either tell the user the action is awaiting their approval, or poll
-  `get_approval_status` with the `approval_id`. It resolves to `approved` (with
-  the result), `rejected` (often with a reason), or `expired`.
+- Either tell the user the action is awaiting their approval, or wait for it with
+  `wait_for_approval` (passing the `approval_id`), which blocks until a human
+  approves or rejects instead of you polling. For a one-shot check use
+  `get_approval_status` instead. Both resolve to `approved` (with the result),
+  `rejected` (often with a reason), or `expired`.
 - Approval is the operator's intent to stay in the loop. Respect it; do not look
   for a way around it.
 

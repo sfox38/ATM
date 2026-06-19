@@ -24,7 +24,7 @@
         <header class="page-head">
           <p class="breadcrumb"><a href="index.html">Docs</a> / Guides / Panel guide</p>
           <h1>Panel guide</h1>
-          <p class="lede">Everything ATM does happens in its sidebar panel. It has six tabs, Tokens, Approvals, MESA, Audit Logs, Changes, and Settings, plus a theme toggle. This guide walks through each, and the panel-only tools that make scoping a token quick.</p>
+          <p class="lede">Everything ATM does happens in its sidebar panel. It has six tabs, Tokens, Approvals, Changes, MESA, Audit Logs, and Settings, plus a theme toggle. This guide walks through each, and the panel-only tools that make scoping a token quick.</p>
         </header>
 
         <h2 id="tokens-tab">Tokens</h2>
@@ -105,7 +105,7 @@
         <p>The Audit Logs tab is a filterable view of the request log: request ID, time, token, method, resource, outcome, and client IP. Filter by token or outcome to trace what an agent did. The log's retention and storage are described in <a href="operations.html#audit-log">Operations</a>.</p>
 
         <h2 id="changes-tab">Changes</h2>
-        <p>The Changes tab is the configuration history for everything an agent builds. It opens on a feed of recent create, edit, and delete actions across automations, scripts, scenes, helpers, and dashboards; select one to see that resource's version timeline, and select a version for its before/after diff. From there, <strong>Restore</strong> re-applies that version, editing the resource if it still exists or recreating it if it was deleted, recorded as a rollback. Storage and retention are described in <a href="operations.html#configuration-history">Operations</a>.</p>
+        <p>The Changes tab is the configuration history for everything an agent builds. It opens on a feed of recent create, edit, and delete actions across automations, scripts, scenes, helpers, and dashboards, and refreshes live as new changes land. Selecting a row opens that version's before/after diff directly, rendered as YAML, with the resource's other versions in a timeline beside it so you can step through its history. Each pane has its own <strong>Restore this configuration</strong> button, so you re-apply the Before (to undo a bad edit) or the After (to re-apply the change) explicitly. A button is hidden when restoring it would do nothing: an empty pane, like the Before of a freshly created resource, or the After of the resource's latest version, which is already its current config. Restore edits the resource if it still exists or recreates it (in place, under its original id) if it was deleted, recorded as a rollback you can itself undo. Storage and retention are described in <a href="operations.html#configuration-history">Operations</a>.</p>
 
         <h2 id="settings-tab">Settings</h2>
         <p>The Settings tab holds the global, deployment-wide options: the kill switch, logging controls, the rate-limit notification, the MESA mode, and the audit buffer size. These are detailed in <a href="operations.html#global-settings">Operations</a>.</p>

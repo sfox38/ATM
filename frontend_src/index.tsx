@@ -12,7 +12,7 @@ import { OnboardingWizard } from "./views/OnboardingWizard";
 import { api, setHass } from "./api";
 import PANEL_CSS from "./atm-panel.css?inline";
 
-type Tab = "tokens" | "approvals" | "mesa" | "audit" | "changes" | "settings";
+type Tab = "tokens" | "approvals" | "changes" | "mesa" | "audit" | "settings";
 type Theme = "light" | "dark" | "auto";
 
 export { HIGH_RISK_DOMAINS } from "./utils";
@@ -49,7 +49,7 @@ type View =
   | { name: "detail"; tokenId: string }
   | { name: "wizard" };
 
-const TAB_LABELS: Record<Tab, string> = { tokens: "Tokens", approvals: "Approvals", mesa: "MESA", audit: "Audit Logs", changes: "Changes", settings: "Settings" };
+const TAB_LABELS: Record<Tab, string> = { tokens: "Tokens", approvals: "Approvals", changes: "Changes", mesa: "MESA", audit: "Audit Logs", settings: "Settings" };
 
 function ATMApp({ hass, narrow, theme, onThemeChange }: { hass: unknown; narrow: boolean; theme: Theme; onThemeChange: (t: Theme) => void }) {
   const [tab, setTab] = useState<Tab>("tokens");
@@ -64,7 +64,10 @@ function ATMApp({ hass, narrow, theme, onThemeChange }: { hass: unknown; narrow:
   const menuRef = useRef<HTMLElement | null>(null);
 
   // Deep-link from a notification: /atm#approvals or /atm#approvals/{id} opens
-  // the Approvals tab (and that specific approval's popup).
+  // the Approvals tab (and that specific approval's popup). We listen on
+  // hashchange AND HA's SPA-navigation signals (location-changed, popstate):
+  // when the panel is already open, HA's router navigates without a real
+  // hashchange, so hashchange alone would miss the deep-link (F3).
   useEffect(() => {
     function handleHash() {
       const m = window.location.hash.replace(/^#/, "").match(/^approvals(?:\/(.+))?$/);
@@ -75,7 +78,13 @@ function ATMApp({ hass, narrow, theme, onThemeChange }: { hass: unknown; narrow:
     }
     handleHash();
     window.addEventListener("hashchange", handleHash);
-    return () => window.removeEventListener("hashchange", handleHash);
+    window.addEventListener("location-changed", handleHash);
+    window.addEventListener("popstate", handleHash);
+    return () => {
+      window.removeEventListener("hashchange", handleHash);
+      window.removeEventListener("location-changed", handleHash);
+      window.removeEventListener("popstate", handleHash);
+    };
   }, []);
 
   useEffect(() => {
@@ -141,7 +150,7 @@ function ATMApp({ hass, narrow, theme, onThemeChange }: { hass: unknown; narrow:
     if (t === "tokens") refreshTokens();
   }, [refreshTokens]);
 
-  const TABS: Tab[] = ["tokens", "approvals", "mesa", "audit", "changes", "settings"];
+  const TABS: Tab[] = ["tokens", "approvals", "changes", "mesa", "audit", "settings"];
 
   function handleTabKeyDown(e: React.KeyboardEvent) {
     const idx = TABS.indexOf(tab);
@@ -235,7 +244,7 @@ function ATMApp({ hass, narrow, theme, onThemeChange }: { hass: unknown; narrow:
         )}
         {tab === "mesa" && <MesaView />}
         {tab === "audit" && <AuditView tokens={tokens} />}
-        {tab === "changes" && <ChangesView />}
+        {tab === "changes" && <ChangesView hass={hass} />}
         {tab === "settings" && (
           <SettingsView
             settings={settings}

@@ -2050,7 +2050,14 @@ class ATMAdminVersionRestoreView(HomeAssistantView):
         if record is None:
             return _err("not_found", "Version not found.", 404, rid)
         try:
-            tool_result, _outcome, _resource = await restore_version(record, user.id, self.hass, data)
+            body = await request.json()
+        except Exception:  # noqa: BLE001 - empty/invalid body means default side
+            body = {}
+        side = body.get("side") if isinstance(body, dict) else None
+        if side not in (None, "before", "after"):
+            return _err("invalid_request", "side must be 'before' or 'after'.", 400, rid)
+        try:
+            tool_result, _outcome, _resource = await restore_version(record, user.id, self.hass, data, side)
         except Exception:  # noqa: BLE001
             _LOGGER.exception("Version restore failed for %s", version_id)
             return _err("internal_error", "Restore failed.", 500, rid)

@@ -208,8 +208,8 @@ export const api = {
     return req<VersionListResponse>("GET", `/versions${q ? `?${q}` : ""}`);
   },
   getVersion: (id: string) => req<VersionRecord>("GET", `/versions/${encodeURIComponent(id)}`),
-  restoreVersion: (id: string) =>
-    req<VersionRestoreResponse>("POST", `/versions/${encodeURIComponent(id)}/restore`),
+  restoreVersion: (id: string, side?: "before" | "after") =>
+    req<VersionRestoreResponse>("POST", `/versions/${encodeURIComponent(id)}/restore`, side ? { side } : undefined),
 };
 
 export { ApiError };

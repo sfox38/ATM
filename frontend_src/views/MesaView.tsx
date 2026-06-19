@@ -780,9 +780,8 @@ export function MesaView() {
 
   return (
     <div className="view-root">
-      <div className="filter-row">
+      <div className="filter-row" style={{ justifyContent: "space-between" }}>
         <div className="filter-row-right">
-          <button className="btn btn-ghost btn-sm btn-icon" onClick={refresh} aria-label="Refresh"><RefreshIcon /></button>
           <button className="btn btn-ghost btn-sm" onClick={() => setEditing({ scope: "area", key: null, isNew: true })}>
             Add area profile
           </button>
@@ -792,6 +791,9 @@ export function MesaView() {
           <button className="btn btn-primary btn-sm" onClick={() => setEditing({ scope: "entity", key: null, isNew: true })}>
             Add entity profile
           </button>
+        </div>
+        <div className="filter-row-right">
+          <button className="btn btn-ghost btn-sm btn-icon" onClick={refresh} aria-label="Refresh"><RefreshIcon /></button>
         </div>
       </div>
 
