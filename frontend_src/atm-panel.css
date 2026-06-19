@@ -1510,8 +1510,6 @@ button.changes-row:hover { background: var(--atm-surface-2); }
   font-size: 13px; color: var(--atm-text); text-align: left;
 }
 .mesa-group-header:hover { background: var(--atm-hover); }
-.mesa-group-caret { display: inline-block; transition: transform 0.15s; font-size: 11px; color: var(--atm-text-2); }
-.mesa-group-caret.collapsed { transform: rotate(-90deg); }
 .mesa-group-count { margin-left: auto; font-size: 11px; color: var(--atm-text-2); background: var(--atm-surface); padding: 1px 8px; border-radius: 8px; }
 /* Fixed layout + shared widths so every domain group's columns line up, and a
    long tag list truncates instead of squeezing the mode badges. */
@@ -1524,18 +1522,3 @@ button.changes-row:hover { background: var(--atm-surface-2); }
 .mesa-row-modes { display: flex; gap: 6px; flex-wrap: nowrap; white-space: nowrap; }
 .mesa-row-tags { font-size: 12px; color: var(--atm-text-2); white-space: normal; overflow-wrap: anywhere; }
 @media (max-width: 600px) { .mesa-search { max-width: none; } }
-
-/* MESA list: domain & area (scope) profiles */
-.mesa-scope-card { margin-bottom: 12px; }
-.mesa-scope-card-title { font-size: 13px; font-weight: 700; color: var(--atm-text); }
-.mesa-scope-card-sub { font-size: 12px; color: var(--atm-text-2); margin: 4px 0 10px 0; }
-.mesa-scope-list { display: flex; flex-wrap: wrap; gap: 8px; }
-.mesa-scope-pill {
-  display: inline-flex; align-items: center; gap: 8px; padding: 6px 10px;
-  border: 1.5px solid var(--atm-border); border-radius: var(--atm-radius-sm);
-  background: var(--atm-surface); color: var(--atm-text); cursor: pointer; font-size: 13px;
-}
-.mesa-scope-pill:hover { border-color: var(--atm-accent); background: var(--atm-hover); }
-.mesa-scope-kind {
-  font-size: 11px; font-weight: 600; color: var(--atm-text-2);
-}

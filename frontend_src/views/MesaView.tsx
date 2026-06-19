@@ -699,9 +699,13 @@ function isEnforced(doc: MesaProfileDocument | null): boolean {
 }
 
 // Provenance of a stored profile. "developer" means it was imported from an
-// integration's mesa_profile.json sidecar (a vendor-supplied profile).
+// integration's mesa_profile.json sidecar (a vendor-supplied profile). The
+// serialized document nests metadata_origin under semantic_profile (matching
+// SemanticProfile.to_dict); a top-level copy is tolerated as a fallback.
 function profileSource(doc: MesaProfileDocument | null): string {
-  return doc?.metadata_origin?.source ?? "";
+  const sp = (doc?.semantic_profile ?? {}) as Record<string, unknown>;
+  const mo = (sp.metadata_origin ?? doc?.metadata_origin ?? {}) as { source?: string };
+  return mo.source ?? "";
 }
 
 function domainOf(entityId: string): string {
@@ -767,16 +771,28 @@ export function MesaView() {
     return entityTree?.[domainOf(eid)]?.entity_details[eid]?.friendly_name ?? "";
   }, [entityTree]);
 
-  // Manage-by-exception summary: tally control modes (+ enforced) across all profiles.
+  // Cascading-rule profiles (area, integration, domain) render as collapsible
+  // cards mirroring the per-domain entity groups. Sentinel collapse keys carry a
+  // "scope:" prefix so they never collide with a real domain group key.
+  const scopeDefs = useMemo(() => ([
+    { title: "area", sentinel: "scope:area", scope: "area" as ProfileScope, rows: areas.map((a) => ({ key: a.area_id, document: a.document })) },
+    { title: "integration", sentinel: "scope:integration", scope: "integration" as ProfileScope, rows: integrations.map((i) => ({ key: i.integration, document: i.document })) },
+    { title: "domain", sentinel: "scope:domain", scope: "domain" as ProfileScope, rows: domains.map((d) => ({ key: d.domain, document: d.document })) },
+  ]), [areas, integrations, domains]);
+
+  // Manage-by-exception summary: tally control modes (+ enforced) across ALL
+  // profiles, entity and cascading, so the filter pills cover both.
   const counts = useMemo(() => {
     const c: Record<string, number> = { autonomous: 0, confirm: 0, read_only: 0, prohibited: 0, inherited: 0, enforced: 0 };
-    for (const p of profiles) {
-      const m = rawControlMode(p.document);
+    const tally = (doc: MesaProfileDocument) => {
+      const m = rawControlMode(doc);
       c[m] = (c[m] ?? 0) + 1;
-      if (isEnforced(p.document)) c.enforced += 1;
-    }
+      if (isEnforced(doc)) c.enforced += 1;
+    };
+    for (const p of profiles) tally(p.document);
+    for (const def of scopeDefs) for (const r of def.rows) tally(r.document);
     return c;
-  }, [profiles]);
+  }, [profiles, scopeDefs]);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -788,6 +804,20 @@ export function MesaView() {
       return hay.includes(q);
     });
   }, [profiles, search, filter, friendly]);
+
+  // The control-mode pills and search box filter the cascading-rule cards too.
+  const scopeFiltered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    const rowOk = (doc: MesaProfileDocument, key: string) => {
+      if (filter === "enforced") { if (!isEnforced(doc)) return false; }
+      else if (filter && rawControlMode(doc) !== filter) return false;
+      if (!q) return true;
+      return `${key} ${tagsOf(doc).join(" ")}`.toLowerCase().includes(q);
+    };
+    return scopeDefs
+      .map((d) => ({ ...d, rows: d.rows.filter((r) => rowOk(r.document, r.key)) }))
+      .filter((d) => d.rows.length > 0);
+  }, [scopeDefs, search, filter]);
 
   // Group filtered profiles by domain; gated entities float to the top of each group.
   const groups = useMemo(() => {
@@ -823,6 +853,8 @@ export function MesaView() {
     { key: "inherited", label: "Inherited", n: counts.inherited },
     { key: "autonomous", label: "Autonomous", n: counts.autonomous },
   ].filter((c) => c.n > 0);
+
+  const totalCount = profiles.length + scopeDefs.reduce((n, d) => n + d.rows.length, 0);
 
   return (
     <div className="view-root">
@@ -878,56 +910,11 @@ export function MesaView() {
         </div>
       )}
 
-      <p className="mesa-scope-note">
-        The list shows entity-level profiles, grouped by domain. Domain, integration, and area profiles cascade to many entities and are listed separately below.
-      </p>
-
-      {(domains.length > 0 || integrations.length > 0 || areas.length > 0) && (
-        <div className="card mesa-scope-card">
-          <div className="mesa-scope-card-title">Domain, integration &amp; area profiles</div>
-          <p className="mesa-scope-card-sub">
-            These cascade to many entities (a whole domain, an integration's own entities, or an area) unless a more specific profile overrides them. Click to edit. A <span className="badge badge-purple">Vendor</span> badge marks a profile an integration shipped; saving creates your own override.
-          </p>
-          <div className="mesa-scope-list">
-            {domains.map((d) => (
-              <button key={`dom:${d.domain}`} className="mesa-scope-pill"
-                onClick={() => setEditing({ scope: "domain", key: d.domain, isNew: false })}>
-                <span className="mesa-scope-kind">domain</span>
-                <code>{d.domain}</code>
-                <ControlBadge mode={rawControlMode(d.document)} />
-                {isEnforced(d.document) && <span className="badge badge-blue">Enforced</span>}
-              </button>
-            ))}
-            {integrations.map((it) => (
-              <button key={`int:${it.integration}`} className="mesa-scope-pill"
-                onClick={() => setEditing({ scope: "integration", key: it.integration, isNew: false })}>
-                <span className="mesa-scope-kind">integration</span>
-                <code>{it.integration}</code>
-                {profileSource(it.document) === "developer" && (
-                  <span className="badge badge-purple" title="Supplied by the integration (mesa_profile.json). Saving creates your own override.">Vendor</span>
-                )}
-                <ControlBadge mode={rawControlMode(it.document)} />
-                {isEnforced(it.document) && <span className="badge badge-blue">Enforced</span>}
-              </button>
-            ))}
-            {areas.map((a) => (
-              <button key={`area:${a.area_id}`} className="mesa-scope-pill"
-                onClick={() => setEditing({ scope: "area", key: a.area_id, isNew: false })}>
-                <span className="mesa-scope-kind">area</span>
-                <code>{a.area_id}</code>
-                <ControlBadge mode={rawControlMode(a.document)} />
-                {isEnforced(a.document) && <span className="badge badge-blue">Enforced</span>}
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {profiles.length > 0 && (
+      {totalCount > 0 && (
         <div className="mesa-controls">
           <div className="mesa-summary" role="group" aria-label="Filter by control mode">
             <button className={`mesa-chip${filter === "" ? " mesa-chip-active" : ""}`} onClick={() => setFilter("")}>
-              All <span className="mesa-chip-count">{profiles.length}</span>
+              All <span className="mesa-chip-count">{totalCount}</span>
             </button>
             {chips.map((c) => (
               <button key={c.key}
@@ -937,52 +924,98 @@ export function MesaView() {
               </button>
             ))}
           </div>
-          <input className="input mesa-search" placeholder="Search entity, name, or tag..."
+          <input className="input mesa-search" placeholder="Search id, name, or tag..."
             value={search} onChange={(e) => setSearch(e.target.value)} aria-label="Search profiles" />
         </div>
       )}
 
-      {loading ? <Loading /> : profiles.length === 0 ? (
+      {loading ? <Loading /> : totalCount === 0 ? (
         <div className="card">
-          <p className="token-table-empty">No entity MESA profiles yet. Add a profile to describe an entity's control mode, automation impact, and privacy to agents.</p>
+          <p className="token-table-empty">No MESA profiles yet. Add a profile to describe an entity, area, integration, or domain's control mode, automation impact, and privacy to agents.</p>
         </div>
-      ) : filtered.length === 0 ? (
+      ) : (filtered.length === 0 && scopeFiltered.length === 0) ? (
         <div className="card"><p className="token-table-empty">No profiles match your filter.</p></div>
       ) : (
-        <div className="mesa-groups">
-          {groups.map(([domain, items]) => {
-            const isCollapsed = collapsed.has(domain);
-            return (
-              <div key={domain} className="card mesa-group">
-                <button className="mesa-group-header" onClick={() => toggleGroup(domain)} aria-expanded={!isCollapsed}>
-                  <span className={`mesa-group-caret${isCollapsed ? " collapsed" : ""}`} aria-hidden="true">&#9662;</span>
-                  <code>{domain}</code>
-                  <span className="mesa-group-count">{items.length}</span>
-                </button>
-                {!isCollapsed && (
-                  <table className="data-table">
-                    <tbody>
-                      {items.map((p) => (
-                        <tr key={p.entity_id} className="clickable"
-                          onClick={() => setEditing({ scope: "entity", key: p.entity_id, isNew: false })}>
-                          <td>
-                            <div className="mesa-row-name">{friendly(p.entity_id) || p.entity_id}</div>
-                            {friendly(p.entity_id) && <code className="mesa-row-id">{p.entity_id}</code>}
-                          </td>
-                          <td className="mesa-row-modes">
-                            <ControlBadge mode={rawControlMode(p.document)} />
-                            {isEnforced(p.document) && <span className="badge badge-blue">Enforced</span>}
-                          </td>
-                          <td className="mesa-row-tags">{tagsOf(p.document).join(", ")}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                )}
+        <>
+          {scopeFiltered.length > 0 && (
+            <>
+              <p className="mesa-scope-note">
+                Cascading rules: an area, integration, or domain profile applies to many entities at once unless a more specific profile overrides it. Click a row to edit. A <span className="badge badge-purple">Vendor</span> badge marks a profile an integration shipped; saving creates your own override.
+              </p>
+              <div className="mesa-groups">
+                {scopeFiltered.map((c) => {
+                  const isCollapsed = collapsed.has(c.sentinel);
+                  return (
+                    <div key={c.sentinel} className="card mesa-group">
+                      <button className="mesa-group-header" onClick={() => toggleGroup(c.sentinel)} aria-expanded={!isCollapsed}>
+                        <span className={`collapsible-chevron${!isCollapsed ? " open" : ""}`} aria-hidden="true" />
+                        <code>{c.title}</code>
+                        <span className="mesa-group-count">{c.rows.length}</span>
+                      </button>
+                      {!isCollapsed && (
+                        <table className="data-table">
+                          <tbody>
+                            {c.rows.map((r) => (
+                              <tr key={r.key} className="clickable"
+                                onClick={() => setEditing({ scope: c.scope, key: r.key, isNew: false })}>
+                                <td><code>{r.key}</code></td>
+                                <td className="mesa-row-modes">
+                                  {c.scope === "integration" && profileSource(r.document) === "developer" && (
+                                    <span className="badge badge-purple" title="Supplied by the integration (mesa_profile.json). Saving creates your own override.">Vendor</span>
+                                  )}
+                                  <ControlBadge mode={rawControlMode(r.document)} />
+                                  {isEnforced(r.document) && <span className="badge badge-blue">Enforced</span>}
+                                </td>
+                                <td className="mesa-row-tags">{tagsOf(r.document).join(", ")}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
-            );
-          })}
-        </div>
+            </>
+          )}
+
+          {filtered.length > 0 && (
+            <div className="mesa-groups">
+              {groups.map(([domain, items]) => {
+                const isCollapsed = collapsed.has(domain);
+                return (
+                  <div key={domain} className="card mesa-group">
+                    <button className="mesa-group-header" onClick={() => toggleGroup(domain)} aria-expanded={!isCollapsed}>
+                      <span className={`collapsible-chevron${!isCollapsed ? " open" : ""}`} aria-hidden="true" />
+                      <code>{domain}</code>
+                      <span className="mesa-group-count">{items.length}</span>
+                    </button>
+                    {!isCollapsed && (
+                      <table className="data-table">
+                        <tbody>
+                          {items.map((p) => (
+                            <tr key={p.entity_id} className="clickable"
+                              onClick={() => setEditing({ scope: "entity", key: p.entity_id, isNew: false })}>
+                              <td>
+                                <div className="mesa-row-name">{friendly(p.entity_id) || p.entity_id}</div>
+                                {friendly(p.entity_id) && <code className="mesa-row-id">{p.entity_id}</code>}
+                              </td>
+                              <td className="mesa-row-modes">
+                                <ControlBadge mode={rawControlMode(p.document)} />
+                                {isEnforced(p.document) && <span className="badge badge-blue">Enforced</span>}
+                              </td>
+                              <td className="mesa-row-tags">{tagsOf(p.document).join(", ")}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </>
       )}
 
       {editing && (
