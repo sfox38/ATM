@@ -402,6 +402,7 @@
 .badge-green  { background: var(--atm-success-bg); color: var(--atm-success); }
 .badge-red    { background: var(--atm-error-bg);   color: var(--atm-error); }
 .badge-grey   { background: var(--atm-grey-tint);   color: var(--atm-text-2); }
+.badge-purple { background: var(--atm-purple-bg);   color: var(--atm-purple); }
 
 /* ============================================================
    Tables

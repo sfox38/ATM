@@ -68,6 +68,15 @@ MESA_CONFIRM_CAP = "mesa_control_mode"
 # tool router, so a token cannot invoke the approved-bypass path directly.
 MESA_APPROVED_EXECUTOR = "call_service_mesa_approved"
 
+# Soft HA-version baseline for the optional in-context MESA profile injector
+# (mesa_inject_enabled). The injector DOM-patches HA's native config data tables,
+# which HA refactors periodically; below this version the module is not even
+# loaded. This is decoupled from MIN_HA_VERSION (the integration's real floor):
+# the injector is an experimental, admin-only, default-off convenience that
+# self-disables via in-page feature-detection regardless. Verified on 2026.6;
+# bump when the adapter is updated for a newer frontend era.
+MESA_INJECT_MIN_HA = "2025.5.0"
+
 SENSITIVE_ATTRIBUTES = frozenset({
     "entity_picture",
     "stream_url",

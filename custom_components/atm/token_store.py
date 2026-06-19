@@ -294,6 +294,10 @@ class GlobalSettings:
     audit_flush_interval: int = 15
     audit_log_maxlen: int = 10000
     mesa_mode: str = MESA_MODE_ADVISORY
+    # Experimental, admin-only convenience: inject a (+)/MESA-pill control into HA's
+    # native config list pages so profiles can be created in context. Default off
+    # because it DOM-patches the HA frontend (fragile across HA updates).
+    mesa_inject_enabled: bool = False
 
     def to_dict(self) -> dict:
         return {
@@ -309,6 +313,7 @@ class GlobalSettings:
             "audit_flush_interval": self.audit_flush_interval,
             "audit_log_maxlen": self.audit_log_maxlen,
             "mesa_mode": self.mesa_mode,
+            "mesa_inject_enabled": self.mesa_inject_enabled,
         }
 
     @classmethod
@@ -327,6 +332,7 @@ class GlobalSettings:
             audit_flush_interval=_clamp_int(data.get("audit_flush_interval"), {0, 5, 10, 15, 30, 60}, 15),
             audit_log_maxlen=_clamp_int(data.get("audit_log_maxlen"), {100, 1000, 5000, 10000}, 10000),
             mesa_mode=mesa_mode if mesa_mode in MESA_MODES else MESA_MODE_ADVISORY,
+            mesa_inject_enabled=bool(data.get("mesa_inject_enabled", False)),
         )
 
 

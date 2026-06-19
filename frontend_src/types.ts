@@ -105,6 +105,7 @@ export interface GlobalSettings {
   audit_flush_interval: number;
   audit_log_maxlen: number;
   mesa_mode: MesaMode;
+  mesa_inject_enabled: boolean;
 }
 
 export type MesaMode = "off" | "advisory" | "enforced";
@@ -115,6 +116,9 @@ export type MesaMode = "off" | "advisory" | "enforced";
 export interface MesaProfileDocument {
   semantic_profile?: Record<string, unknown>;
   privacy_classification?: Record<string, unknown>;
+  // Provenance. "developer" marks a vendor-supplied profile imported from an
+  // integration's mesa_profile.json sidecar; "user" is panel-authored.
+  metadata_origin?: { source?: string };
 }
 
 export interface MesaProfileListItem {

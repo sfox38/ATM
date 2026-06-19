@@ -1103,7 +1103,7 @@ class ATMAdminSettingsView(HomeAssistantView):
         _BOOL_SETTINGS = frozenset({
             "kill_switch", "disable_all_logging", "log_allowed", "log_denied",
             "log_rate_limited", "log_entity_names", "log_client_ip", "notify_on_rate_limit",
-            "notify_on_approval",
+            "notify_on_approval", "mesa_inject_enabled",
         })
         patchable = {
             k: v for k, v in body.items()
@@ -1149,6 +1149,12 @@ class ATMAdminSettingsView(HomeAssistantView):
             if not data.routes_registered and data.async_register_routes:
                 await data.async_register_routes()
                 data.routes_registered = True
+
+        if "mesa_inject_enabled" in patchable:
+            # Add/remove the in-context profile injector module. Takes effect on the
+            # next full HA page load (already-open tabs are unaffected).
+            from .panel import async_sync_mesa_inject
+            await async_sync_mesa_inject(self.hass)
 
         user = request[KEY_HASS_USER]
         data.audit.record(

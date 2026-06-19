@@ -151,8 +151,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         view.hass = hass
         hass.http.register_view(view)
 
-    from .panel import async_register_atm_panel
+    from .panel import async_register_atm_panel, async_sync_mesa_inject
     await async_register_atm_panel(hass)
+    # Optional, experimental, default-off: inject the in-context profile control
+    # into HA's native config pages. Independent of the kill switch (admin-only).
+    await async_sync_mesa_inject(hass)
 
     settings = store.get_settings()
 
@@ -298,7 +301,8 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         data.shutting_down = True
         await data.audit.async_save()
 
-    from .panel import remove_atm_panel
+    from .panel import remove_atm_panel, remove_mesa_inject
+    remove_mesa_inject(hass)
     remove_atm_panel(hass)
 
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)

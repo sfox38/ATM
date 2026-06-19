@@ -9,7 +9,7 @@ import type {
 import { api, ApiError } from "../api";
 import { Modal } from "../components/Modal";
 import { TagInput } from "../components/TagInput";
-import { Loading, ErrorMsg, RefreshIcon } from "../index";
+import { Loading, ErrorMsg, RefreshIcon } from "../components/common";
 
 // HA domain -> the canonical tag namespace roots that describe an ENTITY of that
 // domain, used to surface "Suggested" tags. Intent namespaces (automation, scene)
@@ -339,6 +339,7 @@ export function ProfileEditor({
   canonicalTags,
   onClose,
   onSaved,
+  lockedKey,
 }: {
   scope: ProfileScope;
   profileKey: string | null;
@@ -347,6 +348,10 @@ export function ProfileEditor({
   canonicalTags: string[];
   onClose: () => void;
   onSaved: () => void;
+  // When true, the target id is fixed (supplied by the caller, e.g. the in-context
+  // injector) rather than picked from the registry. Hides the combobox and skips
+  // its validation, so entities not in the registry (e.g. "unmanageable" ones) work.
+  lockedKey?: boolean;
 }) {
   const [detail, setDetail] = useState<MesaProfileDetail | null>(null);
   const [state, setState] = useState<EditorState>(docToEditor(profileKey ?? "", null));
@@ -440,8 +445,8 @@ export function ProfileEditor({
     return () => { cancelled = true; };
   }, [isNew, scope, state.key, keyOptions]);
 
-  const keyValid = !isNew || keyOptions.some((o) => o.value === state.key.trim());
-  const keyInvalidShown = isNew && state.key.trim() !== "" && !keyValid;
+  const keyValid = !!lockedKey || !isNew || keyOptions.some((o) => o.value === state.key.trim());
+  const keyInvalidShown = !lockedKey && isNew && state.key.trim() !== "" && !keyValid;
   const dirty = JSON.stringify(state) !== cleanSnapshot.current;
   const canSave = !saving && !loading && keyValid;
 
@@ -512,7 +517,7 @@ export function ProfileEditor({
         {loading ? <Loading /> : (
           <>
             {scope === "entity" && !isNew && detail && <MesaEffectivePanel detail={detail} />}
-            {isNew && (
+            {isNew && !lockedKey && (
               <div className="field">
                 <FieldLabel id="mesa-key" text={SCOPE_LABEL[scope]} help={HELP[scope]} />
                 <Combo
@@ -526,6 +531,12 @@ export function ProfileEditor({
                 {keyInvalidShown && (
                   <span className="field-error">No matching {SCOPE_LABEL[scope].toLowerCase()}. Pick one from the list.</span>
                 )}
+              </div>
+            )}
+            {isNew && lockedKey && (
+              <div className="field">
+                <FieldLabel id="mesa-key" text={SCOPE_LABEL[scope]} help={HELP[scope]} />
+                <input id="mesa-key" className="input" value={state.key} readOnly disabled />
               </div>
             )}
 
@@ -662,6 +673,12 @@ function rawControlMode(doc: MesaProfileDocument | null): string {
 function isEnforced(doc: MesaProfileDocument | null): boolean {
   const ob = (doc?.semantic_profile?.operational_boundaries ?? {}) as Record<string, unknown>;
   return ob.enforcement_mode === "enforced";
+}
+
+// Provenance of a stored profile. "developer" means it was imported from an
+// integration's mesa_profile.json sidecar (a vendor-supplied profile).
+function profileSource(doc: MesaProfileDocument | null): string {
+  return doc?.metadata_origin?.source ?? "";
 }
 
 function domainOf(entityId: string): string {
@@ -835,6 +852,9 @@ export function MesaView() {
                 onClick={() => setEditing({ scope: "domain", key: d.domain, isNew: false })}>
                 <span className="mesa-scope-kind">domain</span>
                 <code>{d.domain}</code>
+                {profileSource(d.document) === "developer" && (
+                  <span className="badge badge-purple" title="Supplied by the integration (mesa_profile.json). Saving creates your own override.">Vendor</span>
+                )}
                 <ControlBadge mode={rawControlMode(d.document)} />
                 {isEnforced(d.document) && <span className="badge badge-blue">Enforced</span>}
               </button>

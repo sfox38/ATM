@@ -160,6 +160,32 @@ export function SettingsView({ settings, onSettingsChange, theme, onThemeChange 
           </div>
 
           <div className="card">
+            <div className="card-header">Experimental</div>
+            <div className="toggle-row toggle-row-plain">
+              <div className="toggle-label">
+                <span>In-context profile buttons</span>
+                <small>
+                  Adds a (+) / MESA control to the rows of Home Assistant's native
+                  Automations, Scripts, Helpers, and People pages (and integration detail
+                  pages) so you can create a MESA entity profile without leaving the page.
+                  This patches the HA frontend, so the buttons may stop appearing after a
+                  Home Assistant update until ATM is updated to match; it never affects HA
+                  itself. Reload Home Assistant after changing this. Admin only.
+                </small>
+              </div>
+              <label className={`toggle-switch${saving ? " disabled" : ""}`}>
+                <input
+                  type="checkbox"
+                  checked={settings.mesa_inject_enabled}
+                  disabled={saving}
+                  onChange={(e) => patchSetting("mesa_inject_enabled", e.target.checked)}
+                />
+                <span className="toggle-switch-track" />
+              </label>
+            </div>
+          </div>
+
+          <div className="card">
             <div className="card-header">Integration Info</div>
             <div className="settings-info-list">
               <div><strong>ATM Version:</strong> {atmVersion ?? "..."}</div>
