@@ -1807,6 +1807,124 @@ class ATMAdminMesaDomainView(HomeAssistantView):
         return _ok({"domain": domain, "deleted": True}, request_id=rid)
 
 
+class ATMAdminMesaIntegrationsView(HomeAssistantView):
+    """GET /api/atm/admin/mesa/integrations - list all stored integration-level profiles.
+
+    Integration profiles (MESA inheritance level between area and domain) are keyed
+    by the integration's component name and govern the entities that integration
+    created, regardless of entity domain. Vendor sidecars import here.
+    """
+
+    url = "/api/atm/admin/mesa/integrations"
+    name = "api:atm:admin:mesa:integrations"
+    requires_auth = True
+
+    @require_admin
+    async def get(self, request: web.Request) -> web.Response:
+        rid = request["atm_rid"]
+        runtime, err = _mesa_runtime(self.hass, rid)
+        if err is not None:
+            return err
+        integrations = []
+        for integration in sorted(runtime.store.integration_keys()):
+            stored = runtime.store.get_integration_profile(integration)
+            if stored is not None:
+                integrations.append({"integration": integration, "document": stored.to_dict()})
+        return _ok({"integrations": integrations}, request_id=rid)
+
+
+class ATMAdminMesaIntegrationView(HomeAssistantView):
+    """GET/PUT/DELETE /api/atm/admin/mesa/integrations/{integration} - one profile."""
+
+    url = "/api/atm/admin/mesa/integrations/{integration}"
+    name = "api:atm:admin:mesa:integration"
+    requires_auth = True
+
+    @require_admin
+    async def get(self, request: web.Request, integration: str) -> web.Response:
+        rid = request["atm_rid"]
+        runtime, err = _mesa_runtime(self.hass, rid)
+        if err is not None:
+            return err
+        stored = runtime.store.get_integration_profile(integration)
+        return _ok(
+            {"integration": integration, "stored": stored.to_dict() if stored is not None else None},
+            request_id=rid,
+        )
+
+    @require_admin
+    async def put(self, request: web.Request, integration: str) -> web.Response:
+        rid = request["atm_rid"]
+        runtime, err = _mesa_runtime(self.hass, rid)
+        if err is not None:
+            return err
+        # Integration/component names share HA's domain character set.
+        if not _DOMAIN_RE.match(integration):
+            return _err("invalid_request", "Invalid integration name.", 400, rid)
+        body = await _read_body(request, rid)
+        if isinstance(body, web.Response):
+            return body
+
+        from .mesa_core import MetadataOrigin, SemanticProfile  # noqa: PLC0415
+        from .mesa_core.exceptions import MesaValidationError  # noqa: PLC0415
+
+        try:
+            profile = SemanticProfile.from_dict(integration, body, default_origin=MetadataOrigin.USER)
+        except MesaValidationError as exc:
+            return _err("invalid_request", str(exc), 400, rid)
+
+        async with runtime.lock:
+            runtime.store.set_integration_profile(integration, profile)
+            await runtime.async_save()
+        _audit_admin(self.hass, request, rid, request.path)
+        return _ok({"integration": integration, "stored": profile.to_dict()}, request_id=rid)
+
+    @require_admin
+    async def delete(self, request: web.Request, integration: str) -> web.Response:
+        rid = request["atm_rid"]
+        runtime, err = _mesa_runtime(self.hass, rid)
+        if err is not None:
+            return err
+        async with runtime.lock:
+            runtime.store.delete_integration_profile(integration)
+            await runtime.async_save()
+        _audit_admin(self.hass, request, rid, request.path)
+        return _ok({"integration": integration, "deleted": True}, request_id=rid)
+
+
+class ATMAdminMesaIntegrationOptionsView(HomeAssistantView):
+    """GET /api/atm/admin/mesa/integration-options - integrations that have entities.
+
+    Powers the "Add integration profile" picker. `id` is the component name (the key
+    an integration profile is stored under); `name` is the integration's friendly
+    title. Limited to integrations that created entities, since those are the only
+    ones an integration profile can govern. ATM's own domain is excluded.
+    """
+
+    url = "/api/atm/admin/mesa/integration-options"
+    name = "api:atm:admin:mesa:integration-options"
+    requires_auth = True
+
+    @require_admin
+    async def get(self, request: web.Request) -> web.Response:
+        rid = request["atm_rid"]
+        registry = er_mod.async_get(self.hass)
+        domains = sorted(
+            {e.platform for e in registry.entities.values() if e.platform and e.platform != DOMAIN}
+        )
+        names: dict[str, str] = {}
+        try:
+            from homeassistant.loader import async_get_integrations  # noqa: PLC0415
+
+            for dom, integ in (await async_get_integrations(self.hass, domains)).items():
+                if not isinstance(integ, BaseException):
+                    names[dom] = getattr(integ, "name", None) or dom
+        except Exception:  # noqa: BLE001 - friendly names are best-effort
+            pass
+        options = [{"id": dom, "name": names.get(dom, dom)} for dom in domains]
+        return _ok({"integrations": options}, request_id=rid)
+
+
 class ATMAdminMesaAreaView(HomeAssistantView):
     """GET/PUT/DELETE /api/atm/admin/mesa/areas/{area_id} - one area-level profile."""
 
@@ -1954,6 +2072,8 @@ class ATMAdminMesaIssuesView(HomeAssistantView):
             {
                 "issues": [_issue_to_dict(i) for i in runtime.trigger_issues],
                 "orphans": list(runtime.orphans),
+                "orphan_areas": list(runtime.orphan_areas),
+                "orphan_integrations": list(runtime.orphan_integrations),
             },
             request_id=rid,
         )
@@ -2121,6 +2241,9 @@ ALL_ADMIN_VIEWS: list[type[HomeAssistantView]] = [
     ATMAdminMesaProfileView,
     ATMAdminMesaDomainsView,
     ATMAdminMesaDomainView,
+    ATMAdminMesaIntegrationsView,
+    ATMAdminMesaIntegrationView,
+    ATMAdminMesaIntegrationOptionsView,
     ATMAdminMesaAreasView,
     ATMAdminMesaAreaView,
     ATMAdminMesaVocabularyView,

@@ -36,6 +36,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Callable
 
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import area_registry as ar_mod
 from homeassistant.helpers import device_registry as dr_mod
 from homeassistant.helpers import entity_registry as er_mod
 from homeassistant.helpers.storage import Store
@@ -119,6 +120,8 @@ class MesaRuntime:
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     trigger_issues: list[ValidationIssue] = field(default_factory=list)
     orphans: list[str] = field(default_factory=list)
+    orphan_areas: list[str] = field(default_factory=list)
+    orphan_integrations: list[str] = field(default_factory=list)
 
     async def async_save(self) -> None:
         """Persist the current profile set to HA storage.
@@ -157,6 +160,23 @@ def _build_get_entity_area(hass: HomeAssistant) -> Callable[[str], str | None]:
         return None
 
     return _get_entity_area
+
+
+def _build_get_entity_integration(hass: HomeAssistant) -> Callable[[str], str | None]:
+    """Return a sync callback mapping entity_id to the integration that created it.
+
+    This is the MESA "integration" inheritance level (between area and domain): the
+    entity registry's ``platform`` is the component that created the entity (e.g.
+    ``hue``, ``yale_access_bluetooth``), which is exactly the key a vendor sidecar
+    is stored under. It lets a device/hub integration's sidecar govern the entities
+    it created regardless of their entity domain (lock.*, sensor.*, ...).
+    """
+
+    def _get_entity_integration(entity_id: str) -> str | None:
+        entry = er_mod.async_get(hass).async_get(entity_id)
+        return entry.platform if entry is not None else None
+
+    return _get_entity_integration
 
 
 def _build_get_state(hass: HomeAssistant) -> Callable[[str], str | None]:
@@ -212,8 +232,17 @@ async def async_setup_mesa(hass: HomeAssistant, mesa_mode: str) -> MesaRuntime:
     backend = ATMMesaBackend(raw.get("profiles") or {})
 
     get_entity_area = _build_get_entity_area(hass)
-    store = ProfileStore(backend=backend, get_entity_area=get_entity_area)
-    resolver = InheritanceResolver(store=store, get_entity_area=get_entity_area)
+    get_entity_integration = _build_get_entity_integration(hass)
+    store = ProfileStore(
+        backend=backend,
+        get_entity_area=get_entity_area,
+        get_entity_integration=get_entity_integration,
+    )
+    resolver = InheritanceResolver(
+        store=store,
+        get_entity_area=get_entity_area,
+        get_entity_integration=get_entity_integration,
+    )
     store.attach_resolver(resolver)
     enforcer = MesaEnforcer(
         store=store,
@@ -265,10 +294,10 @@ async def async_import_sidecar_profiles(hass: HomeAssistant, runtime: MesaRuntim
     imported = 0
     async with runtime.lock:
         for profile in profiles:
-            existing = runtime.store.get_domain_profile(profile.entity_id)
+            existing = runtime.store.get_integration_profile(profile.entity_id)
             if existing is not None and existing.metadata.source.value == "user":
                 continue
-            runtime.store.set_domain_profile(profile.entity_id, profile)
+            runtime.store.set_integration_profile(profile.entity_id, profile)
             imported += 1
         if imported:
             await runtime.async_save()
@@ -284,10 +313,28 @@ async def async_refresh_trigger_issues(hass: HomeAssistant, runtime: MesaRuntime
 
 
 def refresh_orphans(hass: HomeAssistant, runtime: MesaRuntime) -> None:
-    """Recompute stored profiles whose entity no longer exists in the registry."""
+    """Recompute stored profiles whose target no longer exists.
+
+    Three independent kinds, since mesa-core's ``find_orphans`` covers only the
+    entity level: entity profiles whose entity left the registry, area profiles
+    whose area was deleted, and integration profiles whose integration is neither
+    producing entities nor loaded as a component. MESA never auto-deletes a
+    profile (a rename or temporary removal must not lose authored intent); this
+    only surfaces them for manual cleanup.
+    """
     er = er_mod.async_get(hass)
     known = set(er.entities) | set(hass.states.async_entity_ids())
     runtime.orphans = runtime.store.find_orphans(known)
+
+    known_areas = set(ar_mod.async_get(hass).areas)
+    runtime.orphan_areas = [a for a in runtime.store.area_keys() if a not in known_areas]
+
+    known_integrations = {e.platform for e in er.entities.values() if e.platform} | set(
+        hass.config.components
+    )
+    runtime.orphan_integrations = [
+        i for i in runtime.store.integration_keys() if i not in known_integrations
+    ]
 
 
 # ---------------------------------------------------------------------------

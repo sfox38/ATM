@@ -31,6 +31,7 @@ if TYPE_CHECKING:
 
 _DEPLOYMENT_DEFAULTS_KEY = "__deployment_defaults__"
 _DOMAIN_PREFIX = "__domain__:"
+_INTEGRATION_PREFIX = "__integration__:"
 _AREA_PREFIX = "__area__:"
 
 MAX_PAGE_SIZE = 200
@@ -114,9 +115,11 @@ class ProfileStore:
         backend: StorageBackend,
         *,
         get_entity_area: Callable[[str], str | None] | None = None,
+        get_entity_integration: Callable[[str], str | None] | None = None,
     ) -> None:
         self.backend = backend
         self.get_entity_area = get_entity_area
+        self.get_entity_integration = get_entity_integration
         self._resolver: InheritanceResolver | None = None
 
     # -- entity profiles ------------------------------------------------------
@@ -171,6 +174,20 @@ class ProfileStore:
     def delete_domain_profile(self, domain: str) -> None:
         self.backend.delete(f"{_DOMAIN_PREFIX}{domain}")
 
+    def get_integration_profile(self, integration: str) -> SemanticProfile | None:
+        data = self.backend.read(f"{_INTEGRATION_PREFIX}{integration}")
+        if data is None:
+            return None
+        profile = SemanticProfile.from_dict(integration, data)
+        profile.inheritance_scope = "integration"
+        return profile
+
+    def set_integration_profile(self, integration: str, profile: SemanticProfile) -> None:
+        self.backend.write(f"{_INTEGRATION_PREFIX}{integration}", self._stamped_doc(profile))
+
+    def delete_integration_profile(self, integration: str) -> None:
+        self.backend.delete(f"{_INTEGRATION_PREFIX}{integration}")
+
     def get_area_profile(self, area_id: str) -> SemanticProfile | None:
         data = self.backend.read(f"{_AREA_PREFIX}{area_id}")
         if data is None:
@@ -204,6 +221,10 @@ class ProfileStore:
     def domain_keys(self) -> list[str]:
         """Domain names that have a domain-level profile stored."""
         return [k[len(_DOMAIN_PREFIX) :] for k in self.backend.list_keys(_DOMAIN_PREFIX)]
+
+    def integration_keys(self) -> list[str]:
+        """Integration names that have an integration-level profile stored."""
+        return [k[len(_INTEGRATION_PREFIX) :] for k in self.backend.list_keys(_INTEGRATION_PREFIX)]
 
     def area_keys(self) -> list[str]:
         """Area IDs that have an area-level profile stored."""

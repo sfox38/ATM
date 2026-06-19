@@ -177,6 +177,17 @@ export const api = {
   deleteMesaDomain: (domain: string) =>
     req<{ domain: string; deleted: boolean }>("DELETE", `/mesa/domains/${encodeURIComponent(domain)}`),
 
+  listMesaIntegrations: () =>
+    req<{ integrations: { integration: string; document: MesaProfileDocument }[] }>("GET", "/mesa/integrations"),
+  getMesaIntegration: (integration: string) =>
+    req<{ integration: string; stored: MesaProfileDocument | null }>("GET", `/mesa/integrations/${encodeURIComponent(integration)}`),
+  putMesaIntegration: (integration: string, doc: MesaProfileDocument) =>
+    req<{ integration: string; stored: MesaProfileDocument }>("PUT", `/mesa/integrations/${encodeURIComponent(integration)}`, doc),
+  deleteMesaIntegration: (integration: string) =>
+    req<{ integration: string; deleted: boolean }>("DELETE", `/mesa/integrations/${encodeURIComponent(integration)}`),
+  getMesaIntegrationOptions: () =>
+    req<{ integrations: { id: string; name: string }[] }>("GET", "/mesa/integration-options"),
+
   listMesaAreas: () =>
     req<{ areas: { area_id: string; document: MesaProfileDocument }[] }>("GET", "/mesa/areas"),
   getMesaArea: (areaId: string) =>

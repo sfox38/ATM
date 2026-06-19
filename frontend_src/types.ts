@@ -163,6 +163,8 @@ export interface MesaValidationIssue {
 export interface MesaIssuesResponse {
   issues: MesaValidationIssue[];
   orphans: string[];
+  orphan_areas: string[];
+  orphan_integrations: string[];
 }
 
 export interface MesaPutResponse {

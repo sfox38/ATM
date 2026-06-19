@@ -4,6 +4,7 @@ import type {
   MesaProfileDetail,
   MesaProfileDocument,
   MesaProfileListItem,
+  MesaIssuesResponse,
   MesaValidationIssue,
 } from "../types";
 import { api, ApiError } from "../api";
@@ -92,7 +93,8 @@ const ENFORCEMENT_MODES: Opt[] = [
 
 const HELP = {
   entity: "The Home Assistant entity this profile describes. Start typing a name or id to search.",
-  domain: "Applies to every entity in this domain unless a more specific (area or entity) profile overrides it.",
+  domain: "Applies to every entity in this domain unless a more specific (area, integration, or entity) profile overrides it.",
+  integration: "Applies to every entity created by this integration, identified by its component name (e.g. hue, yale_access_bluetooth), unless an area or entity profile overrides it. Vendor sidecars import here.",
   area: "Applies to every entity in this area unless a more specific entity profile overrides it.",
   tags: "Canonical MESA capability tags surfaced to agents. Type to search and pick from the list; each tag is namespaced (e.g. lighting / ambient). Use the suggestions below for this entity's domain.",
   control_mode:
@@ -107,12 +109,13 @@ const HELP = {
   privacy_level: "Sensitivity of the data this entity exposes to agents.",
 };
 
-type ProfileScope = "entity" | "domain" | "area";
+type ProfileScope = "entity" | "domain" | "integration" | "area";
 
-const SCOPE_LABEL: Record<ProfileScope, string> = { entity: "Entity", domain: "Domain", area: "Area" };
+const SCOPE_LABEL: Record<ProfileScope, string> = { entity: "Entity", domain: "Domain", integration: "Integration", area: "Area" };
 const SCOPE_PLACEHOLDER: Record<ProfileScope, string> = {
   entity: "Search by name or entity id...",
   domain: "Search domains...",
+  integration: "Search integrations by name...",
   area: "Search areas...",
 };
 
@@ -171,12 +174,14 @@ function editorToDoc(s: EditorState): MesaProfileDocument {
 async function loadProfile(scope: ProfileScope, key: string): Promise<MesaProfileDocument | null> {
   if (scope === "entity") return (await api.getMesaProfile(key)).stored;
   if (scope === "domain") return (await api.getMesaDomain(key)).stored;
+  if (scope === "integration") return (await api.getMesaIntegration(key)).stored;
   return (await api.getMesaArea(key)).stored;
 }
 
 async function saveProfile(scope: ProfileScope, key: string, doc: MesaProfileDocument): Promise<MesaValidationIssue[]> {
   if (scope === "entity") return (await api.putMesaProfile(key, doc)).warnings;
   if (scope === "domain") { await api.putMesaDomain(key, doc); return []; }
+  if (scope === "integration") { await api.putMesaIntegration(key, doc); return []; }
   await api.putMesaArea(key, doc);
   return [];
 }
@@ -184,6 +189,7 @@ async function saveProfile(scope: ProfileScope, key: string, doc: MesaProfileDoc
 async function deleteProfile(scope: ProfileScope, key: string): Promise<void> {
   if (scope === "entity") { await api.deleteMesaProfile(key); return; }
   if (scope === "domain") { await api.deleteMesaDomain(key); return; }
+  if (scope === "integration") { await api.deleteMesaIntegration(key); return; }
   await api.deleteMesaArea(key);
 }
 
@@ -337,6 +343,7 @@ export function ProfileEditor({
   isNew,
   entityTree,
   canonicalTags,
+  integrationOptions,
   onClose,
   onSaved,
   lockedKey,
@@ -346,6 +353,9 @@ export function ProfileEditor({
   isNew: boolean;
   entityTree: EntityTreeData | null;
   canonicalTags: string[];
+  // Installed integrations (id = component name, name = friendly title) for the
+  // integration-scope picker. Only the MESA tab supplies these.
+  integrationOptions?: { id: string; name: string }[];
   onClose: () => void;
   onSaved: () => void;
   // When true, the target id is fixed (supplied by the caller, e.g. the in-context
@@ -393,6 +403,11 @@ export function ProfileEditor({
 
   // Valid keys for the current scope, derived from the live registry.
   const keyOptions = useMemo<Opt[]>(() => {
+    if (scope === "integration") {
+      return (integrationOptions ?? [])
+        .map((i) => ({ value: i.id, label: i.name && i.name !== i.id ? `${i.name} (${i.id})` : i.id }))
+        .sort((a, b) => a.label.localeCompare(b.label));
+    }
     if (!entityTree) return [];
     if (scope === "domain") {
       return Object.keys(entityTree).sort().map((d) => ({ value: d, label: d }));
@@ -413,7 +428,7 @@ export function ProfileEditor({
       }
     }
     return out.sort((a, b) => a.label.localeCompare(b.label));
-  }, [entityTree, scope]);
+  }, [entityTree, scope, integrationOptions]);
 
   // New entity profiles: seed control + enforcement from the entity's effective
   // (inherited) mode, so creating a profile starts from what MESA already applies
@@ -445,7 +460,13 @@ export function ProfileEditor({
     return () => { cancelled = true; };
   }, [isNew, scope, state.key, keyOptions]);
 
-  const keyValid = !!lockedKey || !isNew || keyOptions.some((o) => o.value === state.key.trim());
+  // Integration: validate against the picker list when it loaded; if that list is
+  // empty (e.g. the integration-options endpoint isn't reachable yet), fall back to
+  // validating the typed component-name format so the field is never a dead end.
+  const keyValid = !!lockedKey || !isNew
+    || (scope === "integration" && keyOptions.length === 0
+      ? /^[a-z][a-z0-9_]*$/.test(state.key.trim())
+      : keyOptions.some((o) => o.value === state.key.trim()));
   const keyInvalidShown = !lockedKey && isNew && state.key.trim() !== "" && !keyValid;
   const dirty = JSON.stringify(state) !== cleanSnapshot.current;
   const canSave = !saving && !loading && keyValid;
@@ -594,7 +615,9 @@ export function ProfileEditor({
                 <strong>Delete this {scope} profile?</strong>
                 <p>
                   {scope === "domain"
-                    ? `Every entity in the "${profileKey}" domain that inherits from this profile will fall back to the next level (area, deployment defaults, then the built-in safety baseline). This can change the effective control mode for many entities at once.`
+                    ? `Every entity in the "${profileKey}" domain that inherits from this profile will fall back to the next level (area, integration, deployment defaults, then the built-in safety baseline). This can change the effective control mode for many entities at once.`
+                    : scope === "integration"
+                    ? `Every entity created by the "${profileKey}" integration that inherits from this profile will fall back to the next level (domain, deployment defaults, then the built-in safety baseline). This can change the effective control mode for many entities at once.`
                     : `Every entity in the "${profileKey}" area that inherits from this profile will fall back to deployment defaults or the built-in baseline.`}
                 </p>
                 <div className="modal-actions">
@@ -694,14 +717,16 @@ type Editing = { scope: ProfileScope; key: string | null; isNew: boolean };
 
 export function MesaView() {
   const [profiles, setProfiles] = useState<MesaProfileListItem[]>([]);
-  const [issues, setIssues] = useState<{ issues: MesaValidationIssue[]; orphans: string[] }>({ issues: [], orphans: [] });
+  const [issues, setIssues] = useState<MesaIssuesResponse>({ issues: [], orphans: [], orphan_areas: [], orphan_integrations: [] });
   const [entityTree, setEntityTree] = useState<EntityTreeData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState<Editing | null>(null);
   const [domains, setDomains] = useState<{ domain: string; document: MesaProfileDocument }[]>([]);
+  const [integrations, setIntegrations] = useState<{ integration: string; document: MesaProfileDocument }[]>([]);
   const [areas, setAreas] = useState<{ area_id: string; document: MesaProfileDocument }[]>([]);
   const [canonicalTags, setCanonicalTags] = useState<string[]>([]);
+  const [integrationOptions, setIntegrationOptions] = useState<{ id: string; name: string }[]>([]);
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState("");  // "" = all; a control_mode value; or "enforced"
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
@@ -710,15 +735,17 @@ export function MesaView() {
     setLoading(true);
     setError(null);
     try {
-      const [list, iss, doms, ars] = await Promise.all([
+      const [list, iss, doms, ints, ars] = await Promise.all([
         api.listMesaProfiles({ limit: 200 }),
         api.getMesaIssues(),
         api.listMesaDomains().catch(() => ({ domains: [] })),
+        api.listMesaIntegrations().catch(() => ({ integrations: [] })),
         api.listMesaAreas().catch(() => ({ areas: [] })),
       ]);
       setProfiles(list.profiles);
       setIssues(iss);
       setDomains(doms.domains);
+      setIntegrations(ints.integrations);
       setAreas(ars.areas);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load MESA profiles.");
@@ -733,6 +760,8 @@ export function MesaView() {
   useEffect(() => { api.getEntityTree().then(setEntityTree).catch(() => null); }, []);
   // The canonical MESA tag vocabulary powers the tag-input autocomplete.
   useEffect(() => { api.getMesaVocabulary().then((v) => setCanonicalTags(v.canonical_tags)).catch(() => null); }, []);
+  // Installed integrations (those with entities) for the integration-profile picker.
+  useEffect(() => { api.getMesaIntegrationOptions().then((r) => setIntegrationOptions(r.integrations)).catch(() => null); }, []);
 
   const friendly = useCallback((eid: string): string => {
     return entityTree?.[domainOf(eid)]?.entity_details[eid]?.friendly_name ?? "";
@@ -802,6 +831,9 @@ export function MesaView() {
           <button className="btn btn-ghost btn-sm" onClick={() => setEditing({ scope: "area", key: null, isNew: true })}>
             Add area profile
           </button>
+          <button className="btn btn-ghost btn-sm" onClick={() => setEditing({ scope: "integration", key: null, isNew: true })}>
+            Add integration profile
+          </button>
           <button className="btn btn-ghost btn-sm" onClick={() => setEditing({ scope: "domain", key: null, isNew: true })}>
             Add domain profile
           </button>
@@ -816,7 +848,7 @@ export function MesaView() {
 
       {error && <ErrorMsg msg={error} />}
 
-      {(issues.issues.length > 0 || issues.orphans.length > 0) && (
+      {(issues.issues.length > 0 || issues.orphans.length > 0 || issues.orphan_areas.length > 0 || issues.orphan_integrations.length > 0) && (
         <div className="banner banner-warn">
           {issues.issues.length > 0 && (
             <div>
@@ -830,21 +862,31 @@ export function MesaView() {
           )}
           {issues.orphans.length > 0 && (
             <div>
-              <strong>{issues.orphans.length} orphaned profile(s)</strong> (entity no longer exists): {issues.orphans.join(", ")}
+              <strong>{issues.orphans.length} orphaned entity profile(s)</strong> (entity no longer exists): {issues.orphans.join(", ")}
+            </div>
+          )}
+          {issues.orphan_areas.length > 0 && (
+            <div>
+              <strong>{issues.orphan_areas.length} orphaned area profile(s)</strong> (area no longer exists): {issues.orphan_areas.join(", ")}
+            </div>
+          )}
+          {issues.orphan_integrations.length > 0 && (
+            <div>
+              <strong>{issues.orphan_integrations.length} orphaned integration profile(s)</strong> (integration not loaded): {issues.orphan_integrations.join(", ")}
             </div>
           )}
         </div>
       )}
 
       <p className="mesa-scope-note">
-        The list shows entity-level profiles, grouped by domain. Domain and area profiles cascade to many entities and are listed separately below.
+        The list shows entity-level profiles, grouped by domain. Domain, integration, and area profiles cascade to many entities and are listed separately below.
       </p>
 
-      {(domains.length > 0 || areas.length > 0) && (
+      {(domains.length > 0 || integrations.length > 0 || areas.length > 0) && (
         <div className="card mesa-scope-card">
-          <div className="mesa-scope-card-title">Domain &amp; area profiles</div>
+          <div className="mesa-scope-card-title">Domain, integration &amp; area profiles</div>
           <p className="mesa-scope-card-sub">
-            These cascade to every entity in the domain or area unless a more specific profile overrides them. Click to edit.
+            These cascade to many entities (a whole domain, an integration's own entities, or an area) unless a more specific profile overrides them. Click to edit. A <span className="badge badge-purple">Vendor</span> badge marks a profile an integration shipped; saving creates your own override.
           </p>
           <div className="mesa-scope-list">
             {domains.map((d) => (
@@ -852,11 +894,20 @@ export function MesaView() {
                 onClick={() => setEditing({ scope: "domain", key: d.domain, isNew: false })}>
                 <span className="mesa-scope-kind">domain</span>
                 <code>{d.domain}</code>
-                {profileSource(d.document) === "developer" && (
-                  <span className="badge badge-purple" title="Supplied by the integration (mesa_profile.json). Saving creates your own override.">Vendor</span>
-                )}
                 <ControlBadge mode={rawControlMode(d.document)} />
                 {isEnforced(d.document) && <span className="badge badge-blue">Enforced</span>}
+              </button>
+            ))}
+            {integrations.map((it) => (
+              <button key={`int:${it.integration}`} className="mesa-scope-pill"
+                onClick={() => setEditing({ scope: "integration", key: it.integration, isNew: false })}>
+                <span className="mesa-scope-kind">integration</span>
+                <code>{it.integration}</code>
+                {profileSource(it.document) === "developer" && (
+                  <span className="badge badge-purple" title="Supplied by the integration (mesa_profile.json). Saving creates your own override.">Vendor</span>
+                )}
+                <ControlBadge mode={rawControlMode(it.document)} />
+                {isEnforced(it.document) && <span className="badge badge-blue">Enforced</span>}
               </button>
             ))}
             {areas.map((a) => (
@@ -941,6 +992,7 @@ export function MesaView() {
           isNew={editing.isNew}
           entityTree={entityTree}
           canonicalTags={canonicalTags}
+          integrationOptions={integrationOptions}
           onClose={() => setEditing(null)}
           onSaved={refresh}
         />

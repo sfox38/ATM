@@ -104,6 +104,9 @@ class ScopedProfileStore:
     def get_domain_profile(self, domain: str) -> SemanticProfile | None:
         return self._inner.get_domain_profile(domain)
 
+    def get_integration_profile(self, integration: str) -> SemanticProfile | None:
+        return self._inner.get_integration_profile(integration)
+
     def get_area_profile(self, area_id: str) -> SemanticProfile | None:
         return self._inner.get_area_profile(area_id)
 
@@ -113,6 +116,10 @@ class ScopedProfileStore:
     @property
     def get_entity_area(self):
         return self._inner.get_entity_area
+
+    @property
+    def get_entity_integration(self):
+        return self._inner.get_entity_integration
 
     def _fingerprint(self) -> str:
         digest = hashlib.sha256("|".join(self.entity_keys()).encode())
@@ -124,7 +131,9 @@ def _build_handlers(
 ) -> MesaToolHandlers:
     scoped = ScopedProfileStore(runtime.store, token, hass)
     resolver = InheritanceResolver(
-        store=scoped, get_entity_area=runtime.store.get_entity_area
+        store=scoped,
+        get_entity_area=runtime.store.get_entity_area,
+        get_entity_integration=runtime.store.get_entity_integration,
     )
     ctx = build_caller_context(token, session_id)
     return MesaToolHandlers(store=scoped, resolver=resolver, caller_context_fn=lambda: ctx)

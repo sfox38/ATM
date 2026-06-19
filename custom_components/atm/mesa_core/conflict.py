@@ -24,7 +24,7 @@ from custom_components.atm.mesa_core.profile import (
     TriggersAutomations,
 )
 
-SCOPE_RANK = {"entity": 3, "area": 2, "domain": 1}
+SCOPE_RANK = {"entity": 4, "area": 3, "integration": 2, "domain": 1}
 
 # Rule D fields on operational_boundaries (everything not covered by Rules A/B).
 _OB_RULE_D_FIELDS = (

@@ -159,6 +159,7 @@
           "enum": [
             "entity",
             "domain",
+            "integration",
             "area"
           ]
         },

@@ -29,7 +29,7 @@ VALID_SIDE_EFFECT_SCOPES = {
 VALID_STATE_VOLATILITY = {"static", "low", "medium", "high", "realtime"}
 VALID_STATE_PERSISTENCE = {"permanent", "temporary", "session", "transient"}
 VALID_DENY_RESPONSE_MODES = {"omit", "redact", "error"}
-VALID_INHERITANCE_SCOPES = {"entity", "domain", "area"}
+VALID_INHERITANCE_SCOPES = {"entity", "domain", "integration", "area"}
 PREDICATE_OPERATORS = {"eq", "neq", "gt", "gte", "lt", "lte", "in", "contains"}
 VALID_TEMPORAL_TYPES = {
     "time_range",

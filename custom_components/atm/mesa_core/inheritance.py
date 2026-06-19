@@ -55,9 +55,14 @@ class InheritanceResolver:
     """Resolves effective profiles for entities.
 
     Host callbacks supply the HA registry knowledge mesa-core does not have:
-    ``get_entity_area`` maps an entity ID to its area ID (None when unassigned)
-    and ``get_entity_domain`` maps an entity ID to the domain whose domain-level
-    profile applies (defaults to the entity ID prefix).
+    ``get_entity_area`` maps an entity ID to its area ID (None when unassigned),
+    ``get_entity_domain`` maps an entity ID to the HA domain whose domain-level
+    profile applies (defaults to the entity ID prefix), and
+    ``get_entity_integration`` maps an entity ID to the integration that created
+    it, for the integration-level sidecar profile (Spec 5.6). When
+    ``get_entity_integration`` is absent, the integration level falls back to the
+    entity's HA domain, which resolves domain-defining integrations (``light``,
+    ``lock``, ...) and leaves device and hub integration profiles inert.
     """
 
     def __init__(
@@ -65,10 +70,14 @@ class InheritanceResolver:
         store: ProfileStore,
         get_entity_area: Callable[[str], str | None] | None = None,
         get_entity_domain: Callable[[str], str] | None = None,
+        get_entity_integration: Callable[[str], str | None] | None = None,
     ) -> None:
         self.store = store
         self.get_entity_area = get_entity_area or store.get_entity_area
         self.get_entity_domain = get_entity_domain or (lambda eid: eid.split(".", 1)[0])
+        self.get_entity_integration = get_entity_integration or getattr(
+            store, "get_entity_integration", None
+        )
         self._conflicts = ConflictResolver()
 
     def _gather_layers(self, entity_id: str) -> list[Layer]:
@@ -82,6 +91,18 @@ class InheritanceResolver:
                 area_profile = self.store.get_area_profile(area_id)
                 if area_profile is not None:
                     layers.append(Layer("area", area_profile))
+        # Integration level: the sidecar of the integration that created this
+        # entity (Spec 5.6). The host maps entity -> integration; absent that
+        # mapping we fall back to the entity's HA domain, which resolves
+        # domain-defining integrations only.
+        if self.get_entity_integration is not None:
+            integration = self.get_entity_integration(entity_id)
+        else:
+            integration = self.get_entity_domain(entity_id)
+        if integration is not None:
+            integration_profile = self.store.get_integration_profile(integration)
+            if integration_profile is not None:
+                layers.append(Layer("integration", integration_profile))
         domain = self.get_entity_domain(entity_id)
         domain_profile = self.store.get_domain_profile(domain)
         if domain_profile is not None:

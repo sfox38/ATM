@@ -40,7 +40,7 @@
         <ul>
           <li><strong>Describe once, applies to everyone.</strong> A profile lives on the entity, the domain, or the area, never on a token. Every agent you connect, scoped or pass-through, inherits the same treatment, so you never re-encode "the front door is dangerous" in each token's tree.</li>
           <li><strong>Meaning, not just allow or deny.</strong> A profile records <em>why</em> an entity is sensitive (an exterior lock, a camera that sees a bedroom, a child's room), so the right control mode follows from the nature and the decision is explainable rather than a bare flag.</li>
-          <li><strong>Safe by inheritance.</strong> Profiles cascade from deployment defaults to domain to area to entity. Say "all locks need confirmation" once and every lock you add next year is covered, with no new rule to remember; risky domains start conservative out of the box.</li>
+          <li><strong>Safe by inheritance.</strong> Profiles cascade from deployment defaults to domain to integration to area to entity. Say "all locks need confirmation" once and every lock you add next year is covered, with no new rule to remember; risky domains start conservative out of the box.</li>
           <li><strong>A shared vocabulary.</strong> Tags come from a canonical set, not free text, so profiles stay consistent and machine-checkable across the whole install instead of drifting into one-off notes.</li>
           <li><strong>It tells the agent why.</strong> An entity's control mode and nature are surfaced to the AI before it acts, so a well-behaved agent asks for confirmation or backs off on its own, rather than failing into a wall and retrying.</li>
           <li><strong>It stays honest.</strong> ATM validates profiles against the automations that reference your entities, flagging conflicts and orphaned declarations as your configuration changes, so the model does not quietly rot.</li>
@@ -82,16 +82,18 @@
         <p>A <code>confirm</code> entity under enforced mode produces the same kind of <a href="capabilities.html">pending approval</a> as a capability set to confirm: the action is saved, a notification is raised, and the in-panel <strong>Approvals</strong> queue holds it until an admin approves or rejects. On approval, MESA re-evaluates before the action runs, so an entity that became read-only or prohibited in the meantime is still refused. Under advisory mode nothing is held; the call proceeds and the agent receives an advisory note explaining the entity was marked confirm.</p>
 
         <h2>Using MESA in the panel</h2>
-        <p>The <strong>MESA</strong> tab is where you author profiles. Profiles exist at four levels and the most specific one wins, with the rest inherited:</p>
+        <p>The <strong>MESA</strong> tab is where you author profiles. Profiles exist at five levels and the most specific one wins, with the rest inherited:</p>
         <dl class="kv">
           <div class="kv-row"><dt>Entity</dt><dd>A profile for one entity_id. The most specific level.</dd></div>
-          <div class="kv-row"><dt>Domain</dt><dd>A baseline for a whole domain (for example, all locks).</dd></div>
           <div class="kv-row"><dt>Area</dt><dd>A baseline for everything in an area.</dd></div>
+          <div class="kv-row"><dt>Integration</dt><dd>A baseline for every entity a given integration created, keyed by its component name (for example, all <code>hue</code> or <code>yale_access_bluetooth</code> entities, across whatever domains they span). More specific than a domain profile, less specific than an area or entity profile. Vendor-shipped sidecar profiles import at this level.</dd></div>
+          <div class="kv-row"><dt>Domain</dt><dd>A baseline for a whole domain (for example, all locks).</dd></div>
           <div class="kv-row"><dt>Deployment defaults</dt><dd>The fallback applied when nothing more specific matches.</dd></div>
         </dl>
         <p>The editor enforces a few guardrails so a profile is always valid:</p>
         <ul>
           <li>Profile keys are drawn from the live registry, so you describe entities, domains, and areas that actually exist.</li>
+          <li>The integration picker lists every integration that has actually created entities. That includes core and helper integrations such as <code>script</code>, <code>automation</code>, and <code>backup</code> (they create entities under a platform whose name equals their domain), which is expected, not a bug. Selecting one creates a valid profile for that integration's entities; for those domain-equal integrations it simply sits one level above the matching domain profile and wins where both apply.</li>
           <li>Tags come from a canonical vocabulary with autocomplete; free text is not accepted, and a profile holds up to six tags.</li>
           <li>Leaving an editor with unsaved changes prompts before discarding them.</li>
         </ul>

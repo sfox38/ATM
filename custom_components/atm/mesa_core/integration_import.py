@@ -23,8 +23,8 @@ SIDECAR_FILENAME = "mesa_profile.json"
 def import_from_integration(integration_path: str | Path) -> SemanticProfile | None:
     """Load the developer profile shipped with one integration.
 
-    Returns a SemanticProfile with ``inheritance_scope: domain`` keyed by the
-    integration directory name, or None when no sidecar file exists. Raises
+    Returns a SemanticProfile with ``inheritance_scope: integration`` keyed by
+    the integration directory name, or None when no sidecar file exists. Raises
     MesaValidationError for malformed sidecar content.
 
     Host servers call this at startup for each installed integration and write
@@ -32,7 +32,12 @@ def import_from_integration(integration_path: str | Path) -> SemanticProfile | N
 
         profile = import_from_integration(path)
         if profile is not None:
-            store.set_domain_profile(profile.entity_id, profile)
+            store.set_integration_profile(profile.entity_id, profile)
+
+    The profile applies to every entity the integration created (Spec 5.6); the
+    host supplies the entity-to-integration mapping via the resolver's
+    ``get_entity_integration`` callback. Hosts that cannot supply it fall back to
+    matching only entities whose HA domain equals the integration directory name.
     """
     path = Path(integration_path)
     sidecar = path / SIDECAR_FILENAME
@@ -42,5 +47,5 @@ def import_from_integration(integration_path: str | Path) -> SemanticProfile | N
     profile = SemanticProfile.from_dict(
         path.name, data, default_origin=MetadataOrigin.DEVELOPER
     )
-    profile.inheritance_scope = "domain"
+    profile.inheritance_scope = "integration"
     return profile
