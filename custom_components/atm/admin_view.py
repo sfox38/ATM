@@ -1597,8 +1597,9 @@ class ATMAdminMesaProfilesView(HomeAssistantView):
         except (TypeError, ValueError):
             return _err("invalid_request", "limit must be an integer.", 400, rid)
         try:
-            result = runtime.store.list(
-                domain=q.get("domain"),
+            domain = q.get("domain")
+            result = runtime.store.query(
+                domains=[domain] if domain else None,
                 tags=[tag] if tag else None,
                 areas=[area] if area else None,
                 origin=q.get("origin"),
@@ -1614,8 +1615,8 @@ class ATMAdminMesaProfilesView(HomeAssistantView):
         return _ok(
             {
                 "profiles": [
-                    {"entity_id": p.entity_id, "document": p.to_dict()}
-                    for p in result.profiles
+                    {"entity_id": row.entity_id, "document": row.stored.to_dict()}
+                    for row in result.rows
                 ],
                 "total_matched": result.total_matched,
                 "has_more": result.has_more,

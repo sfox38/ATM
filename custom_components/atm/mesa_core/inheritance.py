@@ -80,9 +80,14 @@ class InheritanceResolver:
         )
         self._conflicts = ConflictResolver()
 
-    def _gather_layers(self, entity_id: str) -> list[Layer]:
+    def _gather_layers(
+        self, entity_id: str, entity_profile: SemanticProfile | None = None
+    ) -> list[Layer]:
         layers: list[Layer] = []
-        entity_profile = self.store.get(entity_id)
+        # A caller that has already loaded the entity profile (e.g. query())
+        # passes it in to avoid a redundant store read; None means fetch it.
+        if entity_profile is None:
+            entity_profile = self.store.get(entity_id)
         if entity_profile is not None:
             layers.append(Layer("entity", entity_profile))
         if self.get_entity_area is not None:
@@ -113,8 +118,10 @@ class InheritanceResolver:
         """Whether any profile is declared for this entity at any inheritance level."""
         return bool(self._gather_layers(entity_id))
 
-    def explain(self, entity_id: str) -> ProfileExplanation:
-        layers = self._gather_layers(entity_id)
+    def explain(
+        self, entity_id: str, *, entity_profile: SemanticProfile | None = None
+    ) -> ProfileExplanation:
+        layers = self._gather_layers(entity_id, entity_profile)
         effective, resolution = self._conflicts.resolve(entity_id, layers)
         domain = self.get_entity_domain(entity_id)
         defaults = self.store.get_deployment_defaults()
@@ -184,6 +191,12 @@ class InheritanceResolver:
             warnings=resolution.warnings,
         )
 
-    def resolve(self, entity_id: str) -> SemanticProfile:
-        """Return the fully resolved effective profile for an entity."""
-        return self.explain(entity_id).effective_profile
+    def resolve(
+        self, entity_id: str, *, entity_profile: SemanticProfile | None = None
+    ) -> SemanticProfile:
+        """Return the fully resolved effective profile for an entity.
+
+        ``entity_profile`` is an optional already-loaded entity profile, passed
+        to avoid a redundant store read; None means load it from the store.
+        """
+        return self.explain(entity_id, entity_profile=entity_profile).effective_profile

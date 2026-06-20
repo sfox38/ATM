@@ -298,7 +298,7 @@ class MesaEnforcer:
         warnings.extend(temporal.warnings)
 
         # 2. Privacy.
-        is_person = entity_id.split(".", 1)[0] == "person"
+        is_person = profile.domain == "person"
         decision = self.privacy.evaluate(
             profile.privacy_classification,
             caller_context,

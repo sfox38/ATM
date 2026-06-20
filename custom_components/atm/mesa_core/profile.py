@@ -255,7 +255,6 @@ class SemanticProfile:
         (Spec 5.3 location-based provenance defaults).
         """
         validation.validate_or_raise(data, entity_id)
-        warnings: list[str] = []
 
         if "semantic_profile" in data:
             root = copy.deepcopy(data)
@@ -337,7 +336,6 @@ class SemanticProfile:
             inheritance_scope=sp.get("inheritance_scope", "entity"),
             diagnostic_profile=root.get("diagnostic_profile"),
             raw=root,
-            parse_warnings=warnings,
         )
 
     # -- serialisation ------------------------------------------------------

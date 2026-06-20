@@ -15,6 +15,7 @@ from typing import Any
 from custom_components.atm.mesa_core.profile import (
     CONTROL_MODE_RANK,
     HELPER_DOMAINS,
+    ORIGIN_AUTHORITY,
     PRIVACY_RANK,
     TRUSTED_ORIGINS,
     ControlMode,
@@ -125,8 +126,6 @@ class _Candidate:
 
     @property
     def origin_authority(self) -> int:
-        from custom_components.atm.mesa_core.profile import ORIGIN_AUTHORITY
-
         return ORIGIN_AUTHORITY[self.origin]
 
     def describe(self) -> dict[str, Any]:

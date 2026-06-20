@@ -19,12 +19,8 @@ from custom_components.atm.mesa_core.inheritance import InheritanceResolver
 from custom_components.atm.mesa_core.mcp.adapters import ToolRegistry
 from custom_components.atm.mesa_core.mcp.schemas import TOOL_DESCRIPTIONS, TOOL_SCHEMAS
 from custom_components.atm.mesa_core.privacy import CallerContext
-from custom_components.atm.mesa_core.profile import (
-    ORIGIN_AUTHORITY,
-    MetadataOrigin,
-    SemanticProfile,
-)
-from custom_components.atm.mesa_core.store import MAX_PAGE_SIZE, ProfileStore, _decode_cursor, _encode_cursor
+from custom_components.atm.mesa_core.profile import SemanticProfile
+from custom_components.atm.mesa_core.store import ProfileStore
 
 logger = logging.getLogger("mesa_core.mcp")
 
@@ -93,105 +89,44 @@ class MesaToolHandlers:
 
     async def mesa_query_profiles(self, params: dict[str, Any]) -> dict[str, Any]:
         try:
-            limit = max(1, min(int(params.get("limit", 50)), MAX_PAGE_SIZE))
-            domains = params.get("domains")
-            tags = params.get("tags")
-            tags_match = params.get("tags_match", "any")
-            if tags_match not in ("any", "all"):
-                return _error("invalid_query", f"invalid tags_match: {tags_match!r}")
-            areas = params.get("areas")
-            intents = params.get("intents")
-            include_inferred = bool(params.get("include_inferred", False))
+            result = self.store.query(
+                domains=params.get("domains"),
+                tags=params.get("tags"),
+                tags_match=params.get("tags_match", "any"),
+                areas=params.get("areas"),
+                intents=params.get("intents"),
+                include_inferred=bool(params.get("include_inferred", False)),
+                min_origin_authority=params.get("min_origin_authority"),
+                limit=int(params.get("limit", 50)),
+                cursor=params.get("cursor"),
+                resolver=self.resolver,
+            )
             include_fields = params.get("include_fields")
-            min_auth_raw = params.get("min_origin_authority")
-            min_authority: int | None = None
-            if min_auth_raw is not None:
-                try:
-                    min_authority = ORIGIN_AUTHORITY[MetadataOrigin(min_auth_raw)]
-                except ValueError:
-                    return _error(
-                        "invalid_query", f"invalid min_origin_authority: {min_auth_raw!r}"
-                    )
-            if areas and self.resolver.get_entity_area is None:
-                return _error(
-                    "invalid_query",
-                    "areas filter requires the host's get_entity_area callback",
-                )
-
-            warnings: list[str] = []
-            matched: list[tuple[str, SemanticProfile, SemanticProfile]] = []
-            for key in self.store.entity_keys():
-                try:
-                    stored = self.store.get(key)
-                except MesaValidationError as err:
-                    warnings.append(f"skipped malformed profile {key}: {err}")
-                    continue
-                if stored is None:
-                    continue
-                if domains and stored.domain not in domains:
-                    continue
-                source = stored.metadata.source
-                if not include_inferred and source in (
-                    MetadataOrigin.INFERRED_AI,
-                    MetadataOrigin.UNKNOWN,
-                ):
-                    continue
-                if min_authority is not None and ORIGIN_AUTHORITY[source] < min_authority:
-                    continue
-                if (
-                    areas
-                    and self.resolver.get_entity_area is not None
-                    and self.resolver.get_entity_area(key) not in areas
-                ):
-                    continue
-                effective = self.resolver.resolve(key)
-                # Tag matching evaluates the effective resolved tag set (Spec 9.2).
-                effective_tags = set(effective.semantic_tags)
-                intent_tags = effective_tags | set(
-                    (stored.raw.get("semantic_profile", {}).get("semantic_routing", {}) or {})
-                    .get("intent_tags", [])
-                )
-                if tags:
-                    if tags_match == "all" and not set(tags) <= effective_tags:
-                        continue
-                    if tags_match == "any" and not set(tags) & effective_tags:
-                        continue
-                if intents and not set(intents) & intent_tags:
-                    continue
-                matched.append((key, stored, effective))
-
-            matched.sort(key=lambda item: item[0])
-            fingerprint = self.store._fingerprint()
-            cursor = params.get("cursor")
-            offset = _decode_cursor(cursor, fingerprint) if cursor else 0
-            page = matched[offset : offset + limit]
-            has_more = offset + limit < len(matched)
-
             response: dict[str, Any] = {
                 "mesa_version": MESA_VERSION,
                 "results": [
-                    self._result_object(key, stored, effective, include_fields)
-                    for key, stored, effective in page
+                    self._result_object(
+                        row.entity_id, row.stored, row.effective or row.stored, include_fields
+                    )
+                    for row in result.rows
                 ],
-                "total_matched": len(matched),
+                "total_matched": result.total_matched,
                 "pagination": {
-                    "limit": limit,
-                    "returned": len(page),
-                    "has_more": has_more,
-                    "next_cursor": (
-                        _encode_cursor(offset + limit, fingerprint) if has_more else None
-                    ),
+                    "limit": result.limit,
+                    "returned": len(result.rows),
+                    "has_more": result.has_more,
+                    "next_cursor": result.next_cursor,
                 },
             }
             caller = self._caller_context()
             if caller is not None:
                 response["caller_context"] = caller.to_dict()
-            if warnings:
-                response["warnings"] = warnings
+            if result.warnings:
+                response["warnings"] = result.warnings
             return response
         except InvalidCursorError as err:
             return _error("invalid_cursor", str(err))
-        except MesaValidationError as err:
+        except (ValueError, MesaValidationError) as err:
             return _error("invalid_query", str(err))
         except Exception:
             logger.exception("mesa_query_profiles failed")

@@ -21,7 +21,7 @@ from typing import TYPE_CHECKING, Any
 from .const import CAP_DENY
 from .helpers import effective_cap
 from .mesa import build_caller_context
-from .mesa_core import InheritanceResolver
+from .mesa_core import InheritanceResolver, ProfileQueryResult, ProfileStore
 from .mesa_core.mcp.schemas import TOOL_DESCRIPTIONS, TOOL_SCHEMAS
 from .mesa_core.mcp.tools import MesaToolHandlers
 from .policy_engine import Permission, resolve
@@ -124,6 +124,24 @@ class ScopedProfileStore:
     def _fingerprint(self) -> str:
         digest = hashlib.sha256("|".join(self.entity_keys()).encode())
         return digest.hexdigest()[:16]
+
+    def query(self, **kwargs: Any) -> ProfileQueryResult:
+        """Run mesa-core's profile query over this scoped view.
+
+        mesa-core's MesaToolHandlers delegates mesa_query_profiles to
+        store.query(); driving the real ProfileStore.query with this scoped
+        store as self keeps total_matched, the cursor, and the fingerprint all
+        scope-relative (no entity-enumeration oracle). The handler always passes
+        a scoped resolver; _default_resolver mirrors it for the no-resolver path.
+        """
+        return ProfileStore.query(self, **kwargs)
+
+    def _default_resolver(self) -> InheritanceResolver:
+        return InheritanceResolver(
+            store=self,
+            get_entity_area=self.get_entity_area,
+            get_entity_integration=self.get_entity_integration,
+        )
 
 
 def _build_handlers(

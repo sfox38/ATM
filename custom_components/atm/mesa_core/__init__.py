@@ -24,7 +24,7 @@ from custom_components.atm.mesa_core.profile import (
     SemanticProfile,
     TriggersAutomations,
 )
-from custom_components.atm.mesa_core.store import DeploymentDefaults, ProfileQueryResult, ProfileStore
+from custom_components.atm.mesa_core.store import DeploymentDefaults, ProfileQueryResult, ProfileStore, QueryRow
 from custom_components.atm.mesa_core.temporal import TemporalEvaluator, TemporalResult
 from custom_components.atm.mesa_core.trigger_validator import (
     TriggerValidator,
@@ -60,6 +60,7 @@ __all__ = [
     "ProfileMetadata",
     "ProfileQueryResult",
     "ProfileStore",
+    "QueryRow",
     "SemanticProfile",
     "TemporalEvaluator",
     "TemporalResult",

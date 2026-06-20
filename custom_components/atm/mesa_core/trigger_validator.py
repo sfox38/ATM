@@ -70,11 +70,6 @@ def entities_by_role(config: dict[str, Any]) -> dict[str, set[str]]:
         result[role] = found
     return result
 
-
-# Back-compat alias for internal callers predating the public name.
-_entities_by_role = entities_by_role
-
-
 class TriggerValidator:
     def __init__(self, store: ProfileStore) -> None:
         self.store = store

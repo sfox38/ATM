@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import asyncio
 import base64
-import builtins
 import hashlib
 import json
 from collections.abc import Callable, Iterable
@@ -17,8 +16,9 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from custom_components.atm.mesa_core.backends import StorageBackend
-from custom_components.atm.mesa_core.exceptions import InvalidCursorError
+from custom_components.atm.mesa_core.exceptions import InvalidCursorError, MesaValidationError
 from custom_components.atm.mesa_core.profile import (
+    ORIGIN_AUTHORITY,
     ControlMode,
     MetadataOrigin,
     SemanticProfile,
@@ -79,12 +79,31 @@ class DeploymentDefaults:
 
 
 @dataclass
+class QueryRow:
+    """One query match: the stored profile and its resolved effective profile.
+
+    ``effective`` is populated for every returned row; it is None only for
+    intermediate matches that were filtered out before the page was resolved.
+    """
+
+    entity_id: str
+    stored: SemanticProfile
+    effective: SemanticProfile | None = None
+
+
+@dataclass
 class ProfileQueryResult:
-    profiles: list[SemanticProfile]
+    rows: list[QueryRow]
     total_matched: int
     has_more: bool
     next_cursor: str | None
+    limit: int = 50
     warnings: list[str] = field(default_factory=list)
+
+    @property
+    def profiles(self) -> list[SemanticProfile]:
+        """The effective profile of each returned row (stored if unresolved)."""
+        return [row.effective or row.stored for row in self.rows]
 
 
 def _encode_cursor(offset: int, fingerprint: str) -> str:
@@ -243,62 +262,113 @@ class ProfileStore:
         digest = hashlib.sha256("|".join(self.entity_keys()).encode())
         return digest.hexdigest()[:16]
 
-    def list(
+    def query(
         self,
-        domain: str | None = None,
+        *,
+        domains: list[str] | None = None,
         tags: list[str] | None = None,
+        tags_match: str = "any",
         areas: list[str] | None = None,
-        origin: str | None = None,
+        intents: list[str] | None = None,
         include_inferred: bool = False,
+        origin: str | None = None,
+        min_origin_authority: str | None = None,
         limit: int = 50,
         cursor: str | None = None,
+        resolver: InheritanceResolver | None = None,
     ) -> ProfileQueryResult:
-        """Query stored entity profiles with filtering and pagination.
+        """Query entity profiles with filtering and pagination (Spec 9.2).
 
-        Tag matching here is against stored (entity-level) tags; effective-tag
-        matching after inheritance is the retrieval API layer's responsibility.
+        Tag and intent filters match the effective (resolved) tag set per Spec
+        9.2, so resolution is used; the resolver defaults to this store's. Cheap
+        attribute filters (domain, origin, area) run first and resolution is
+        deferred to the survivors, or to just the returned page when neither a
+        tag nor an intent filter is present.
+
         ``include_inferred=False`` excludes ``inferred_ai`` and ``unknown``
-        origins (Spec 5.4 Rule 5) unless an explicit ``origin`` filter asks
-        for them.
+        origins (Spec 5.4 Rule 5) unless an explicit ``origin`` filter asks for
+        them. Raises ValueError for malformed filter arguments and
+        InvalidCursorError for a stale or malformed cursor.
         """
-        limit = max(1, min(limit, MAX_PAGE_SIZE))
-        warnings: list[str] = []
-        if areas and self.get_entity_area is None:
+        if tags_match not in ("any", "all"):
+            raise ValueError(f"invalid tags_match: {tags_match!r}")
+        origin_filter = MetadataOrigin(origin) if origin is not None else None
+        min_authority: int | None = None
+        if min_origin_authority is not None:
+            try:
+                min_authority = ORIGIN_AUTHORITY[MetadataOrigin(min_origin_authority)]
+            except ValueError as err:
+                raise ValueError(
+                    f"invalid min_origin_authority: {min_origin_authority!r}"
+                ) from err
+
+        resolver = resolver or self._default_resolver()
+        get_area = resolver.get_entity_area
+        if areas and get_area is None:
             raise ValueError("areas filter requires the get_entity_area callback")
 
-        matched: list[SemanticProfile] = []
+        limit = max(1, min(limit, MAX_PAGE_SIZE))
+        filter_needs_resolution = bool(tags or intents)
+        warnings: list[str] = []
+        matched: list[QueryRow] = []
         for key in self.entity_keys():
-            profile = self.get(key)
-            if profile is None:
+            try:
+                stored = self.get(key)
+            except MesaValidationError as err:
+                warnings.append(f"skipped malformed profile {key}: {err}")
                 continue
-            if domain is not None and profile.domain != domain:
+            if stored is None:
                 continue
-            if tags and not any(t in profile.semantic_tags for t in tags):
+            if domains and stored.domain not in domains:
                 continue
-            if areas and self.get_entity_area is not None:
-                area = self.get_entity_area(key)
-                if area not in areas:
+            source = stored.metadata.source
+            if origin_filter is not None:
+                if source != origin_filter:
                     continue
-            if origin is not None:
-                if profile.metadata.source != MetadataOrigin(origin):
-                    continue
-            elif not include_inferred and profile.metadata.source in (
+            elif not include_inferred and source in (
                 MetadataOrigin.INFERRED_AI,
                 MetadataOrigin.UNKNOWN,
             ):
                 continue
-            matched.append(profile)
+            if min_authority is not None and ORIGIN_AUTHORITY[source] < min_authority:
+                continue
+            if areas and get_area is not None and get_area(key) not in areas:
+                continue
+            effective: SemanticProfile | None = None
+            if filter_needs_resolution:
+                effective = resolver.resolve(key, entity_profile=stored)
+                effective_tags = set(effective.semantic_tags)
+                if tags:
+                    if tags_match == "all" and not set(tags) <= effective_tags:
+                        continue
+                    if tags_match == "any" and not set(tags) & effective_tags:
+                        continue
+                if intents:
+                    routing = (
+                        stored.raw.get("semantic_profile", {}).get("semantic_routing", {}) or {}
+                    )
+                    intent_tags = effective_tags | set(routing.get("intent_tags", []))
+                    if not set(intents) & intent_tags:
+                        continue
+            matched.append(QueryRow(entity_id=key, stored=stored, effective=effective))
 
+        matched.sort(key=lambda row: row.entity_id)
         fingerprint = self._fingerprint()
         offset = _decode_cursor(cursor, fingerprint) if cursor else 0
         page = matched[offset : offset + limit]
         has_more = offset + limit < len(matched)
+        # OPT: resolve only the returned page when filtering did not already,
+        # reusing the stored profile each row already holds.
+        for row in page:
+            if row.effective is None:
+                row.effective = resolver.resolve(row.entity_id, entity_profile=row.stored)
         next_cursor = _encode_cursor(offset + limit, fingerprint) if has_more else None
         return ProfileQueryResult(
-            profiles=page,
+            rows=page,
             total_matched=len(matched),
             has_more=has_more,
             next_cursor=next_cursor,
+            limit=limit,
             warnings=warnings,
         )
 
@@ -343,15 +413,14 @@ class ProfileStore:
     async def aset_many(self, profiles: dict[str, SemanticProfile]) -> None:
         await asyncio.to_thread(self.set_many, profiles)
 
-    # NOTE: builtins.list below because the `list` method shadows the builtin in class scope.
-    async def adelete_many(self, entity_ids: builtins.list[str]) -> None:
+    async def adelete_many(self, entity_ids: list[str]) -> None:
         await asyncio.to_thread(self.delete_many, entity_ids)
 
-    async def alist(self, **kwargs: Any) -> ProfileQueryResult:
-        return await asyncio.to_thread(lambda: self.list(**kwargs))
+    async def aquery(self, **kwargs: Any) -> ProfileQueryResult:
+        return await asyncio.to_thread(lambda: self.query(**kwargs))
 
     async def aget_effective(self, entity_id: str) -> SemanticProfile:
         return await asyncio.to_thread(self.get_effective, entity_id)
 
-    async def afind_orphans(self, known_entity_ids: Iterable[str]) -> builtins.list[str]:
+    async def afind_orphans(self, known_entity_ids: Iterable[str]) -> list[str]:
         return await asyncio.to_thread(self.find_orphans, known_entity_ids)
