@@ -4235,7 +4235,7 @@ async def _tool_describe_entity(
         "area": _area_name_for_entity(entity_id, er.async_get(hass), dr.async_get(hass), ar.async_get(hass)),
         "writable": token.pass_through or perm == Permission.WRITE,
         "domain_services": sorted(hass.services.async_services().get(domain, {}).keys()),
-        "referenced_by": _references_for_entity(hass, entity_id),
+        "referenced_by": await hass.async_add_executor_job(_references_for_entity, hass, entity_id),
     }
 
     settings = data.store.get_settings()
