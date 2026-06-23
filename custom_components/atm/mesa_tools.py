@@ -18,7 +18,7 @@ import hashlib
 import json
 from typing import TYPE_CHECKING, Any
 
-from .const import CAP_DENY
+from .const import CAP_DENY, MAX_PREVIEW_ENTITY_IDS
 from .helpers import effective_cap
 from .mesa import build_caller_context
 from .mesa_core import InheritanceResolver, ProfileQueryResult, ProfileStore
@@ -142,6 +142,61 @@ class ScopedProfileStore:
             get_entity_area=self.get_entity_area,
             get_entity_integration=self.get_entity_integration,
         )
+
+
+# Control modes surfaced as an explicit "do not operate / observe only" list in
+# get_overview. Other authored modes (e.g. a confirm override) appear only in the
+# counts, since confirm is the common domain default and listing every confirm
+# entity would reintroduce the baseline noise a rollup must avoid.
+_RESTRICTIVE_MODES = ("prohibited", "read_only")
+
+
+def authored_restrictions(
+    runtime: "MesaRuntime",
+    token: "TokenRecord",
+    hass: Any,
+    *,
+    limit: int = MAX_PREVIEW_ENTITY_IDS,
+) -> dict[str, Any]:
+    """Scope-relative summary of ADMIN-AUTHORED entity profiles, for get_overview.
+
+    Iterates only entities with a stored (operator-authored) profile via the
+    scoped store, never baseline-derived modes, so the rollup reflects operator
+    intent rather than domain defaults (the reason a naive control_mode count was
+    originally omitted). ScopedProfileStore hides out-of-scope authored entities,
+    so this is not an enumeration oracle.
+    """
+    scoped = ScopedProfileStore(runtime.store, token, hass)
+    by_mode: dict[str, int] = {}
+    restricted: list[dict[str, str]] = []
+    truncated = 0
+    for entity_id in sorted(scoped.entity_keys()):
+        profile = scoped.get(entity_id)
+        if profile is None:
+            continue
+        boundaries = profile.operational_boundaries
+        cm = boundaries.control_mode
+        mode = getattr(cm, "value", cm)
+        if mode is None:
+            continue
+        by_mode[mode] = by_mode.get(mode, 0) + 1
+        if mode in _RESTRICTIVE_MODES:
+            if len(restricted) < limit:
+                entry = {"entity_id": entity_id, "control_mode": mode}
+                reason = getattr(boundaries, "control_reason", None)
+                if reason:
+                    entry["reason"] = reason
+                restricted.append(entry)
+            else:
+                truncated += 1
+    summary: dict[str, Any] = {
+        "authored_profile_count": sum(by_mode.values()),
+        "by_control_mode": dict(sorted(by_mode.items())),
+        "restricted_entities": restricted,
+    }
+    if truncated:
+        summary["restricted_truncated"] = truncated
+    return summary
 
 
 def _build_handlers(

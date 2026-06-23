@@ -76,7 +76,13 @@ from .ws_dispatch import (
     async_save_lovelace_config,
     async_ws_command,
 )
-from .mesa_tools import MESA_TOOL_NAMES, call_mesa_tool, mesa_tool_defs
+from .mesa_tools import (
+    MESA_TOOL_NAMES,
+    MESA_TOOLS_CAP,
+    authored_restrictions,
+    call_mesa_tool,
+    mesa_tool_defs,
+)
 from .helpers import (
     build_error_response as _error,
     build_permitted_states as _build_permitted_states,
@@ -755,7 +761,9 @@ _SYSTEM_TOOL_DEFS: list[dict] = [
             "A compact summary of the home as this token sees it: total accessible entities, "
             "counts by domain and by area, how many are unavailable, and the deployment MESA mode "
             "(off | advisory | enforced) so you know whether to expect confirm/read-only gates. "
-            "Good for orienting at session start."
+            "When MESA is active it also lists the operator-set prohibited and read-only entities "
+            "with reasons, so this is the fastest way to learn what is off-limits or must not be "
+            "controlled, prefer it over enumerating profiles. Good for orienting at session start."
         ),
         "cap": "cap_search",
         "inputSchema": {"type": "object", "properties": {}},
@@ -4026,11 +4034,16 @@ async def _tool_get_overview(
     }
     # Deployment-wide MESA posture: a cheap one-field orientation signal so the
     # agent knows whether to expect confirm/read-only gates (off | advisory |
-    # enforced). A per-entity rollup is intentionally omitted here: control_mode
-    # is mostly baseline-derived, so a home-wide count reflects defaults, not
-    # admin intent. Use search_entities (per-row control_mode) for that.
+    # enforced), plus the operator-authored prohibited/read-only entities the agent
+    # should avoid. The rollup lists ONLY admin-authored profiles (never baseline-
+    # derived modes), so it reflects operator intent, and it folds a safety-audit
+    # ("what's off-limits?") into this one call instead of paginated mesa_* lookups.
+    # Gated on cap_config_read (the profile-data cap) and only when MESA governs.
     if data.mesa is not None:
-        body["mesa_mode"] = data.store.get_settings().mesa_mode
+        mesa_mode = data.store.get_settings().mesa_mode
+        body["mesa_mode"] = mesa_mode
+        if mesa_mode != MESA_MODE_OFF and effective_cap(token, MESA_TOOLS_CAP) != CAP_DENY:
+            body["mesa_restrictions"] = authored_restrictions(data.mesa, token, hass)
     return _tool_success(json.dumps(body, default=str)), "allowed", "get_overview"
 
 
