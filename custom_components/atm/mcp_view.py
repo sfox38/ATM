@@ -3219,6 +3219,32 @@ async def _hass_turn_gate(
     return await _hass_turn_execute(tool_name, service, args, token, hass, data)
 
 
+# homeassistant.turn_on/off does not operate these domains on current HA, so a
+# HassTurnOn/Off must call the domain service instead (mirroring HA's own intent
+# handler): turn_on -> lock.lock / cover.open_cover, turn_off -> lock.unlock /
+# cover.close_cover. Every other domain stays on homeassistant.turn_on/off.
+_TURN_DOMAIN_SERVICES: dict[str, tuple[str, str, str]] = {
+    "lock": ("lock", "lock", "unlock"),
+    "cover": ("cover", "open_cover", "close_cover"),
+}
+
+
+def _turn_service_groups(service: str, entities: list[str]) -> list[tuple[str, str, list[str]]]:
+    """Group entities by the service that actuates them for a turn_on/turn_off.
+
+    Returns (service_domain, service_name, entities) groups in first-seen order.
+    Lock and cover route to their domain services; every other domain stays on
+    homeassistant.turn_on/off.
+    """
+    on = service == "turn_on"
+    grouped: dict[tuple[str, str], list[str]] = {}
+    for entity_id in entities:
+        mapped = _TURN_DOMAIN_SERVICES.get(entity_id.split(".")[0])
+        key = (mapped[0], mapped[1] if on else mapped[2]) if mapped else ("homeassistant", service)
+        grouped.setdefault(key, []).append(entity_id)
+    return [(domain, svc, ents) for (domain, svc), ents in grouped.items()]
+
+
 async def _hass_turn_execute(
     tool_name: str, service: str, args: dict, token: TokenRecord, hass: Any, data: ATMData
 ) -> tuple[dict, str, str]:
@@ -3227,7 +3253,53 @@ async def _hass_turn_execute(
     # (direct) or confirm (reached here only after admin approval) they are kept.
     if effective_cap(token, "cap_physical_control") == CAP_DENY:
         entities = [e for e in entities if e.split(".")[0] not in PHYSICAL_GATE_DOMAINS]
-    return await _tool_intent_action(tool_name, "homeassistant", service, {}, entities, hass, token, args=args)
+    groups = _turn_service_groups(service, entities)
+    if len(groups) <= 1:
+        domain, svc, ents = groups[0] if groups else ("homeassistant", service, [])
+        return await _tool_intent_action(tool_name, domain, svc, {}, ents, hass, token, args=args)
+    return await _merge_turn_groups(tool_name, groups, args, hass, token)
+
+
+async def _merge_turn_groups(
+    tool_name: str,
+    groups: list[tuple[str, str, list[str]]],
+    args: dict,
+    hass: Any,
+    token: TokenRecord,
+) -> tuple[dict, str, str]:
+    """Run a mixed-domain HassTurnOn/Off as one service call per domain and merge
+    the action_done responses. A pending approval from any group is surfaced
+    immediately; denied/empty groups contribute nothing to the merged success."""
+    success: list[dict] = []
+    seen: set[tuple] = set()
+    speech_parts: list[str] = []
+    any_ok = False
+    for domain, svc, ents in groups:
+        resp, outcome, resource = await _tool_intent_action(
+            tool_name, domain, svc, {}, ents, hass, token, args=args
+        )
+        if outcome == "pending_approval":
+            return resp, outcome, resource
+        if outcome != "allowed":
+            continue
+        any_ok = True
+        payload = json.loads(resp["content"][0]["text"])
+        for entry in payload.get("data", {}).get("success", []):
+            key = (entry.get("type"), entry.get("id"))
+            if key not in seen:
+                seen.add(key)
+                success.append(entry)
+        spoken = payload.get("speech", {}).get("plain", {}).get("speech")
+        if spoken:
+            speech_parts.append(spoken)
+    if not any_ok:
+        return _tool_error("No accessible entities matched your request."), "denied", tool_name
+    speech = {"plain": {"speech": " ".join(speech_parts), "extra_data": None}} if speech_parts else {}
+    return _tool_success(json.dumps({
+        "speech": speech,
+        "response_type": "action_done",
+        "data": {"success": success, "failed": []},
+    })), "allowed", tool_name
 
 
 async def _tool_hass_turn_on(
