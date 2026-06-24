@@ -337,7 +337,7 @@
 
           <article class="tool" data-cap="write" data-search="create_helper edit_helper delete_helper input_ counter timer">
             <div class="tool-head"><span class="tool-name">create_helper</span><span class="tool-name">edit_helper</span><span class="tool-name">delete_helper</span><span class="badge badge-cap">Helper write</span></div>
-            <p class="tool-desc">Manage helpers (input_*, counter, timer). Confirm-eligible.</p>
+            <p class="tool-desc">Manage helpers (input_*, counter, timer). Confirm-eligible. Created helpers appear in the Helpers UI and persist in HA's storage collection, which HA flushes on a short (~10&nbsp;second) debounce. A graceful restart (including <code>restart_ha</code> or the <code>homeassistant.restart</code> service) flushes the pending write first, so the helper survives; only an abrupt restart or crash within a few seconds of creation can lose it. If one is lost that way, you can restore it from the Changes tab, since the create was recorded in version history immediately.</p>
           </article>
 
           <article class="tool" data-cap="write" data-search="create_scene edit_scene delete_scene">
