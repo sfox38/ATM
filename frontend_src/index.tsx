@@ -30,9 +30,35 @@ type View =
 
 const TAB_LABELS: Record<Tab, string> = { tokens: "Tokens", approvals: "Approvals", changes: "Changes", mesa: "MESA", audit: "Audit Logs", settings: "Settings" };
 
+// Persist the active tab so it survives a reload or navigating away and back.
+const TAB_STORAGE_KEY = "atm-tab";
+function readStoredTab(): Tab {
+  try {
+    const v = localStorage.getItem(TAB_STORAGE_KEY);
+    if (v && v in TAB_LABELS) return v as Tab;
+  } catch {
+    // localStorage unavailable (e.g. blocked): fall back to the default.
+  }
+  return "tokens";
+}
+
+// Persist the token being edited so returning to the Tokens tab reopens its
+// detail; with none stored (or any other tab), reopen at the Tokens list.
+const TOKEN_DETAIL_STORAGE_KEY = "atm-token-detail";
+function readStoredView(tab: Tab): View {
+  if (tab !== "tokens") return { name: "list" };
+  try {
+    const id = localStorage.getItem(TOKEN_DETAIL_STORAGE_KEY);
+    if (id) return { name: "detail", tokenId: id };
+  } catch {
+    // localStorage unavailable: fall back to the list.
+  }
+  return { name: "list" };
+}
+
 function ATMApp({ hass, narrow, theme, onThemeChange }: { hass: unknown; narrow: boolean; theme: Theme; onThemeChange: (t: Theme) => void }) {
-  const [tab, setTab] = useState<Tab>("tokens");
-  const [view, setView] = useState<View>({ name: "list" });
+  const [tab, setTab] = useState<Tab>(readStoredTab);
+  const [view, setView] = useState<View>(() => readStoredView(readStoredTab()));
   const [tokens, setTokens] = useState<TokenRecord[]>([]);
   const [settings, setSettings] = useState<GlobalSettings | null>(null);
   const [loadingTokens, setLoadingTokens] = useState(true);
@@ -65,6 +91,22 @@ function ATMApp({ hass, narrow, theme, onThemeChange }: { hass: unknown; narrow:
       window.removeEventListener("popstate", handleHash);
     };
   }, []);
+
+  useEffect(() => {
+    try { localStorage.setItem(TAB_STORAGE_KEY, tab); } catch { /* storage blocked: skip */ }
+  }, [tab]);
+
+  // Remember the open token detail (only on the Tokens tab); clear it otherwise
+  // so returning lands on the list rather than a stale detail.
+  useEffect(() => {
+    try {
+      if (tab === "tokens" && view.name === "detail") {
+        localStorage.setItem(TOKEN_DETAIL_STORAGE_KEY, view.tokenId);
+      } else {
+        localStorage.removeItem(TOKEN_DETAIL_STORAGE_KEY);
+      }
+    } catch { /* storage blocked: skip */ }
+  }, [tab, view]);
 
   useEffect(() => {
     if (menuRef.current) {
