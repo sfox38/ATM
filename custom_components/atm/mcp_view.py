@@ -1665,10 +1665,13 @@ def _tool_pending(approval: Any) -> dict:
         "expires_at": approval.expires_at.isoformat() if approval.expires_at else None,
         "review_url": f"/atm#approvals/{approval.id}",
         "message": (
-            "This action requires admin approval. The admin has been notified. "
-            "The result is not returned here. Call wait_for_approval with this approval_id "
-            "to block until it resolves, or get_approval_status for a one-shot check, to learn "
-            "whether it was approved or rejected (and any reason). Do not retry the original action."
+            "This action is queued for admin approval and will be applied once approved; "
+            "the admin has been notified. You do not need to wait: you may tell the user it is "
+            "pending and finish now. Only if you need the outcome in this same session (for "
+            "example, a later step depends on this action) call wait_for_approval with this "
+            "approval_id to block until it resolves, or get_approval_status for a one-shot check, "
+            "to learn whether it was approved or rejected (and any reason). Either way, do not "
+            "retry the original action."
         ),
     })
     return {"content": [{"type": "text", "text": body}]}
