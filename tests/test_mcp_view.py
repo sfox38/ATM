@@ -377,6 +377,12 @@ async def test_skill_view_serves_markdown_unauthenticated():
 
     view = ATMSkillView()
     assert view.requires_auth is False
+    hass = MagicMock()
+    data = MagicMock()
+    data.shutting_down = False
+    data.store.get_settings.return_value = MagicMock(kill_switch=False)
+    hass.data = {DOMAIN: data}
+    view.hass = hass
     resp = await view.get(MagicMock())
     assert resp.status == 200
     assert resp.content_type == "text/markdown"
