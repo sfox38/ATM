@@ -888,7 +888,7 @@ async def test_entity_tree_rebuilds_when_invalid():
     request = _make_admin_request()
     request.query = {}
 
-    with patch("custom_components.atm.admin_view._build_entity_tree", new=AsyncMock(return_value=fresh_tree)):
+    with patch("custom_components.atm.admin_view._build_entity_tree", new=MagicMock(return_value=fresh_tree)):
         resp = await view.get(request)
 
     assert resp.status == 200

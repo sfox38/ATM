@@ -31,7 +31,11 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          # Sourced from .nvmrc so CI, local dev, and the lockfile stay on one
+          # Node major. It must match the npm that generated package-lock.json
+          # (npm 11 / Node 24); an older npm resolves the tree differently and
+          # makes `npm ci` reject the lockfile as out of sync.
+          node-version-file: .nvmrc
           cache: npm
       - name: Install dependencies
         run: npm ci
