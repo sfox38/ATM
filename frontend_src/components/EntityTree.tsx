@@ -102,7 +102,10 @@ function HintInput({ tokenId, entityId, currentHint, globalHint, currentState, o
 
   function switchScope(all: boolean) {
     setAllTokens(all);
-    setValue((all ? globalHint : currentHint) ?? "");
+    // Load the target scope's saved hint if it has one, but never wipe the box:
+    // switching scope must not discard text the admin is in the middle of writing.
+    const target = all ? globalHint : currentHint;
+    if (target) setValue(target);
   }
 
   async function save() {
