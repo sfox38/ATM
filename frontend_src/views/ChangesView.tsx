@@ -69,11 +69,19 @@ export function ChangesView({ hass }: { hass: unknown }) {
   const selectedRef = useRef<string | null>(null);
   selectedRef.current = selected;
 
-  // token_id -> current name, so a renamed token shows its new name here.
+  // token_id -> latest known name, so a renamed token shows its new name here.
+  // Covers archived tokens too, so a renamed-then-revoked token resolves to its
+  // final name rather than the one captured with the change.
   const loadTokens = useCallback(async () => {
     try {
-      const toks = await api.listTokens();
-      setTokenNames(new Map(toks.map((t) => [t.id, t.name])));
+      const [active, archived] = await Promise.all([
+        api.listTokens(),
+        api.listArchivedTokens().catch(() => []),
+      ]);
+      const map = new Map<string, string>();
+      for (const t of archived) map.set(t.id, t.name);
+      for (const t of active) map.set(t.id, t.name);
+      setTokenNames(map);
     } catch {
       // Names fall back to the value captured with each change.
     }
