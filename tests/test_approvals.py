@@ -19,6 +19,7 @@ from custom_components.atm.approvals import (
     STATUS_REJECTED,
     cancel_approvals_for_token,
     create_pending_approval,
+    expire_overdue_approval_records,
     expire_overdue_approvals,
     get_approval,
     list_approvals,
@@ -293,6 +294,38 @@ class TestExpire:
         n = await expire_overdue_approvals(store)
         assert n == 0
         assert get_approval(store, record.id).status == STATUS_APPROVED
+
+    @pytest.mark.asyncio
+    async def test_skips_in_progress_ids(self, store):
+        record = await create_pending_approval(
+            store, token_id="t1", token_name="a", tool_name="x",
+            cap_name="cap_restart", args={}, diff={}, request_id="r",
+            ttl_seconds=60,
+        )
+        raw = store.get_pending_approvals()
+        raw[0]["expires_at"] = (utcnow() - timedelta(minutes=5)).isoformat()
+        store.set_pending_approvals(raw)
+
+        n = await expire_overdue_approvals(store, skip_ids={record.id})
+
+        assert n == 0
+        assert get_approval(store, record.id).status == STATUS_PENDING
+
+    @pytest.mark.asyncio
+    async def test_returns_expired_records(self, store):
+        record = await create_pending_approval(
+            store, token_id="t1", token_name="a", tool_name="x",
+            cap_name="cap_restart", args={}, diff={}, request_id="r",
+            ttl_seconds=60,
+        )
+        raw = store.get_pending_approvals()
+        raw[0]["expires_at"] = (utcnow() - timedelta(minutes=5)).isoformat()
+        store.set_pending_approvals(raw)
+
+        expired = await expire_overdue_approval_records(store)
+
+        assert [approval.id for approval in expired] == [record.id]
+        assert expired[0].status == STATUS_EXPIRED
 
 
 # --- to_dict / from_dict round trip -----------------------------------------

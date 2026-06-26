@@ -43,6 +43,11 @@ class ATMData:
     rate_limit_notified: dict[str, float] = field(default_factory=dict)
     # In-memory request/denied/rate-limit counters keyed by token ID.
     token_counters: dict[str, dict[str, int]] = field(default_factory=dict)
+    # Approval IDs whose saved action is currently mid-execution. Guards
+    # _approve_approval against a concurrent double-approve re-running the same
+    # side effect; in memory only (a restart drops it, leaving the approval
+    # pending for retry).
+    approvals_in_progress: set[str] = field(default_factory=set)
     entity_tree_cache: dict | None = None
     entity_tree_cache_valid: bool = False
     entity_tree_lock: asyncio.Lock = field(default_factory=asyncio.Lock)

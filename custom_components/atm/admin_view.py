@@ -8,7 +8,7 @@ import json
 import logging
 import re
 import uuid
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from aiohttp import web
 from homeassistant.components.http import HomeAssistantView
@@ -36,6 +36,9 @@ from .data import ATMData
 from .helpers import cancel_expiry_timer
 from .policy_engine import Permission, get_effective_hint, resolve
 from .token_store import PermissionTree, VALID_NODE_STATES, token_name_slug
+
+if TYPE_CHECKING:
+    from homeassistant.core import HomeAssistant
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -1436,6 +1439,8 @@ async def _resolve_approval(
             return _err("not_found", "Approval not found.", 404, rid)
         if record.is_terminal():
             return _ok(record.to_dict(), request_id=rid)
+        if approval_id in data.approvals_in_progress:
+            return _err("conflict", "Approval is already being processed.", 409, rid)
         updated = await update_approval_status(
             data.store,
             approval_id,
@@ -1460,7 +1465,7 @@ async def _resolve_approval(
     return _ok(updated.to_dict(), request_id=rid)
 
 
-async def _approve_approval(hass, request: web.Request, approval_id: str) -> web.Response:
+async def _approve_approval(hass: HomeAssistant, request: web.Request, approval_id: str) -> web.Response:
     """Validate, execute, and finalize a previously-pending approval."""
     from .approvals import (  # noqa: PLC0415
         REASON_CAPABILITY_DENIED,
@@ -1532,45 +1537,73 @@ async def _approve_approval(hass, request: web.Request, approval_id: str) -> web
                 fire_approval_resolved_event(hass, updated)
             return _err("service_unavailable", "Kill switch engaged.", 503, rid)
 
-    # Execute outside the lock so the tool can use it freely.
+        # Atomic claim before releasing the lock: a second concurrent approve
+        # that finds this id already claimed is rejected, so the saved side
+        # effect runs exactly once even under a double-click / double POST.
+        if approval_id in data.approvals_in_progress:
+            return _err("conflict", "Approval is already being processed.", 409, rid)
+        data.approvals_in_progress.add(approval_id)
+
+    # Execute outside the lock so the tool can use it freely. The claim is
+    # released in the finally below so a failed execution stays retryable while
+    # a successful one cannot be re-run.
     try:
-        tool_result, outcome, _resource = await execute_approved_tool(
-            record.tool_name, record.args, token, hass, data,
-        )
-    except KeyError:
-        return _err("invalid_request", "No executor registered for this tool.", 400, rid)
-    except Exception:
-        _LOGGER.exception("Approval execution failed for %s", approval_id)
-        return _err("internal_error", "Execution failed.", 500, rid)
+        try:
+            tool_result, outcome, _resource = await execute_approved_tool(
+                record.tool_name, record.args, token, hass, data,
+            )
+        except KeyError:
+            return _err("invalid_request", "No executor registered for this tool.", 400, rid)
+        except Exception:
+            _LOGGER.exception("Approval execution failed for %s", approval_id)
+            return _err("internal_error", "Execution failed.", 500, rid)
 
-    is_error = bool(tool_result.get("isError"))
-    saved_result = {"tool_result": tool_result, "outcome": outcome}
-    final_status = STATUS_REJECTED if is_error else STATUS_APPROVED
-    auto_reason = "execution_failed" if is_error else None
+        is_error = bool(tool_result.get("isError"))
+        saved_result = {"tool_result": tool_result, "outcome": outcome}
+        final_status = STATUS_REJECTED if is_error else STATUS_APPROVED
+        auto_reason = "execution_failed" if is_error else None
+        audit_outcome = "allowed" if final_status == STATUS_APPROVED else "denied"
 
-    async with data.store.async_lock:
-        updated = await update_approval_status(
-            data.store, approval_id,
-            status=final_status,
-            approved_by_user_id=user.id,
-            rejected_reason=auto_reason,
-            result=saved_result,
-        )
-    if updated is None:
-        return _err("not_found", "Approval not found.", 404, rid)
-    dismiss_approval_notification(hass, approval_id)
-    fire_approval_resolved_event(hass, updated)
-    data.audit.record(
-        request_id=rid,
-        token_id=record.token_id,
-        token_name=record.token_name,
-        method=f"approval/{final_status}",
-        resource=f"approval:{record.tool_name}:{approval_id}",
-        outcome="allowed" if final_status == STATUS_APPROVED else "denied",
-        client_ip="",
-        settings=settings,
-    )
-    return _ok(updated.to_dict(), request_id=rid)
+        def _record_execution_audit(payload: dict | None = None) -> None:
+            data.audit.record(
+                request_id=rid,
+                token_id=record.token_id,
+                token_name=record.token_name,
+                method=f"approval/{final_status}",
+                resource=f"approval:{record.tool_name}:{approval_id}",
+                outcome=audit_outcome,
+                client_ip="",
+                settings=settings,
+                payload=payload,
+            )
+
+        async with data.store.async_lock:
+            updated = await update_approval_status(
+                data.store, approval_id,
+                status=final_status,
+                approved_by_user_id=user.id,
+                rejected_reason=auto_reason,
+                result=saved_result,
+            )
+        if updated is None:
+            _record_execution_audit({
+                "finalization": "missing_after_execution",
+                "executor_outcome": outcome,
+            })
+            return _err("not_found", "Approval not found.", 404, rid)
+        if updated.status != final_status:
+            _record_execution_audit({
+                "finalization": "conflict",
+                "stored_status": updated.status,
+                "executor_outcome": outcome,
+            })
+            return _err("conflict", "Approval was already resolved.", 409, rid)
+        dismiss_approval_notification(hass, approval_id)
+        fire_approval_resolved_event(hass, updated)
+        _record_execution_audit()
+        return _ok(updated.to_dict(), request_id=rid)
+    finally:
+        data.approvals_in_progress.discard(approval_id)
 
 
 # ---------------------------------------------------------------------------

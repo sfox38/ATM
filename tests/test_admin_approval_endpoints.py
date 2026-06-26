@@ -267,6 +267,22 @@ class TestApprovalDelete:
         # Idempotent: already-terminal record returns its current state, not cancelled.
         assert body["status"] == STATUS_APPROVED
 
+    @pytest.mark.asyncio
+    async def test_delete_rejected_when_already_in_progress(self):
+        store = _make_store(pending=[_make_pending("appr_a")])
+        data = _make_data(store)
+        data.approvals_in_progress.add("appr_a")
+        hass = _make_hass(data)
+        view = ATMAdminApprovalView()
+        view.hass = hass
+        request = _make_admin_request()
+
+        with patch("custom_components.atm.admin_view.require_admin", lambda f: f):
+            resp = await view.delete(request, approval_id="appr_a")
+
+        assert resp.status == 409
+        assert next(r for r in store._pending if r["id"] == "appr_a")["status"] == STATUS_PENDING
+
 
 # ---- reject view -------------------------------------------------------------
 
@@ -307,6 +323,22 @@ class TestApprovalReject:
         assert out["status"] == STATUS_REJECTED
         assert out["rejected_reason"] is None
 
+    @pytest.mark.asyncio
+    async def test_reject_rejected_when_already_in_progress(self):
+        store = _make_store(pending=[_make_pending("appr_a")])
+        data = _make_data(store)
+        data.approvals_in_progress.add("appr_a")
+        hass = _make_hass(data)
+        view = ATMAdminApprovalRejectView()
+        view.hass = hass
+        request = _make_admin_request(body=b"{}")
+
+        with patch("custom_components.atm.admin_view.require_admin", lambda f: f):
+            resp = await view.post(request, approval_id="appr_a")
+
+        assert resp.status == 409
+        assert next(r for r in store._pending if r["id"] == "appr_a")["status"] == STATUS_PENDING
+
 
 # ---- approve view ------------------------------------------------------------
 
@@ -334,6 +366,85 @@ class TestApprovalApprove:
         assert out["status"] == STATUS_APPROVED
         assert out["result"]["outcome"] == "allowed"
         assert out["approved_by_user_id"] == "admin-user"
+
+    @pytest.mark.asyncio
+    async def test_approve_rejected_when_already_in_progress(self):
+        # Double-run race guard: an approve whose id is already claimed by a
+        # concurrent in-flight approve returns 409 and never runs the executor.
+        token = _make_token("tok-1", cap_restart="confirm")
+        store = _make_store(pending=[_make_pending("appr_a", token_id="tok-1")], tokens=[token])
+        data = _make_data(store)
+        data.approvals_in_progress.add("appr_a")
+        hass = _make_hass(data)
+        view = ATMAdminApprovalApproveView()
+        view.hass = hass
+        request = _make_admin_request(body=b"{}")
+
+        executor = AsyncMock()
+        with patch("custom_components.atm.admin_view.require_admin", lambda f: f), \
+             patch("custom_components.atm.mcp_view.execute_approved_tool", executor), \
+             patch("homeassistant.components.persistent_notification.async_dismiss"):
+            resp = await view.post(request, approval_id="appr_a")
+
+        assert resp.status == 409
+        executor.assert_not_called()
+        # Untouched: still pending for the in-flight request to finalize.
+        assert next(r for r in store._pending if r["id"] == "appr_a")["status"] == STATUS_PENDING
+
+    @pytest.mark.asyncio
+    async def test_approve_releases_in_progress_claim(self):
+        # The claim is released after execution so the id is not stuck.
+        token = _make_token("tok-1", cap_restart="confirm")
+        store = _make_store(pending=[_make_pending("appr_a", token_id="tok-1")], tokens=[token])
+        data = _make_data(store)
+        hass = _make_hass(data)
+        view = ATMAdminApprovalApproveView()
+        view.hass = hass
+        request = _make_admin_request(body=b"{}")
+
+        async def _fake_executor(name, args, tok, hass, data):
+            return ({"content": [{"type": "text", "text": '{"success": true}'}]}, "allowed", "restart_ha")
+
+        with patch("custom_components.atm.admin_view.require_admin", lambda f: f), \
+             patch("custom_components.atm.mcp_view.execute_approved_tool", side_effect=_fake_executor), \
+             patch("homeassistant.components.persistent_notification.async_dismiss"):
+            resp = await view.post(request, approval_id="appr_a")
+
+        assert json.loads(resp.text)["status"] == STATUS_APPROVED
+        assert "appr_a" not in data.approvals_in_progress
+
+    @pytest.mark.asyncio
+    async def test_approve_conflicts_if_record_resolved_during_execution(self):
+        token = _make_token("tok-1", cap_restart="confirm")
+        store = _make_store(pending=[_make_pending("appr_a", token_id="tok-1")], tokens=[token])
+        data = _make_data(store)
+        hass = _make_hass(data)
+        view = ATMAdminApprovalApproveView()
+        view.hass = hass
+        request = _make_admin_request(body=b"{}")
+
+        async def _executor_that_resolves_elsewhere(name, args, tok, hass, data):
+            store._pending[0]["status"] = STATUS_REJECTED
+            store._pending[0]["rejected_reason"] = "admin_cancelled"
+            return ({"content": [{"type": "text", "text": '{"success": true}'}]}, "allowed", "restart_ha")
+
+        with patch("custom_components.atm.admin_view.require_admin", lambda f: f), \
+             patch("custom_components.atm.mcp_view.execute_approved_tool", side_effect=_executor_that_resolves_elsewhere), \
+             patch("homeassistant.components.persistent_notification.async_dismiss"):
+            resp = await view.post(request, approval_id="appr_a")
+
+        assert resp.status == 409
+        assert store._pending[0]["status"] == STATUS_REJECTED
+        data.audit.record.assert_called_once()
+        audit_kwargs = data.audit.record.call_args.kwargs
+        assert audit_kwargs["method"] == f"approval/{STATUS_APPROVED}"
+        assert audit_kwargs["outcome"] == "allowed"
+        assert audit_kwargs["payload"] == {
+            "finalization": "conflict",
+            "stored_status": STATUS_REJECTED,
+            "executor_outcome": "allowed",
+        }
+        assert "appr_a" not in data.approvals_in_progress
 
     @pytest.mark.asyncio
     async def test_approve_rejected_when_executor_returns_error(self):

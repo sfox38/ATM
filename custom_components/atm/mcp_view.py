@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import functools
-import hashlib
 import dataclasses
 import json
 from contextvars import ContextVar
@@ -59,8 +58,6 @@ from .const import (
     PHYSICAL_GATE_SERVICES,
     PROXY_TIMEOUT_SECONDS,
     SENSITIVE_ATTRIBUTES,
-    TOKEN_LENGTH,
-    TOKEN_PREFIX,
 )
 from .data import ATMData
 from .mesa import (
@@ -90,12 +87,10 @@ from .helpers import (
     effective_cap,
     effective_caps,
     evaluate_capability,
-    fire_rate_limit_events as _fire_rate_limit_events,
     get_authenticated_token as _get_authenticated_token,
     get_client_ip as _get_client_ip,
     log_request as _log,
     parse_time_param as _parse_time_param,
-    read_json_body as _read_json_body,
     redact_secrets_in_text as _redact_secrets_in_text,
     render_template_for_token as _render_template_for_token,
     token_has_write_scope,
@@ -2308,7 +2303,7 @@ async def _tool_edit_automation(
     blocked = await _gate(
         "cap_automation_write", token, hass, data,
         tool_name="edit_automation", args=args, request_id=request_id,
-        client_ip=client_ip, diff=_build_diff_edit_automation(args, token, hass),
+        client_ip=client_ip, diff=await _build_diff_edit_automation(args, token, hass),
     )
     if blocked is not None:
         return blocked
@@ -2377,7 +2372,7 @@ async def _tool_delete_automation(
     blocked = await _gate(
         "cap_automation_write", token, hass, data,
         tool_name="delete_automation", args=args, request_id=request_id,
-        client_ip=client_ip, diff=_build_diff_delete_automation(args, token, hass),
+        client_ip=client_ip, diff=await _build_diff_delete_automation(args, token, hass),
     )
     if blocked is not None:
         return blocked
@@ -2491,7 +2486,7 @@ async def _tool_edit_script(
     blocked = await _gate(
         "cap_script_write", token, hass, data,
         tool_name="edit_script", args=args, request_id=request_id,
-        client_ip=client_ip, diff=_build_diff_edit_script(args, token, hass),
+        client_ip=client_ip, diff=await _build_diff_edit_script(args, token, hass),
     )
     if blocked is not None:
         return blocked
@@ -2555,7 +2550,7 @@ async def _tool_delete_script(
     blocked = await _gate(
         "cap_script_write", token, hass, data,
         tool_name="delete_script", args=args, request_id=request_id,
-        client_ip=client_ip, diff=_build_diff_delete_script(args, token, hass),
+        client_ip=client_ip, diff=await _build_diff_delete_script(args, token, hass),
     )
     if blocked is not None:
         return blocked
@@ -4866,7 +4861,7 @@ async def _tool_edit_scene(
     blocked = await _gate(
         "cap_scene_write", token, hass, data,
         tool_name="edit_scene", args=args, request_id=request_id,
-        client_ip=client_ip, diff=_build_diff_edit_scene(args, token, hass),
+        client_ip=client_ip, diff=await _build_diff_edit_scene(args, token, hass),
     )
     if blocked is not None:
         return blocked
@@ -4893,7 +4888,7 @@ async def _tool_delete_scene(
     blocked = await _gate(
         "cap_scene_write", token, hass, data,
         tool_name="delete_scene", args=args, request_id=request_id,
-        client_ip=client_ip, diff=_build_diff_delete_scene(args, token, hass),
+        client_ip=client_ip, diff=await _build_diff_delete_scene(args, token, hass),
     )
     if blocked is not None:
         return blocked
@@ -5273,7 +5268,7 @@ async def _tool_write_file(
     blocked = await _gate(
         "cap_filesystem", token, hass, data,
         tool_name="write_file", args=args, request_id=request_id,
-        client_ip=client_ip, diff=_build_diff_write_file(args, token, hass),
+        client_ip=client_ip, diff=await _build_diff_write_file(args, token, hass),
     )
     if blocked is not None:
         return blocked
@@ -5331,7 +5326,7 @@ async def _tool_set_yaml_config(
     blocked = await _gate(
         "cap_yaml_edit", token, hass, data,
         tool_name="set_yaml_config", args=args, request_id=request_id,
-        client_ip=client_ip, diff=_build_diff_set_yaml_config(args, token, hass),
+        client_ip=client_ip, diff=await _build_diff_set_yaml_config(args, token, hass),
     )
     if blocked is not None:
         return blocked
@@ -6587,17 +6582,16 @@ def _build_diff_create_automation(args: dict, token: TokenRecord, hass: Any) -> 
     }
 
 
-def _build_diff_edit_automation(args: dict, token: TokenRecord, hass: Any) -> dict:
+async def _build_diff_edit_automation(args: dict, token: TokenRecord, hass: Any) -> dict:
     automation_id = (args.get("automation_id") or "").strip()
     config = args.get("config") if isinstance(args.get("config"), dict) else {}
     before = None
     try:
         path = os.path.join(hass.config.config_dir, _AUTOMATION_YAML)
-        if os.path.exists(path):
-            items = _read_automations_yaml(path)
-            current = next((a for a in items if a.get("id") == automation_id), None)
-            if current is not None:
-                before = _truncate(json.dumps(current, indent=2, default=str))
+        items = await hass.async_add_executor_job(_read_automations_yaml, path)
+        current = next((a for a in items if a.get("id") == automation_id), None)
+        if current is not None:
+            before = _truncate(json.dumps(current, indent=2, default=str))
     except Exception:  # noqa: BLE001 - diagnostic only
         pass
     return {
@@ -6610,16 +6604,15 @@ def _build_diff_edit_automation(args: dict, token: TokenRecord, hass: Any) -> di
     }
 
 
-def _build_diff_delete_automation(args: dict, token: TokenRecord, hass: Any) -> dict:
+async def _build_diff_delete_automation(args: dict, token: TokenRecord, hass: Any) -> dict:
     automation_id = (args.get("automation_id") or "").strip()
     before = None
     try:
         path = os.path.join(hass.config.config_dir, _AUTOMATION_YAML)
-        if os.path.exists(path):
-            items = _read_automations_yaml(path)
-            current = next((a for a in items if a.get("id") == automation_id), None)
-            if current is not None:
-                before = _truncate(json.dumps(current, indent=2, default=str))
+        items = await hass.async_add_executor_job(_read_automations_yaml, path)
+        current = next((a for a in items if a.get("id") == automation_id), None)
+        if current is not None:
+            before = _truncate(json.dumps(current, indent=2, default=str))
     except Exception:  # noqa: BLE001 - diagnostic only
         pass
     return {
@@ -6655,10 +6648,10 @@ def _build_diff_create_scene(args: dict, token: TokenRecord, hass: Any) -> dict:
     }
 
 
-def _build_diff_edit_scene(args: dict, token: TokenRecord, hass: Any) -> dict:
+async def _build_diff_edit_scene(args: dict, token: TokenRecord, hass: Any) -> dict:
     scene_id = str(args.get("scene_id") or "").strip()
     config = args.get("config") if isinstance(args.get("config"), dict) else {}
-    current = _scene_yaml_entry(hass, scene_id)
+    current = await hass.async_add_executor_job(_scene_yaml_entry, hass, scene_id)
     return {
         "kind": "yaml_diff",
         "summary": f"Edit scene '{scene_id}'",
@@ -6670,9 +6663,9 @@ def _build_diff_edit_scene(args: dict, token: TokenRecord, hass: Any) -> dict:
     }
 
 
-def _build_diff_delete_scene(args: dict, token: TokenRecord, hass: Any) -> dict:
+async def _build_diff_delete_scene(args: dict, token: TokenRecord, hass: Any) -> dict:
     scene_id = str(args.get("scene_id") or "").strip()
-    current = _scene_yaml_entry(hass, scene_id)
+    current = await hass.async_add_executor_job(_scene_yaml_entry, hass, scene_id)
     return {
         "kind": "system_action",
         "summary": f"Delete scene '{scene_id}'",
@@ -6721,17 +6714,25 @@ def _build_diff_delete_helper(args: dict, token: TokenRecord, hass: Any) -> dict
     }
 
 
-def _build_diff_write_file(args: dict, token: TokenRecord, hass: Any) -> dict:
+def _read_capped_if_file(path: str) -> str | None:
+    """isfile-guarded _read_text_capped for diff builders. Returns None when the
+    file is missing, too large, or unreadable. Safe to run in an executor job."""
+    try:
+        if os.path.isfile(path):
+            return _read_text_capped(path)
+    except (OSError, ValueError):
+        return None
+    return None
+
+
+async def _build_diff_write_file(args: dict, token: TokenRecord, hass: Any) -> dict:
     path = args.get("path", "")
     content = args.get("content") if isinstance(args.get("content"), str) else ""
     target = _resolve_fs_path(hass, path)
     before = None
     if target is not None:
-        try:
-            if os.path.isfile(target):
-                before = _truncate(_read_text_capped(target))
-        except (OSError, ValueError):
-            before = None
+        raw = await hass.async_add_executor_job(_read_capped_if_file, target)
+        before = _truncate(raw) if raw is not None else None
     return {
         "kind": "file_write",
         "summary": f"Write file '{path}'",
@@ -6743,15 +6744,11 @@ def _build_diff_write_file(args: dict, token: TokenRecord, hass: Any) -> dict:
     }
 
 
-def _build_diff_set_yaml_config(args: dict, token: TokenRecord, hass: Any) -> dict:
+async def _build_diff_set_yaml_config(args: dict, token: TokenRecord, hass: Any) -> dict:
     content = args.get("content") if isinstance(args.get("content"), str) else ""
-    before = None
-    try:
-        path = hass.config.path(_CONFIG_YAML)
-        if os.path.isfile(path):
-            before = _truncate(_read_text_capped(path))
-    except (OSError, ValueError):
-        before = None
+    path = hass.config.path(_CONFIG_YAML)
+    raw = await hass.async_add_executor_job(_read_capped_if_file, path)
+    before = _truncate(raw) if raw is not None else None
     return {
         "kind": "yaml_diff",
         "summary": "Replace configuration.yaml",
@@ -6822,17 +6819,16 @@ def _build_diff_create_script(args: dict, token: TokenRecord, hass: Any) -> dict
     }
 
 
-def _build_diff_edit_script(args: dict, token: TokenRecord, hass: Any) -> dict:
+async def _build_diff_edit_script(args: dict, token: TokenRecord, hass: Any) -> dict:
     script_id = (args.get("script_id") or "").strip()
     config = args.get("config") if isinstance(args.get("config"), dict) else {}
     before = None
     try:
         path = hass.config.path(_SCRIPT_CONFIG_PATH)
-        if os.path.exists(path):
-            scripts = _read_scripts_yaml(path)
-            current = scripts.get(script_id)
-            if current is not None:
-                before = _truncate(json.dumps({script_id: current}, indent=2, default=str))
+        scripts = await hass.async_add_executor_job(_read_scripts_yaml, path)
+        current = scripts.get(script_id)
+        if current is not None:
+            before = _truncate(json.dumps({script_id: current}, indent=2, default=str))
     except Exception:  # noqa: BLE001 - diagnostic only
         pass
     return {
@@ -6845,16 +6841,15 @@ def _build_diff_edit_script(args: dict, token: TokenRecord, hass: Any) -> dict:
     }
 
 
-def _build_diff_delete_script(args: dict, token: TokenRecord, hass: Any) -> dict:
+async def _build_diff_delete_script(args: dict, token: TokenRecord, hass: Any) -> dict:
     script_id = (args.get("script_id") or "").strip()
     before = None
     try:
         path = hass.config.path(_SCRIPT_CONFIG_PATH)
-        if os.path.exists(path):
-            scripts = _read_scripts_yaml(path)
-            current = scripts.get(script_id)
-            if current is not None:
-                before = _truncate(json.dumps({script_id: current}, indent=2, default=str))
+        scripts = await hass.async_add_executor_job(_read_scripts_yaml, path)
+        current = scripts.get(script_id)
+        if current is not None:
+            before = _truncate(json.dumps({script_id: current}, indent=2, default=str))
     except Exception:  # noqa: BLE001 - diagnostic only
         pass
     return {

@@ -280,17 +280,24 @@ async def cancel_approvals_for_token(
     return changed
 
 
-async def expire_overdue_approvals(store: TokenStore) -> int:
-    """Move all pending approvals past their expires_at to status=expired.
+async def expire_overdue_approval_records(
+    store: TokenStore,
+    *,
+    skip_ids: set[str] | frozenset[str] | None = None,
+) -> list[PendingApproval]:
+    """Move overdue pending approvals to status=expired and return changed records.
 
-    Returns the number of records expired. Caller must hold async_lock.
+    Caller must hold async_lock.
     """
+    skip_ids = skip_ids or frozenset()
     raw = store.get_pending_approvals()
     now = utcnow()
     now_iso = now.isoformat()
-    changed = 0
+    expired: list[PendingApproval] = []
     for entry in raw:
         if entry.get("status") != STATUS_PENDING:
+            continue
+        if entry.get("id") in skip_ids:
             continue
         try:
             expires = parse_datetime(entry.get("expires_at", ""))
@@ -300,11 +307,23 @@ async def expire_overdue_approvals(store: TokenStore) -> int:
             continue
         entry["status"] = STATUS_EXPIRED
         entry["resolved_at"] = now_iso
-        changed += 1
-    if changed:
+        expired.append(PendingApproval.from_dict(entry))
+    if expired:
         store.set_pending_approvals(raw)
         await store.async_save()
-    return changed
+    return expired
+
+
+async def expire_overdue_approvals(
+    store: TokenStore,
+    *,
+    skip_ids: set[str] | frozenset[str] | None = None,
+) -> int:
+    """Move all pending approvals past their expires_at to status=expired.
+
+    Returns the number of records expired. Caller must hold async_lock.
+    """
+    return len(await expire_overdue_approval_records(store, skip_ids=skip_ids))
 
 
 def fire_approval_requested_event(hass: HomeAssistant, approval: PendingApproval) -> None:

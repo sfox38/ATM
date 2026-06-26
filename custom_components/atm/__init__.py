@@ -15,7 +15,7 @@ from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.helpers.storage import Store
 from .audit import AuditLog
 from .version_store import VersionStore
-from .const import AUDIT_STORAGE_KEY, AUDIT_STORAGE_VERSION, DOMAIN, EXPIRY_CHECK_INTERVAL, FLUSH_INTERVAL, SENSOR_PUSH_INTERVAL, VERSION_STORAGE_KEY, VERSION_STORAGE_VERSION
+from .const import APPROVAL_SWEEP_INTERVAL, AUDIT_STORAGE_KEY, AUDIT_STORAGE_VERSION, DOMAIN, EXPIRY_CHECK_INTERVAL, FLUSH_INTERVAL, SENSOR_PUSH_INTERVAL, VERSION_STORAGE_KEY, VERSION_STORAGE_VERSION
 from .data import ATMData
 from .helpers import archive_expired_token, cancel_expiry_timer, schedule_expiry_timer
 from .policy_engine import template_blocklist_vars
@@ -236,6 +236,30 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     cancel_expiry = async_track_time_interval(hass, _check_expired_tokens, EXPIRY_CHECK_INTERVAL)
     entry.async_on_unload(cancel_expiry)
     entry.async_on_unload(lambda: [cancel_expiry_timer(data, tid) for tid in list(data.expiry_timers)])
+
+    async def _sweep_expired_approvals(_now=None) -> None:
+        from .approvals import (  # noqa: PLC0415
+            dismiss_approval_notification,
+            expire_overdue_approval_records,
+            fire_approval_resolved_event,
+        )
+
+        async with store.async_lock:
+            expired = await expire_overdue_approval_records(
+                store,
+                skip_ids=data.approvals_in_progress,
+            )
+        for approval in expired:
+            dismiss_approval_notification(hass, approval.id)
+            fire_approval_resolved_event(hass, approval)
+
+    await _sweep_expired_approvals()
+    cancel_approval_sweep = async_track_time_interval(
+        hass,
+        _sweep_expired_approvals,
+        APPROVAL_SWEEP_INTERVAL,
+    )
+    entry.async_on_unload(cancel_approval_sweep)
 
     async def _on_stop(event: Event) -> None:
         audit_task.cancel()
