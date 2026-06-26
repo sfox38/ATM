@@ -1535,6 +1535,7 @@ button.changes-row:hover { background: var(--atm-surface-2); }
 .mesa-group .data-table td:nth-child(3) { width: 22%; }
 .mesa-row-name { font-size: 13px; color: var(--atm-text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mesa-row-id { font-size: 11px; color: var(--atm-text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.mesa-row-modes { display: flex; gap: 6px; flex-wrap: nowrap; white-space: nowrap; }
+.mesa-row-modes { white-space: nowrap; }
+.mesa-row-modes .badge + .badge { margin-left: 6px; }
 .mesa-row-tags { font-size: 12px; color: var(--atm-text-2); white-space: normal; overflow-wrap: anywhere; }
 @media (max-width: 600px) { .mesa-search { max-width: none; } }

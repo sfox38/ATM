@@ -24,8 +24,25 @@ function label(v: { alias: string | null; resource_id: string }): string {
   return v.alias || v.resource_id;
 }
 
-function who(v: { token_name: string | null; approved_by_user_id: string | null }): string {
-  return v.token_name || (v.approved_by_user_id ? "admin" : "-");
+// Author display name. Prefer the token's CURRENT name (it may have been renamed
+// since the change was recorded), falling back to the name captured at the time,
+// then to "admin" for admin-driven restores.
+function whoNow(
+  v: { token_id?: string | null; token_name: string | null; approved_by_user_id: string | null },
+  current: Map<string, string>,
+): string {
+  const cur = v.token_id ? current.get(v.token_id) : undefined;
+  return cur || v.token_name || (v.approved_by_user_id ? "admin" : "-");
+}
+
+// Detail view: when the token has since been renamed, show "current (original)".
+function whoDetail(
+  v: { token_id: string | null; token_name: string | null; approved_by_user_id: string | null },
+  current: Map<string, string>,
+): string {
+  const cur = v.token_id ? current.get(v.token_id) : undefined;
+  if (cur && v.token_name && cur !== v.token_name) return `${cur} (${v.token_name})`;
+  return cur || v.token_name || (v.approved_by_user_id ? "admin" : "-");
 }
 
 const FEED_POLL_MS = 5_000;
@@ -48,8 +65,21 @@ export function ChangesView({ hass }: { hass: unknown }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
+  const [tokenNames, setTokenNames] = useState<Map<string, string>>(new Map());
   const selectedRef = useRef<string | null>(null);
   selectedRef.current = selected;
+
+  // token_id -> current name, so a renamed token shows its new name here.
+  const loadTokens = useCallback(async () => {
+    try {
+      const toks = await api.listTokens();
+      setTokenNames(new Map(toks.map((t) => [t.id, t.name])));
+    } catch {
+      // Names fall back to the value captured with each change.
+    }
+  }, []);
+
+  useEffect(() => { loadTokens(); }, [loadTokens]);
 
   const loadFeed = useCallback(async (background = false) => {
     if (!background) setLoading(true);
@@ -88,6 +118,7 @@ export function ChangesView({ hass }: { hass: unknown }) {
     return (
       <ChangeDetail
         versionId={selected}
+        tokenNames={tokenNames}
         onSelectVersion={setSelected}
         onBack={() => { setSelected(null); loadFeed(); }}
         onRestored={() => loadFeed(true)}
@@ -104,7 +135,7 @@ export function ChangesView({ hass }: { hass: unknown }) {
             Versions captured when an agent creates, edits, or deletes automations, scripts, scenes, helpers, and dashboards.
           </p>
         </div>
-        <button className="btn btn-ghost btn-sm btn-icon" onClick={() => loadFeed()} title="Refresh">
+        <button className="btn btn-ghost btn-sm btn-icon" onClick={() => { loadFeed(); loadTokens(); }} title="Refresh">
           <RefreshIcon />
         </button>
       </div>
@@ -127,7 +158,7 @@ export function ChangesView({ hass }: { hass: unknown }) {
               <span role="cell"><ActionBadge action={v.action} /></span>
               <span role="cell" className="changes-col-type"><code>{v.resource_type}</code></span>
               <span role="cell" className="changes-name">{label(v)}</span>
-              <span role="cell" className="changes-col-who">{who(v)}</span>
+              <span role="cell" className="changes-col-who">{whoNow(v, tokenNames)}</span>
               <span role="cell" className="changes-col-when">{formatDateTime(v.timestamp)}</span>
             </button>
           ))}
@@ -138,8 +169,9 @@ export function ChangesView({ hass }: { hass: unknown }) {
 }
 
 function ChangeDetail(
-  { versionId, onSelectVersion, onBack, onRestored }: {
+  { versionId, tokenNames, onSelectVersion, onBack, onRestored }: {
     versionId: string;
+    tokenNames: Map<string, string>;
     onSelectVersion: (id: string) => void;
     onBack: () => void;
     onRestored: () => void;
@@ -213,7 +245,7 @@ function ChangeDetail(
             <strong className="change-detail-name">{resourceLabel}</strong>
             <code className="change-detail-type">{record.resource_type}</code>
             <span className="change-detail-when">{formatDateTime(record.timestamp)}</span>
-            <span className="change-detail-by">by {who(record)}</span>
+            <span className="change-detail-by">by {whoDetail(record, tokenNames)}</span>
           </div>
 
           <div className="change-detail-body">

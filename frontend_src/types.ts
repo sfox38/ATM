@@ -359,6 +359,7 @@ export interface VersionSummary {
   resource_id: string;
   alias: string | null;
   action: VersionAction;
+  token_id: string | null;
   token_name: string | null;
   approved_by_user_id: string | null;
   timestamp: string;

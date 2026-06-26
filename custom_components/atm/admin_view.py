@@ -2123,6 +2123,7 @@ def _version_summary(r) -> dict:
         "resource_id": r.resource_id,
         "alias": r.alias,
         "action": r.action,
+        "token_id": r.token_id,
         "token_name": r.token_name,
         "approved_by_user_id": r.approved_by_user_id,
         "timestamp": r.timestamp,
