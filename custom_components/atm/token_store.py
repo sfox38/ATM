@@ -474,10 +474,18 @@ class TokenStore:
     def active_token_count(self) -> int:
         return len(self._tokens)
 
-    def name_slug_exists(self, name: str) -> bool:
-        """Return True if a token with an equivalent slug already exists."""
+    def name_slug_exists(self, name: str, exclude_token_id: str | None = None) -> bool:
+        """Return True if a token with an equivalent slug already exists.
+
+        exclude_token_id skips that token, so a rename can keep (or re-case) its
+        own name without colliding with itself.
+        """
         slug = token_name_slug(name)
-        return any(token_name_slug(t.name) == slug for t in self._tokens.values())
+        return any(
+            token_name_slug(t.name) == slug
+            for tid, t in self._tokens.items()
+            if tid != exclude_token_id
+        )
 
     async def async_archive_token(
         self,
@@ -522,6 +530,7 @@ class TokenStore:
         if token is None:
             return None
         mutable_fields = {
+            "name",
             "pass_through",
             "use_assist_exposure",
             "announce_all_tools",

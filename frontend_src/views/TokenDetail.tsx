@@ -166,6 +166,62 @@ function ToolAnnouncementToggle({ token, onUpdate }: { token: TokenRecord; onUpd
   );
 }
 
+// Inline-editable token name shown as the detail heading. Click to select/edit;
+// it auto-saves on blur (and on Enter), validating format client-side and letting
+// the server reject a name that clashes with another token. Escape cancels.
+const TOKEN_NAME_RE = /^[A-Za-z0-9_-]{3,32}$/;
+
+function EditableTokenName({ token, onRenamed }: { token: TokenRecord; onRenamed: (t: TokenRecord) => void }) {
+  const [value, setValue] = useState(token.name);
+  const [err, setErr] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => { setValue(token.name); setErr(null); }, [token.name]);
+
+  async function commit() {
+    const next = value.trim();
+    if (next === token.name) { setValue(token.name); setErr(null); return; }
+    if (!TOKEN_NAME_RE.test(next)) {
+      setErr("3-32 characters: letters, numbers, hyphens, or underscores.");
+      setValue(token.name);
+      return;
+    }
+    setSaving(true);
+    setErr(null);
+    try {
+      const updated = await api.patchToken(token.id, { name: next });
+      onRenamed(updated);
+    } catch (e: unknown) {
+      setErr(e instanceof Error ? e.message : "Rename failed.");
+      setValue(token.name);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <span className="token-name-edit">
+      <input
+        className="token-card-name token-name-input"
+        value={value}
+        disabled={saving}
+        spellCheck={false}
+        maxLength={32}
+        aria-label="Token name (editable)"
+        title="Rename this token; saves when you click away"
+        onChange={(e) => setValue(e.target.value)}
+        onFocus={(e) => e.target.select()}
+        onBlur={commit}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") { e.preventDefault(); (e.target as HTMLInputElement).blur(); }
+          else if (e.key === "Escape") { setValue(token.name); setErr(null); (e.target as HTMLInputElement).blur(); }
+        }}
+      />
+      {err && <span className="token-name-error" role="alert">{err}</span>}
+    </span>
+  );
+}
+
 export function TokenDetailView({ tokenId, onBack, onRefresh }: Props) {
   const [token, setToken] = useState<TokenRecord | null>(null);
   const [mesaProfileEntities, setMesaProfileEntities] = useState<Set<string>>(new Set());
@@ -417,7 +473,7 @@ export function TokenDetailView({ tokenId, onBack, onRefresh }: Props) {
             <div className="token-card-header">
               <div className="token-card-name-row">
                 <img src={ATM_ICON} className="token-card-icon" alt="" />
-                <span className="token-card-name">{token.name}</span>
+                <EditableTokenName token={token} onRenamed={(u) => { applyTokenUpdate(u); onRefresh?.(); }} />
               </div>
               <div className="token-card-badges">
                 <span className={`badge ${statusClass}`}>{status}</span>

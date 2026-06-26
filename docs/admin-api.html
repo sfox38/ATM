@@ -62,7 +62,7 @@ DELETE  /api/atm/admin/tokens/archived/{id}   Delete an archived record</code></
   "rate_limit_burst": 10          // optional
 }</code></pre>
 
-        <p><strong>Update</strong> (<code>PATCH /tokens/{id}</code>) accepts any subset of these fields. Capability fields each take <code>"deny"</code>, <code>"allow"</code>, or <code>"confirm"</code>. Enabling pass-through requires <code>confirm_pass_through: true</code> in the same request, or the call returns 400.</p>
+        <p><strong>Update</strong> (<code>PATCH /tokens/{id}</code>) accepts any subset of these fields. Capability fields each take <code>"deny"</code>, <code>"allow"</code>, or <code>"confirm"</code>. Enabling pass-through requires <code>confirm_pass_through: true</code> in the same request, or the call returns 400. A token can also be renamed by sending <code>name</code> (same format and uniqueness rules as creation, excluding the token's own name); <code>expires_at</code> stays immutable. Renaming rebuilds the token's per-token sensor entities under the new name.</p>
         <pre class="code" data-lang="json" data-label="Patch token body (all optional)"><code>{
   "persona": "voice_assistant",
   "pass_through": false,

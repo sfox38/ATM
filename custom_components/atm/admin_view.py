@@ -485,13 +485,24 @@ class ATMAdminTokenView(HomeAssistantView):
         if isinstance(body, web.Response):
             return body
 
-        if "name" in body or "expires_at" in body:
-            return _err("invalid_request", "name and expires_at are immutable after token creation.", 400, rid)
+        if "expires_at" in body:
+            return _err("invalid_request", "expires_at is immutable after token creation.", 400, rid)
 
+        old_name: str | None = None
         async with data.store.async_lock:
             token = data.store.get_token_by_id(token_id)
             if token is None:
                 return _err("not_found", "Token not found.", 404, rid)
+            old_name = token.name
+
+            if "name" in body:
+                new_name = body["name"]
+                if not new_name or not isinstance(new_name, str):
+                    return _err("invalid_request", "name is required.", 400, rid)
+                if not TOKEN_NAME_REGEX.match(new_name):
+                    return _err("invalid_request", "name must be 3-32 characters: letters, numbers, hyphens, or underscores.", 400, rid)
+                if data.store.name_slug_exists(new_name, exclude_token_id=token_id):
+                    return _err("invalid_request", "A token with this name already exists.", 400, rid)
 
             if "pass_through" in body:
                 enabling = bool(body["pass_through"])
@@ -499,7 +510,7 @@ class ATMAdminTokenView(HomeAssistantView):
                     return _err("invalid_request", "confirm_pass_through: true is required when enabling pass_through.", 400, rid)
 
             allowed_keys = {
-                "pass_through", "use_assist_exposure", "announce_all_tools",
+                "name", "pass_through", "use_assist_exposure", "announce_all_tools",
                 "rate_limit_requests", "rate_limit_burst", "persona",
             } | set(CAPABILITY_NAMES)
             patchable = {k: v for k, v in body.items() if k in allowed_keys}
@@ -550,6 +561,23 @@ class ATMAdminTokenView(HomeAssistantView):
             client_ip=request.remote or "",
             settings=data.store.get_settings(),
         )
+
+        # A rename changes the token-name slug that the per-token sensors and
+        # device are keyed on, so rebuild them under the new name (remove the old
+        # slug's entities, recreate for the new). Best-effort: never fail the patch.
+        if updated is not None and old_name is not None and updated.name != old_name:
+            old_slug = token_name_slug(old_name)
+            if data.async_on_token_archived:
+                try:
+                    await data.async_on_token_archived(old_slug)
+                except Exception:  # noqa: BLE001
+                    _LOGGER.warning("Sensor cleanup failed renaming token %s; registry may have a ghost entry", token_id, exc_info=True)
+            if data.async_on_token_created:
+                try:
+                    await data.async_on_token_created(updated)
+                except Exception:  # noqa: BLE001
+                    _LOGGER.warning("Sensor recreate failed renaming token %s", token_id, exc_info=True)
+
         return _ok(updated.to_dict(), request_id=rid)
 
     @require_admin

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useMemo } from "react";
 import type { AuditEntry, TokenRecord, Outcome } from "../types";
 import { api } from "../api";
 import { AuditTable } from "../components/AuditTable";
@@ -29,6 +29,13 @@ export function AuditView({ tokens }: Props) {
   const [methodFilter, setMethodFilter] = useState("");
   const [resourceFilter, setResourceFilter] = useState("");
   const [ipFilter, setIpFilter] = useState("");
+
+  // Current id -> name map so renamed tokens show their current name on existing
+  // audit rows (falls back to the row's stored name for archived/admin entries).
+  const tokenNames = useMemo(
+    () => Object.fromEntries(tokens.map((t) => [t.id, t.name])),
+    [tokens],
+  );
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -130,6 +137,7 @@ export function AuditView({ tokens }: Props) {
           page={page}
           pageSize={PAGE_SIZE}
           onPageChange={setPage}
+          tokenNames={tokenNames}
         />
       </div>
     </div>

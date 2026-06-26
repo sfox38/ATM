@@ -258,6 +258,7 @@ export interface CreateTokenBody {
 }
 
 export interface PatchTokenBody {
+  name?: string;
   pass_through?: boolean;
   confirm_pass_through?: boolean;
   rate_limit_requests?: number;

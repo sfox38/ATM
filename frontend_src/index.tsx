@@ -197,24 +197,40 @@ function ATMApp({ hass, narrow, theme, onThemeChange }: { hass: unknown; narrow:
       <nav className="atm-tabs" aria-label="ATM sections">
         <div role="tablist" aria-label="ATM sections" onKeyDown={handleTabKeyDown} style={{ display: "contents" }}>
           {TABS.map((t) => (
-            <button
-              key={t}
-              role="tab"
-              id={`atm-tab-${t}`}
-              aria-selected={tab === t}
-              aria-controls={`atm-tabpanel-${t}`}
-              tabIndex={tab === t ? 0 : -1}
-              className={`atm-tab${tab === t ? " active" : ""}`}
-              onClick={() => onTabClick(t)}
-              aria-label={t === "approvals" && pendingCount > 0
-                ? `Approvals (${pendingCount} pending)`
-                : undefined}
-            >
-              {TAB_LABELS[t]}
-              {t === "approvals" && pendingCount > 0 && (
-                <span className="atm-tab-badge" aria-hidden="true">{pendingCount}</span>
+            <React.Fragment key={t}>
+              {t === "settings" && (
+                <a
+                  className="atm-tab atm-tab-doclink"
+                  href="https://sfox38.github.io/ATM/"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  Documentation
+                  <svg className="atm-tab-extlink" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+                    <polyline points="15 3 21 3 21 9" />
+                    <line x1="10" y1="14" x2="21" y2="3" />
+                  </svg>
+                </a>
               )}
-            </button>
+              <button
+                role="tab"
+                id={`atm-tab-${t}`}
+                aria-selected={tab === t}
+                aria-controls={`atm-tabpanel-${t}`}
+                tabIndex={tab === t ? 0 : -1}
+                className={`atm-tab${tab === t ? " active" : ""}`}
+                onClick={() => onTabClick(t)}
+                aria-label={t === "approvals" && pendingCount > 0
+                  ? `Approvals (${pendingCount} pending)`
+                  : undefined}
+              >
+                {TAB_LABELS[t]}
+                {t === "approvals" && pendingCount > 0 && (
+                  <span className="atm-tab-badge" aria-hidden="true">{pendingCount}</span>
+                )}
+              </button>
+            </React.Fragment>
           ))}
         </div>
 
