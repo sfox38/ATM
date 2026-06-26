@@ -1,5 +1,11 @@
 # Advanced Token Management (ATM)
 
+[![HACS](https://github.com/sfox38/ATM/actions/workflows/hacs.yml/badge.svg)](https://github.com/sfox38/ATM/actions/workflows/hacs.yml)
+[![Hassfest](https://github.com/sfox38/ATM/actions/workflows/hassfest.yml/badge.svg)](https://github.com/sfox38/ATM/actions/workflows/hassfest.yml)
+[![Tests](https://github.com/sfox38/ATM/actions/workflows/tests.yml/badge.svg)](https://github.com/sfox38/ATM/actions/workflows/tests.yml)
+[![HACS Custom](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://hacs.xyz)
+[![Home Assistant](https://img.shields.io/badge/Home%20Assistant-2024.5%2B-41BDF5?logo=home-assistant&logoColor=white)](https://www.home-assistant.io)
+
 Why give your AI agent unrestricted access to your home? ATM is more than a drop-in replacement for Home Assistant's native MCP server. It implements all 20 native HA MCP tools, so an existing AI client works without changes, and adds the control layer the native system has no place for: each client gets its own token, scoped to exactly the entities you allow, with its own rate limit, optional expiry, and a full audit trail. If a token is ever compromised, revoking it takes effect immediately, and its next request is rejected. ATM runs entirely inside Home Assistant: no extra process, no cloud dependency, and no configuration beyond the ATM panel.
 
 ## Documentation
@@ -31,4 +37,4 @@ Go to **Settings > Devices & services > Add integration** and search for **Advan
 
 ## Issues and feedback
 
-Report issues at [github.com/sfox38/atm/issues](https://github.com/sfox38/ATM/issues).
+Report issues at [github.com/sfox38/ATM/issues](https://github.com/sfox38/ATM/issues).

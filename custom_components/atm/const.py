@@ -5,7 +5,7 @@ import re
 
 ATM_VERSION = "2.0.0"
 MIN_HA_VERSION = "2024.5.0"
-GITHUB_URL = "https://github.com/sfox38/atm"
+GITHUB_URL = "https://github.com/sfox38/ATM"
 DOMAIN = "atm"
 STORAGE_KEY = "atm"
 STORAGE_VERSION = 2
