@@ -1,13 +1,13 @@
 {
   "domain": "atm",
   "name": "Advanced Token Management (ATM)",
-  "version": "2.0.0",
-  "config_flow": true,
-  "documentation": "https://github.com/sfox38/ATM",
-  "issue_tracker": "https://github.com/sfox38/ATM/issues",
+  "after_dependencies": ["http", "lovelace", "recorder", "trace"],
   "codeowners": ["@sfox38"],
-  "iot_class": "calculated",
+  "config_flow": true,
   "dependencies": ["frontend"],
+  "documentation": "https://github.com/sfox38/ATM",
+  "iot_class": "calculated",
+  "issue_tracker": "https://github.com/sfox38/ATM/issues",
   "requirements": [],
-  "min_ha_version": "2024.5.0"
+  "version": "2.0.0"
 }
