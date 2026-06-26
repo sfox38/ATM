@@ -10,6 +10,9 @@
 
 export const ENTITY_ID_RE = /^[a-z_]+\.[a-z0-9_]+$/;
 export const BTN_CLASS = "atm-mesa-inject-btn";
+// id of the per-table <style> we inject to widen the icon column. Lives here so
+// isSelfMutation can recognise it as one of our own nodes.
+export const WIDEN_STYLE_ID = "atm-mesa-col-widen";
 
 // URL prefixes whose data-table rows are entity rows we can profile. The
 // /config/entities list covers every entity (including person.*), so it is the
@@ -55,6 +58,46 @@ export function nameInsertionPoint(row: HTMLElement): { parent: HTMLElement; bef
     return { parent: iconCell, before: icon.nextSibling };
   }
   return null;
+}
+
+/** Is this node one we injected (our +/MESA button or our column-width style)? */
+function isOurNode(n: Node): boolean {
+  const el = n as HTMLElement;
+  return el.nodeType === 1 && (el.classList?.contains(BTN_CLASS) || el.id === WIDEN_STYLE_ID);
+}
+
+/**
+ * True when every mutation in the batch was caused by our own injected DOM, so
+ * reacting to it would feed an endless rescan -> repaint -> rescan loop.
+ *
+ * The per-table observer fires on any childList change in the table's shadow
+ * root, including our own writes: inserting the button, swapping its glyph in
+ * applyButtonState, and appending the width <style>. applyButtonState is guarded
+ * against redundant writes, but a real state change (right after an add or delete)
+ * still mutates the DOM, the observer sees it, and that ping-pongs with HA's own
+ * row re-render until the page is reloaded (the "+/check toggles forever" bug).
+ * Filtering our own mutations here breaks our half of that loop.
+ *
+ * A record that REMOVES our button is NOT self: HA reclaimed the cell, and we
+ * want a later scan to re-add the button.
+ */
+export function isSelfMutation(records: MutationRecord[]): boolean {
+  for (const r of records) {
+    const target = r.target as HTMLElement;
+    // Glyph/text churn on our own button (applyButtonState swapping + and check).
+    if (target?.nodeType === 1 && target.classList?.contains(BTN_CLASS)) continue;
+    // Our button or width-style being ADDED by us. Pure additions only; a removal
+    // means HA dropped our node, which we must react to.
+    if (
+      r.removedNodes.length === 0 &&
+      r.addedNodes.length > 0 &&
+      Array.from(r.addedNodes).every(isOurNode)
+    ) {
+      continue;
+    }
+    return false; // a foreign mutation: worth a rescan
+  }
+  return true;
 }
 
 /** Collect all elements matching `selector`, piercing open shadow roots. */

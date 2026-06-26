@@ -23,7 +23,7 @@
  */
 
 import { api, setHass } from "../api";
-import { areaIdFromPath, BTN_CLASS, deepQueryAll, extractEntityId, nameInsertionPoint, onEntityPage } from "./dom";
+import { areaIdFromPath, BTN_CLASS, deepQueryAll, extractEntityId, isSelfMutation, nameInsertionPoint, onEntityPage, WIDEN_STYLE_ID } from "./dom";
 
 const LOG = "[ATM inject]";
 const POLL_MS = 2000;
@@ -39,6 +39,21 @@ function log(...args: unknown[]): void {
   // Quiet by default; visible with verbose console logging.
   // eslint-disable-next-line no-console
   console.debug(LOG, ...args);
+}
+
+// Opt-in loud diagnostics: localStorage["atm-inject-debug"] = "1" then reload.
+// Used to chase the "+/check toggles forever" report; logs every state change so
+// we can see whether `has` is flipping or buttons are duplicating.
+const DEBUG: boolean = (() => {
+  try {
+    return localStorage.getItem("atm-inject-debug") === "1";
+  } catch {
+    return false;
+  }
+})();
+function dbg(...args: unknown[]): void {
+  // eslint-disable-next-line no-console
+  if (DEBUG) console.info(LOG, ...args);
 }
 
 function getHass(): any {
@@ -94,6 +109,7 @@ function applyButtonState(btn: HTMLButtonElement, scope: Scope, key: string): vo
   const has = (scope === "area" ? profiledAreas : profiledEntities).has(key);
   const want = has ? "has" : "new";
   if (btn.dataset.atmState === want) return;
+  dbg("glyph flip", key, `${btn.dataset.atmState ?? "(new)"} -> ${want}`, "has=", has);
   btn.dataset.atmState = want;
   // Compact, fixed-width glyphs (no "MESA" text, which is too wide for the cell):
   // a check on an accent fill means "profile set, click to edit"; a "+" outline
@@ -110,20 +126,20 @@ function applyButtonState(btn: HTMLButtonElement, scope: Scope, key: string): vo
 function decorateRow(row: HTMLElement): void {
   const entityId = extractEntityId(row);
   if (!entityId) return;
-  const existing = row.querySelector<HTMLButtonElement>(`.${BTN_CLASS}`);
-  if (existing) {
-    applyButtonState(existing, "entity", entityId);
+  const buttons = row.querySelectorAll<HTMLButtonElement>(`.${BTN_CLASS}`);
+  if (buttons.length) {
+    if (buttons.length > 1) dbg("DUPLICATE buttons", entityId, "count=", buttons.length);
+    applyButtonState(buttons[0], "entity", entityId);
     return;
   }
   const point = nameInsertionPoint(row);
   if (!point) return; // icon not rendered yet; a later scan will retry
+  dbg("insert button", entityId, "has=", profiledEntities.has(entityId));
   // Mark this cell so only decorated (entity) cells get the wider column, never
   // the full-width group-header rows.
   point.parent.setAttribute("data-atm-widen", "1");
   point.parent.insertBefore(buildButton("entity", entityId), point.before);
 }
-
-const WIDEN_STYLE_ID = "atm-mesa-col-widen";
 
 /** Widen the first (icon) column of a data table so our button has room and does
  *  not collide with the name. Injected once per table shadow root. Targets both
@@ -187,9 +203,25 @@ function scanAreaPage(): void {
   }
 }
 
-function debouncedScan(): void {
+const _scanReasons = new Set<string>();
+let _scanCount = 0;
+let _scanWindow = 0;
+function debouncedScan(reason = "?"): void {
+  _scanReasons.add(reason);
   window.clearTimeout(debounceTimer);
-  debounceTimer = window.setTimeout(() => safe(scan), DEBOUNCE_MS);
+  debounceTimer = window.setTimeout(() => {
+    if (DEBUG) {
+      const now = Date.now();
+      _scanCount++;
+      if (now - _scanWindow >= 1000) {
+        dbg("scans last ~1s:", _scanCount, "triggers:", [..._scanReasons]);
+        _scanCount = 0;
+        _scanWindow = now;
+        _scanReasons.clear();
+      }
+    }
+    safe(scan);
+  }, DEBOUNCE_MS);
 }
 
 /** Observe a table's shadow root so virtualized row changes repaint promptly. */
@@ -197,7 +229,12 @@ function observeRoot(sr: ShadowRoot): void {
   if (observedRoots.has(sr)) return;
   observedRoots.add(sr);
   try {
-    new MutationObserver(() => debouncedScan()).observe(sr, {
+    new MutationObserver((records) => {
+      // Ignore our own button/style writes so applyButtonState's glyph swap cannot
+      // ping-pong with HA's row re-render into an endless loop (the "+/check
+      // toggles until reload" bug after adding or deleting a profile).
+      if (!isSelfMutation(records)) debouncedScan("table-observer");
+    }).observe(sr, {
       childList: true,
       subtree: true,
     });
@@ -217,6 +254,7 @@ async function refreshProfiled(): Promise<void> {
       cursor = resp.next_cursor;
     }
     profiledEntities = set;
+    dbg("refreshProfiled done, entities=", set.size, [...set].slice(0, 12));
   } catch (e) {
     log("profile list refresh failed", e);
   }
@@ -239,7 +277,8 @@ async function openModal(scope: Scope, key: string): Promise<void> {
   const profiled = scope === "area" ? profiledAreas : profiledEntities;
   if (profiled.has(key)) el.setAttribute("has-profile", "1");
   el.addEventListener("atm-mesa-saved", () => {
-    (scope === "area" ? refreshProfiledAreas() : refreshProfiled()).then(() => safe(scan));
+    dbg("atm-mesa-saved", scope, key);
+    (scope === "area" ? refreshProfiledAreas() : refreshProfiled()).then(() => debouncedScan("saved"));
   });
   document.body.appendChild(el);
 }
@@ -254,19 +293,19 @@ function safe(fn: () => void): void {
 
 function installListeners(): void {
   for (const ev of ["location-changed", "popstate", "hashchange"]) {
-    window.addEventListener(ev, () => debouncedScan());
+    window.addEventListener(ev, () => debouncedScan(ev));
   }
   // Coarse observer for navigation/panel swaps (shadow-internal changes are
   // covered by the per-table observers and the poll).
   try {
-    new MutationObserver(() => debouncedScan()).observe(document.body, {
+    new MutationObserver(() => debouncedScan("body-observer")).observe(document.body, {
       childList: true,
       subtree: true,
     });
   } catch (e) {
     log("body observe failed", e);
   }
-  window.setInterval(() => safe(scan), POLL_MS);
+  window.setInterval(() => debouncedScan("poll"), POLL_MS);
 }
 
 let startAttempts = 0;
@@ -284,4 +323,17 @@ function start(): void {
   log("active");
 }
 
-safe(start);
+// A single page can end up with more than one copy of this module loaded: a
+// redeploy bumps the cache-bust ?v= on the module URL, and HA live-updates
+// extra_module_url into the open page without a full browser reload, so the old
+// and new modules both run. Each copy keeps its own profiledEntities set, and
+// they fight over the one shared button, flipping its glyph +/check forever (only
+// a full reload clears it). Guard on a window flag so only the first copy in a
+// page is ever active; later copies stand down until the next full reload.
+const ACTIVE_FLAG = "__atmMesaInjectActive";
+if ((window as unknown as Record<string, unknown>)[ACTIVE_FLAG]) {
+  log("another injector instance is already active in this page; standing down");
+} else {
+  (window as unknown as Record<string, unknown>)[ACTIVE_FLAG] = true;
+  safe(start);
+}

@@ -139,6 +139,7 @@ async def async_sync_mesa_inject(hass: HomeAssistant) -> None:
 
     if not enabled:
         if prior:
+            _remove_all_inject_urls(hass)
             _safe_remove_inject_url(hass, prior)
             hass.data.pop(_INJECT_REGISTERED_URL_KEY, None)
         return
@@ -146,6 +147,9 @@ async def async_sync_mesa_inject(hass: HomeAssistant) -> None:
     url = await hass.async_add_executor_job(_inject_url_with_cache_bust)
     if prior == url:
         return  # already current
+    # Remove every prior inject URL (tracked or orphaned) before adding, so HA only
+    # ever holds one atm-inject module and a full reload cannot start two instances.
+    _remove_all_inject_urls(hass)
     if prior:
         _safe_remove_inject_url(hass, prior)
     add_extra_js_url(hass, url)  # es5=False -> loaded as an ES module
@@ -164,3 +168,28 @@ def _safe_remove_inject_url(hass: HomeAssistant, url: str) -> None:
         remove_extra_js_url(hass, url)
     except Exception:  # noqa: BLE001 - removal is best-effort; never block teardown
         _LOGGER.debug("ATM: failed to remove inject module URL %s", url, exc_info=True)
+
+
+def _remove_all_inject_urls(hass: HomeAssistant) -> None:
+    """Remove every registered injector module URL, whatever its cache-bust value.
+
+    Belt-and-suspenders so HA never holds two atm-inject modules at once: a full
+    page load would otherwise run them as two fighting injector instances. Catches
+    a stale URL orphaned in HA's extra-module set if our own tracking got out of
+    sync (e.g. a prior removal that raised). Best-effort; never raises. Falls back
+    to the caller's tracked-prior removal if the set cannot be read on this HA.
+    """
+    try:
+        from homeassistant.components.frontend import DATA_EXTRA_MODULE_URL
+
+        registered = hass.data.get(DATA_EXTRA_MODULE_URL)
+        if not registered:
+            return
+        stale = [
+            u for u in list(registered)
+            if u == _INJECT_JS_URL or u.startswith(f"{_INJECT_JS_URL}?")
+        ]
+        for u in stale:
+            _safe_remove_inject_url(hass, u)
+    except Exception:  # noqa: BLE001 - introspection is best-effort
+        _LOGGER.debug("ATM: inject module URL sweep failed", exc_info=True)

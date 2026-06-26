@@ -37,6 +37,23 @@ export function setHass(hass: any) {
   hassInstance = hass;
 }
 
+// The hass to authenticate with. Normally the one passed to setHass, but the
+// in-context inject modal can run in a module realm where setHass was never
+// called (a second injector copy, or one stood down by the singleton guard), so
+// fall back to the live hass on the page's <home-assistant> element. Without this
+// a request would go out with no Authorization header and HA would 401 + ban-log
+// it. Harmless for the panel, which reads the same object.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function authHass(): any {
+  if (hassInstance) return hassInstance;
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return (document.querySelector("home-assistant") as any)?.hass ?? null;
+  } catch {
+    return null;
+  }
+}
+
 class ApiError extends Error {
   status: number;
   code: string;
@@ -48,15 +65,16 @@ class ApiError extends Error {
 }
 
 async function _doReq<T>(method: string, path: string, body?: unknown, retried = false): Promise<T> {
+  const hass = authHass();
   // Proactively refresh if the token is expired or within 60s of expiry, avoiding a
   // guaranteed 401 that HA would log as a ban warning.
-  if (!retried && hassInstance?.auth) {
-    const expires: number | undefined = hassInstance.auth.data?.expires;
+  if (!retried && hass?.auth) {
+    const expires: number | undefined = hass.auth.data?.expires;
     if (expires !== undefined && Date.now() > expires - 60_000) {
-      await hassInstance.auth.refreshAccessToken();
+      await hass.auth.refreshAccessToken();
     }
   }
-  const token: string | undefined = hassInstance?.auth?.data?.access_token;
+  const token: string | undefined = hass?.auth?.data?.access_token;
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   if (token) headers["Authorization"] = `Bearer ${token}`;
   const opts: RequestInit = { method, headers };
@@ -64,8 +82,8 @@ async function _doReq<T>(method: string, path: string, body?: unknown, retried =
 
   const res = await fetch(`${BASE}${path}`, opts);
 
-  if (res.status === 401 && !retried && hassInstance?.auth) {
-    await hassInstance.auth.refreshAccessToken();
+  if (res.status === 401 && !retried && hass?.auth) {
+    await hass.auth.refreshAccessToken();
     return _doReq<T>(method, path, body, true);
   }
 
