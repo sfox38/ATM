@@ -3,6 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <script>(function(){try{var t=localStorage.getItem("atm-docs-theme");if(t==="light"||t==="dark")document.documentElement.setAttribute("data-theme",t);}catch(e){}})();</script>
   <title>Capabilities &amp; pass-through &middot; ATM docs</title>
   <meta name="description" content="Capability flags gate ATM's powerful operations. Pass-through mode trades the permission tree for broad access, with MESA still on top." />
   <link rel="icon" href="assets/atm-logo.png" type="image/png" />
@@ -135,7 +136,7 @@
           <li>Log read</li>
           <li>A capability set to <code>confirm</code>, which is gated even under pass-through</li>
         </ul>
-        <p>All other read-tier capabilities are granted by pass-through. To enable pass-through through the admin API directly, the PATCH must include <code>"confirm_pass_through": true</code> alongside <code>"pass_through": true</code>; omitting it returns a 400. Use pass-through only for tools you fully control.</p>
+        <p>All other read-tier capabilities are granted by pass-through. Use pass-through only for tools you fully control.</p>
 
         <h2 id="mesa">Pass-through and MESA</h2>
         <p>Pass-through bypasses ATM's per-token tree, but it does not bypass <strong>MESA</strong>, the per-entity safety layer that always runs last (the <a href="mesa.html">MESA</a> page covers it in full). When MESA is active, a pass-through token's writes are still governed by each entity's MESA <code>control_mode</code>. In effect, pass-through hands entity gating to MESA with ATM's per-token permissions out of the way.</p>

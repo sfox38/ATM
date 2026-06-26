@@ -3,6 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <script>(function(){try{var t=localStorage.getItem("atm-docs-theme");if(t==="light"||t==="dark")document.documentElement.setAttribute("data-theme",t);}catch(e){}})();</script>
   <title>MESA &middot; ATM docs</title>
   <meta name="description" content="MESA is ATM's per-entity safety layer: it runs last on the flattened entity list and governs each entity's control nature, no matter what a token allows." />
   <link rel="icon" href="assets/atm-logo.png" type="image/png" />
@@ -99,23 +100,29 @@
         </ul>
         <p>An <strong>Issues</strong> view validates your profiles against the automations that reference them and lists orphaned declarations, so a profile that no longer matches anything is easy to spot. The full panel walkthrough is in the <a href="panel.html#mesa-tab">Panel guide</a>.</p>
 
-        <figure class="screenshot-placeholder">
-          <!-- SCREENSHOT: mesa-tab -->
-          <div class="shot-box">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="8.5" cy="10" r="1.6"/><path d="m21 16-4.5-4.5L9 19"/></svg>
-            <span class="shot-label">Screenshot: MESA tab, profiles list</span>
-          </div>
+        <figure class="screenshot">
+          <img src="assets/mesa-panel.png" alt="The MESA tab listing entity profiles grouped by control mode" loading="lazy" />
           <figcaption>The MESA tab, listing profiles by control mode.</figcaption>
         </figure>
 
-        <figure class="screenshot-placeholder">
-          <!-- SCREENSHOT: mesa-editor -->
-          <div class="shot-box">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="8.5" cy="10" r="1.6"/><path d="m21 16-4.5-4.5L9 19"/></svg>
-            <span class="shot-label">Screenshot: profile editor (mode + tags)</span>
-          </div>
+        <figure class="screenshot">
+          <img src="assets/mesa-edit.png" alt="The MESA profile editor with control mode and canonical tags" loading="lazy" />
           <figcaption>The profile editor, with control mode and canonical tags.</figcaption>
         </figure>
+
+        <h2 id="in-context-buttons">In-context profile buttons</h2>
+        <p>Authoring profiles from the MESA tab means leaving whatever page you were on to look up an entity. The <strong>In-context profile buttons</strong> setting closes that gap. When you enable it, ATM adds a small <code>(+)</code> control to the rows of Home Assistant's own configuration lists, the All Entities list and the Automations, Scripts, Scenes, Helpers, and People pages, and to the integration and area detail pages. Clicking it opens the same profile editor you would use in the MESA tab, with the target already filled in, so you can describe an entity or area the moment you notice it needs a profile. Because the target is pre-set, this also works for entities that are not in the registry and so cannot otherwise be selected.</p>
+        <p>The setting lives under <strong>Settings &middot; Experimental</strong>, is admin-only, and is off by default. It is a convenience for the admin's own browser and is independent of the <a href="security.html">kill switch</a>; it never opens any agent-facing surface.</p>
+
+        <figure class="screenshot">
+          <img src="assets/mesa-inject.png" alt="Home Assistant's native entity list with an ATM (+) / MESA control added to each row" loading="lazy" />
+          <figcaption>The injected (+) / MESA control on Home Assistant's native config rows.</figcaption>
+        </figure>
+
+        <div class="callout warn">
+          <svg class="callout-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.3 3.8 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.8a2 2 0 0 0-3.4 0z"/><path d="M12 9v4"/><circle cx="12" cy="17" r="0.4" fill="currentColor"/></svg>
+          <div class="callout-body"><p class="callout-title">It patches the Home Assistant frontend</p><p>These buttons are injected into pages ATM does not own, so a Home Assistant update that reworks those pages can make them stop appearing until ATM is updated to match. When that happens the feature self-disables on the layout it no longer recognises rather than breaking anything, so the failure is cosmetic, never an outage, and it never affects Home Assistant itself. If the buttons vanish after an upgrade, turn the setting off and author from the MESA tab until a matching ATM release ships.</p></div>
+        </div>
 
         <h2 id="mesa-tools">The MESA tools</h2>
         <p>An agent can read MESA profiles through four retrieval tools, all gated by <strong>Config read</strong> (profiles are configuration metadata, the same sensitivity class as <code>get_config</code>). They are token-scoped: the handlers and resolver only ever see entities the token can read, and every count, cursor, and fingerprint is relative to that scope, so there is no way to enumerate entities outside it. An out-of-scope or nonexistent entity returns the same "not found" envelope.</p>

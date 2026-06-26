@@ -3,6 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <script>(function(){try{var t=localStorage.getItem("atm-docs-theme");if(t==="light"||t==="dark")document.documentElement.setAttribute("data-theme",t);}catch(e){}})();</script>
   <title>Quick start &middot; ATM docs</title>
   <meta name="description" content="From nothing to a working scoped token in a few minutes: the guided setup creates your first token, connects your agent, and tests it." />
   <link rel="icon" href="assets/atm-logo.png" type="image/png" />
@@ -44,12 +45,8 @@
             <h3>Pick a persona</h3>
             <p>A persona is a named preset that sets every capability at once: what the agent may read, what it may control, and what needs your approval. <strong>New user</strong> is preselected and is a safe starting point. It lets the agent read your home and control the devices you grant, while locks, alarms, and covers ask for your confirmation.</p>
             <p>Choosing a persona modifies the entire capability set, not just a label; you can fine-tune any single capability later. The personas are described on <a href="capabilities.html#personas">Capabilities</a>.</p>
-            <figure class="screenshot-placeholder">
-              <!-- SCREENSHOT: quickstart-persona -->
-              <div class="shot-box">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="8.5" cy="10" r="1.6"/><path d="m21 16-4.5-4.5L9 19"/></svg>
-                <span class="shot-label">Screenshot: persona step</span>
-              </div>
+            <figure class="screenshot">
+              <img src="assets/wizard1.png" alt="The wizard's persona step with New user selected" loading="lazy" />
               <figcaption>The persona picker, with New user selected.</figcaption>
             </figure>
           </div></div>
@@ -62,12 +59,8 @@
           <div class="step"><div class="step-body">
             <h3>Grant access to one device</h3>
             <p>The wizard highlights your <code>light</code> domain. Expand it, find a light you can physically see, and click the <strong>W</strong> button on that row to grant full read and write access; its badge changes to "WRITE". Granting one device is enough to prove the connection; you can grant more later from the token's detail page.</p>
-            <figure class="screenshot-placeholder">
-              <!-- SCREENSHOT: quickstart-grant -->
-              <div class="shot-box">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="8.5" cy="10" r="1.6"/><path d="m21 16-4.5-4.5L9 19"/></svg>
-                <span class="shot-label">Screenshot: grant one light</span>
-              </div>
+            <figure class="screenshot">
+              <img src="assets/wizard3.png" alt="The wizard's access step, granting WRITE to a single light in the entity tree" loading="lazy" />
               <figcaption>The entity tree, granting WRITE to a single light.</figcaption>
             </figure>
           </div></div>
@@ -82,22 +75,19 @@
 
           <div class="step"><div class="step-body">
             <h3>Connect your agent</h3>
-            <p>The wizard shows a ready-to-paste command for your agent. For Claude Code it is a single line; substitute your Home Assistant address if it differs.</p>
-            <pre class="code" data-lang="bash" data-label="Claude Code"><code>claude mcp add --transport http atm-home-assistant \
-  http://your-ha-address:8123/api/atm/mcp \
-  --header "Authorization: Bearer atm_your_token_here"</code></pre>
+            <p>The wizard shows a ready-to-paste command for your agent. Claude Code, for example,  is a single command line; substitute your Home Assistant address.</p>
             <p>Other clients (Cursor, Codex, Gemini CLI, and any MCP-capable tool) connect the same way with their own command or config; the panel shows the exact form per agent, and so does <a href="connect.html">Connect an AI client</a>.</p>
+            <figure class="screenshot">
+              <img src="assets/wizard5.png" alt="The wizard's connect step with the MCP server URL, the token, and a ready-to-paste command per agent" loading="lazy" />
+              <figcaption>The connect step: the MCP server URL, your token, and a per-agent command.</figcaption>
+            </figure>
           </div></div>
 
           <div class="step"><div class="step-body">
             <h3>Run a test</h3>
             <p>Ask your agent to do something simple, like <em>"List my Home Assistant lights"</em>. The moment it calls ATM, the wizard detects the connection and confirms it. That is the whole loop: a scoped token, connected and verified.</p>
-            <figure class="screenshot-placeholder">
-              <!-- SCREENSHOT: quickstart-connected -->
-              <div class="shot-box">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="8.5" cy="10" r="1.6"/><path d="m21 16-4.5-4.5L9 19"/></svg>
-                <span class="shot-label">Screenshot: connection detected</span>
-              </div>
+            <figure class="screenshot">
+              <img src="assets/wizard6.png" alt="The wizard's test step showing Connected after the agent reached ATM" loading="lazy" />
               <figcaption>The test step showing "Connected".</figcaption>
             </figure>
           </div></div>

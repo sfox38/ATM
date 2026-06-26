@@ -46,12 +46,12 @@
     if (t === "light" || t === "dark") document.documentElement.setAttribute("data-theme", t);
     else document.documentElement.removeAttribute("data-theme");
   }
-  function currentTheme() { return localStorage.getItem(THEME_KEY) || "auto"; }
+  function currentTheme() { try { return localStorage.getItem(THEME_KEY) || "auto"; } catch (e) { return "auto"; } }
   applyTheme(currentTheme());
   function cycleTheme() {
     var order = ["auto", "light", "dark"];
     var next = order[(order.indexOf(currentTheme()) + 1) % 3];
-    localStorage.setItem(THEME_KEY, next);
+    try { localStorage.setItem(THEME_KEY, next); } catch (e) {}
     applyTheme(next);
     paintThemeBtn();
   }

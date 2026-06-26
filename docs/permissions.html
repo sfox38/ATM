@@ -3,6 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <script>(function(){try{var t=localStorage.getItem("atm-docs-theme");if(t==="light"||t==="dark")document.documentElement.setAttribute("data-theme",t);}catch(e){}})();</script>
   <title>Permissions &middot; ATM docs</title>
   <meta name="description" content="ATM's permission tree: four states, two-pass resolution, inheritance, and the indirect-control risks to watch for." />
   <link rel="icon" href="assets/atm-logo.png" type="image/png" />
@@ -140,7 +141,7 @@
 
         <div class="callout note">
           <svg class="callout-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9.2"/><path d="M12 11v5"/><circle cx="12" cy="7.6" r="0.4" fill="currentColor"/></svg>
-          <div class="callout-body"><p class="callout-title">Why two passes</p><p>Splitting the RED scan from the grant lookup is what makes a RED override absolute. A single pass that stopped at the first grant could let a GREEN child slip past a RED ancestor. Pass 1 closes that gap.</p></div>
+          <div class="callout-body"><p class="callout-title">Why two passes</p><p>Splitting the RED scan from the grant lookup is what makes a RED override absolute. A single pass that stopped at the first grant could let a GREEN child slip past a RED ancestor. Pass 2 closes that gap.</p></div>
         </div>
 
         <h2>Worked examples</h2>

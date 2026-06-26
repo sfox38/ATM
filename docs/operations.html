@@ -3,6 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <script>(function(){try{var t=localStorage.getItem("atm-docs-theme");if(t==="light"||t==="dark")document.documentElement.setAttribute("data-theme",t);}catch(e){}})();</script>
   <title>Operations &middot; ATM docs</title>
   <meta name="description" content="Run ATM day to day: rate limiting, per-token sensors, global settings, the audit log, HA events, and the full route reference." />
   <link rel="icon" href="assets/atm-logo.png" type="image/png" />
@@ -36,17 +37,17 @@ X-RateLimit-Reset: 1712345678</code></pre>
         <p>If <strong>Notify on rate limit</strong> is enabled in global settings, Home Assistant raises a persistent notification when a token hits its limit, throttled to once per token per minute.</p>
 
         <h2>Telemetry &amp; sensors</h2>
-        <p>ATM creates six Home Assistant sensors for each active token. For a token named <code>claude-code</code>:</p>
+        <p>ATM creates six Home Assistant sensors for each active token. For a token named <code>my_token</code>:</p>
         <div class="table-wrap">
           <table>
             <thead><tr><th scope="col">Entity</th><th scope="col">Reports</th></tr></thead>
             <tbody>
-              <tr><td><code>sensor.atm_claude_code_denied_count</code></td><td>Requests blocked by permission rules</td></tr>
-              <tr><td><code>sensor.atm_claude_code_expires_in</code></td><td>Days until expiry, or <code>No expiry</code></td></tr>
-              <tr><td><code>sensor.atm_claude_code_last_access</code></td><td>Timestamp of the most recent request</td></tr>
-              <tr><td><code>sensor.atm_claude_code_rate_limit_hits</code></td><td>Times this token has been rate limited</td></tr>
-              <tr><td><code>sensor.atm_claude_code_request_count</code></td><td>Total requests made with this token</td></tr>
-              <tr><td><code>sensor.atm_claude_code_status</code></td><td><code>active</code>, <code>expired</code>, or <code>revoked</code></td></tr>
+              <tr><td><code>sensor.atm_my_token_denied_count</code></td><td>Requests blocked by permission rules</td></tr>
+              <tr><td><code>sensor.atm_my_token_expires_in</code></td><td>Days until expiry, or <code>No expiry</code></td></tr>
+              <tr><td><code>sensor.atm_my_token_last_access</code></td><td>Timestamp of the most recent request</td></tr>
+              <tr><td><code>sensor.atm_my_token_rate_limit_hits</code></td><td>Times this token has been rate limited</td></tr>
+              <tr><td><code>sensor.atm_my_token_request_count</code></td><td>Total requests made with this token</td></tr>
+              <tr><td><code>sensor.atm_my_token_status</code></td><td><code>active</code>, <code>expired</code>, or <code>revoked</code></td></tr>
             </tbody>
           </table>
         </div>

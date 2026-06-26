@@ -3,6 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <script>(function(){try{var t=localStorage.getItem("atm-docs-theme");if(t==="light"||t==="dark")document.documentElement.setAttribute("data-theme",t);}catch(e){}})();</script>
   <title>Installation &middot; ATM docs</title>
   <meta name="description" content="Install Advanced Token Management through HACS or by hand, then add the integration in Home Assistant." />
   <link rel="icon" href="assets/atm-logo.png" type="image/png" />
@@ -45,12 +46,8 @@
             <h3>Add the repository</h3>
             <p>Enter the repository URL and select <strong>Integration</strong> as the category, then click <strong>Add</strong>.</p>
             <pre class="code" data-lang="text" data-label="Repository"><code>https://github.com/sfox38/atm</code></pre>
-            <figure class="screenshot-placeholder">
-              <!-- SCREENSHOT: install-hacs-repo -->
-              <div class="shot-box">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="8.5" cy="10" r="1.6"/><path d="m21 16-4.5-4.5L9 19"/></svg>
-                <span class="shot-label">Screenshot: HACS custom repository dialog</span>
-              </div>
+            <figure class="screenshot">
+              <img src="assets/custom%20repositories.png" alt="HACS custom repositories dialog with the ATM repository URL entered and Integration selected" loading="lazy" />
               <figcaption>Adding the repository in HACS.</figcaption>
             </figure>
           </div></div>
@@ -79,12 +76,8 @@
           <div class="step"><div class="step-body">
             <h3>Add the integration</h3>
             <p>Go to <strong>Settings &rarr; Devices &amp; services &rarr; Add integration</strong> and search for <strong>Advanced Token Management</strong>.</p>
-            <figure class="screenshot-placeholder">
-              <!-- SCREENSHOT: install-add-integration -->
-              <div class="shot-box">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="8.5" cy="10" r="1.6"/><path d="m21 16-4.5-4.5L9 19"/></svg>
-                <span class="shot-label">Screenshot: Add integration search</span>
-              </div>
+            <figure class="screenshot">
+              <img src="assets/select%20brand.png" alt="Home Assistant Add Integration dialog showing the Advanced Token Management result" loading="lazy" />
               <figcaption>Searching for Advanced Token Management.</figcaption>
             </figure>
           </div></div>

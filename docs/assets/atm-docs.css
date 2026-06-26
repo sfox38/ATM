@@ -660,7 +660,7 @@ body[data-home] .content { max-width: 1120px; }
 }
 .card-link { text-decoration: none; color: inherit; display: block; transition: transform 0.18s var(--ease-out), box-shadow 0.18s ease, border-color 0.18s ease; }
 .card-link:hover { transform: translateY(-3px); box-shadow: var(--shadow-md); border-color: var(--border-strong); color: inherit; }
-.card h3 { font-size: 1.12rem; margin-bottom: 7px; }
+.card h3 { font-size: 1.12rem; margin-top: 0; margin-bottom: 7px; }
 .card p { color: var(--ink-2); font-size: 0.95rem; margin: 0; max-width: none; }
 .card .card-ix {
   font-family: var(--font-mono);
@@ -1022,6 +1022,22 @@ td .no  { color: var(--ink-3); }
   letter-spacing: 0.01em;
 }
 .screenshot-placeholder figcaption {
+  margin-top: 12px;
+  font-size: 0.88rem;
+  color: var(--ink-2);
+  text-align: center;
+  font-family: var(--font-body);
+}
+/* Real screenshots (replacing the placeholders above). */
+.screenshot { margin: 1.9rem 0; }
+.screenshot img {
+  display: block;
+  width: 100%;
+  height: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+}
+.screenshot figcaption {
   margin-top: 12px;
   font-size: 0.88rem;
   color: var(--ink-2);

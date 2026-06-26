@@ -3,6 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <script>(function(){try{var t=localStorage.getItem("atm-docs-theme");if(t==="light"||t==="dark")document.documentElement.setAttribute("data-theme",t);}catch(e){}})();</script>
   <title>Panel guide &middot; ATM docs</title>
   <meta name="description" content="A tour of the ATM panel: managing tokens, painting the permission tree, bulk select, the emulator, entity hints, the approvals queue, MESA, audit, configuration history, and settings." />
   <link rel="icon" href="assets/atm-logo.png" type="image/png" />
@@ -30,12 +31,8 @@
         <h2 id="tokens-tab">Tokens</h2>
         <p>The Tokens tab lists every active token with its status and last use. From here you create tokens, open one to edit it, or launch the guided setup that walks a first-timer all the way to a tested connection (see <a href="quickstart.html">Quick start</a>).</p>
         <p>Opening a token shows its detail page: the capability matrix, the permission tree, and lifecycle actions (rotate the raw value, revoke the token). The capability matrix is where you pick a <a href="capabilities.html#personas">persona</a> or set individual capabilities to deny, allow, or confirm.</p>
-        <figure class="screenshot-placeholder">
-          <!-- SCREENSHOT: panel-token-detail -->
-          <div class="shot-box">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="8.5" cy="10" r="1.6"/><path d="m21 16-4.5-4.5L9 19"/></svg>
-            <span class="shot-label">Screenshot: token detail (capability matrix)</span>
-          </div>
+        <figure class="screenshot">
+          <img src="assets/token-panel.png" alt="A token detail page showing the capability matrix and persona" loading="lazy" />
           <figcaption>A token's detail page: capabilities and persona.</figcaption>
         </figure>
 
@@ -48,23 +45,15 @@
           <svg class="callout-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h4l2 6 4-14 2 8h6"/></svg>
           <div class="callout-body"><p class="callout-title">It applies to the entities in the group now, not forever</p><p>Select-by grants access to the entities <em>currently</em> in the chosen area or label, one entity at a time. Entities added to that area or label later are <strong>not</strong> picked up automatically. For coverage that follows future entities, set a domain-level grant instead.</p></div>
         </div>
-        <figure class="screenshot-placeholder">
-          <!-- SCREENSHOT: panel-select-by -->
-          <div class="shot-box">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="8.5" cy="10" r="1.6"/><path d="m21 16-4.5-4.5L9 19"/></svg>
-            <span class="shot-label">Screenshot: Select by Area or Label</span>
-          </div>
+        <figure class="screenshot">
+          <img src="assets/token-area.png" alt="The Select by Area or Label dialog grouping entities by area" loading="lazy" />
           <figcaption>The bulk-apply dialog, grouping by area or label.</figcaption>
         </figure>
 
         <h3 id="emulator">The effective-permission emulator</h3>
         <p>The emulator shows what ATM will actually decide for any entity. Type an entity ID, or click one in the tree or summary, and ATM runs the full two-pass resolver, then shows the result, which ancestor decided it, and the hint text if one is set. If a result surprises you, the path output names the ancestor that is overriding it.</p>
-        <figure class="screenshot-placeholder">
-          <!-- SCREENSHOT: panel-emulator -->
-          <div class="shot-box">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="8.5" cy="10" r="1.6"/><path d="m21 16-4.5-4.5L9 19"/></svg>
-            <span class="shot-label">Screenshot: emulator result + path</span>
-          </div>
+        <figure class="screenshot">
+          <img src="assets/token-epe.png" alt="The effective-permission emulator showing a result and the deciding ancestor" loading="lazy" />
           <figcaption>The emulator, showing the deciding ancestor.</figcaption>
         </figure>
 
@@ -77,24 +66,16 @@
           <div class="kv-row"><dt>This token only</dt><dd>A per-token hint, stored on the permission node. It is visible only to this token and takes precedence over a global hint.</dd></div>
           <div class="kv-row"><dt>All tokens</dt><dd>A global hint for the entity, applied to every token that can see it. Useful when the clarification is about the entity itself, not one agent's view of it.</dd></div>
         </dl>
-        <figure class="screenshot-placeholder">
-          <!-- SCREENSHOT: panel-hint-modal -->
-          <div class="shot-box">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="8.5" cy="10" r="1.6"/><path d="m21 16-4.5-4.5L9 19"/></svg>
-            <span class="shot-label">Screenshot: entity hint, scope toggle</span>
-          </div>
+        <figure class="screenshot">
+          <img src="assets/token-entity-hint.png" alt="The entity hint editor with the token-only and all-tokens scope toggle" loading="lazy" />
           <figcaption>The hint editor, with the token-only / all-tokens toggle.</figcaption>
         </figure>
 
         <h2 id="approvals-tab">Approvals</h2>
         <p>When a capability or a MESA entity is set to confirm, the held action lands in the Approvals queue. The tab badge shows the pending count, and a notification can deep-link straight to a specific approval. Each row shows the requesting token, the action, and a review payload (for file and YAML writes, a redacted before/after diff). Approve to run the saved action, or reject with an optional reason.</p>
         <p>The panel keeps the view current by polling: the pending-count badge refreshes every few seconds and the queue itself every ten, so an approval appears shortly after the agent submits it and clears soon after you resolve it. There is no live socket; the panel is request-and-response, so a resolved approval is reflected on the next poll.</p>
-        <figure class="screenshot-placeholder">
-          <!-- SCREENSHOT: panel-approvals -->
-          <div class="shot-box">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="8.5" cy="10" r="1.6"/><path d="m21 16-4.5-4.5L9 19"/></svg>
-            <span class="shot-label">Screenshot: approvals queue</span>
-          </div>
+        <figure class="screenshot">
+          <img src="assets/token-mesa-confirm.png" alt="A pending MESA confirmation approval with its diff and approve or reject actions" loading="lazy" />
           <figcaption>A pending approval awaiting review.</figcaption>
         </figure>
 

@@ -3,6 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <script>(function(){try{var t=localStorage.getItem("atm-docs-theme");if(t==="light"||t==="dark")document.documentElement.setAttribute("data-theme",t);}catch(e){}})();</script>
   <title>ATM &middot; Advanced Token Management for Home Assistant</title>
   <meta name="description" content="ATM is a security-focused, drop-in replacement for Home Assistant's MCP server. Every AI agent gets its own scoped, rate-limited, audited, instantly revocable token." />
   <link rel="icon" href="assets/atm-logo.png" type="image/png" />
@@ -27,7 +28,7 @@
           <div class="hero-copy">
             <span class="eyebrow reveal">Advanced Token Management</span>
             <h1 class="reveal d1">Give your AI agent the keys to <span class="amber">exactly</span> what it needs.</h1>
-            <p class="hero-lede reveal d2">ATM is a drop-in replacement for Home Assistant's MCP server. Every client gets its own token, scoped to the entities you allow, rate-limited, audited, and revocable in one click.</p>
+            <p class="hero-lede reveal d2">ATM is more than just a replacement for Home Assistant's MCP server. Every client gets its own token, scoped to the entities you allow, rate-limited, audited, and revocable in one click.</p>
             <div class="hero-cta reveal d3">
               <a class="btn btn-primary" href="install.html">Get started <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg></a>
               <a class="btn btn-ghost" href="https://github.com/sfox38/atm" target="_blank" rel="noopener">View on GitHub</a>
@@ -133,6 +134,27 @@
             </table>
           </div>
           <p>If you are connecting Claude Code, Cursor, ChatGPT, Antigravity, or any other AI tool to Home Assistant, ATM gives you control the native system cannot.</p>
+        </section>
+
+        <!-- ===================== ROAD TEST ===================== -->
+        <section class="reveal">
+          <h2>How ATM compares:</h2>
+          <p class="lede">We benchmarked ATM against Home Assistant's built-in MCP server and the popular community server, one agent model, one synthetic home, the same tasks. ATM came out cheapest per completed task, the only server that left every off-limits device untouched, and it's the most capable.</p>
+
+          <div class="grid-2">
+            <a class="card card-link" href="https://sfox38.github.io/atm-roadtest/" target="_blank" rel="noopener">
+              <span class="card-ix">Results</span>
+              <h3>Read the road test</h3>
+              <p>Cost, capability, and safety across the three servers, with charts and the full method.</p>
+              <span class="card-go">View the report <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg></span>
+            </a>
+            <a class="card card-link" href="https://github.com/sfox38/atm-roadtest" target="_blank" rel="noopener">
+              <span class="card-ix">Reproduce</span>
+              <h3>Run it yourself</h3>
+              <p>The harness, tasks, and raw run data are open. Point it at your own Home Assistant and check the numbers.</p>
+              <span class="card-go">View the repository <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg></span>
+            </a>
+          </div>
         </section>
 
         <!-- ===================== WHAT YOU GET ===================== -->
