@@ -11,8 +11,8 @@ jobs:
     name: Python (pytest)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           # Matches the pinned test stack in requirements_test.txt
           # (pytest-homeassistant-custom-component -> homeassistant 2026.6.x).
@@ -28,8 +28,8 @@ jobs:
     name: Frontend (vitest)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           # Sourced from .nvmrc so CI, local dev, and the lockfile stay on one
           # Node major. It must match the npm that generated package-lock.json
