@@ -153,6 +153,7 @@ GET/PUT/DELETE  /api/atm/admin/mesa/integrations/{integration}   One integration
 GET     /api/atm/admin/mesa/integration-options    Integrations with entities (picker source)
 GET     /api/atm/admin/mesa/areas                  List area profiles
 GET/PUT/DELETE  /api/atm/admin/mesa/areas/{area_id}    One area profile
+GET/PUT /api/atm/admin/mesa/defaults               Deployment-default profile (the fallback level)
 GET     /api/atm/admin/mesa/vocabulary             Canonical tags and roots
 GET     /api/atm/admin/mesa/issues                 Validation issues + orphans (?refresh=1)</code></pre>
         <pre class="code" data-lang="json" data-label="MESA profile document (PUT)"><code>{
@@ -177,9 +178,10 @@ DELETE /api/atm/admin/wipe       Wipe all tokens and settings</code></pre>
   "log_client_ip": true,
   "notify_on_rate_limit": false,
   "notify_on_approval": true,
-  "audit_flush_interval": 900,
+  "audit_flush_interval": 15,    // minutes: 0 (never), 5, 10, 15, 30, 60
   "audit_log_maxlen": 10000,
-  "mesa_mode": "advisory"        // off | advisory | enforced
+  "mesa_mode": "advisory",       // off | advisory | enforced
+  "mesa_inject_enabled": false   // experimental in-context MESA buttons; admin-only, off by default
 }</code></pre>
         <p>The wipe route is intentionally guarded: it requires an exact confirmation string.</p>
         <pre class="code" data-lang="json" data-label="Wipe body"><code>{ "confirm": "WIPE" }</code></pre>

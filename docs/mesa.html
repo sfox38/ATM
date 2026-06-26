@@ -83,7 +83,7 @@
         <p>A <code>confirm</code> entity under enforced mode produces the same kind of <a href="capabilities.html">pending approval</a> as a capability set to confirm: the action is saved, a notification is raised, and the in-panel <strong>Approvals</strong> queue holds it until an admin approves or rejects. On approval, MESA re-evaluates before the action runs, so an entity that became read-only or prohibited in the meantime is still refused. Under advisory mode nothing is held; the call proceeds and the agent receives an advisory note explaining the entity was marked confirm.</p>
 
         <h2>Using MESA in the panel</h2>
-        <p>The <strong>MESA</strong> tab is where you author profiles. Profiles exist at five levels and the most specific one wins, with the rest inherited:</p>
+        <p>The <strong>MESA</strong> tab is where you author profiles. Profiles exist at five levels, listed below from most to least specific. MESA resolves each field across these levels rather than letting a single level win wholesale:</p>
         <dl class="kv">
           <div class="kv-row"><dt>Entity</dt><dd>A profile for one entity_id. The most specific level.</dd></div>
           <div class="kv-row"><dt>Area</dt><dd>A baseline for everything in an area.</dd></div>
@@ -91,10 +91,11 @@
           <div class="kv-row"><dt>Domain</dt><dd>A baseline for a whole domain (for example, all locks).</dd></div>
           <div class="kv-row"><dt>Deployment defaults</dt><dd>The fallback applied when nothing more specific matches.</dd></div>
         </dl>
+        <p>Resolution is field by field, and for the safety-critical <code>control_mode</code> the most <em>restrictive</em> value wins, not the most specific: a less-specific <code>prohibited</code> or <code>read_only</code> is never loosened by a more-specific profile. The only exception is a deliberate operator override, which can relax an entity to <code>autonomous</code> only when it is set at the entity level and carries a written <code>control_reason</code>.</p>
         <p>The editor enforces a few guardrails so a profile is always valid:</p>
         <ul>
           <li>Profile keys are drawn from the live registry, so you describe entities, domains, and areas that actually exist.</li>
-          <li>The integration picker lists every integration that has actually created entities. That includes core and helper integrations such as <code>script</code>, <code>automation</code>, and <code>backup</code> (they create entities under a platform whose name equals their domain), which is expected, not a bug. Selecting one creates a valid profile for that integration's entities; for those domain-equal integrations it simply sits one level above the matching domain profile and wins where both apply.</li>
+          <li>The integration picker lists every integration that has actually created entities. That includes core and helper integrations such as <code>script</code>, <code>automation</code>, and <code>backup</code> (they create entities under a platform whose name equals their domain), which is expected, not a bug. Selecting one creates a valid profile for that integration's entities; for those domain-equal integrations it simply sits one level above the matching domain profile, so it is more specific for ordinary fields, subject to the most-restrictive <code>control_mode</code> rule above.</li>
           <li>Tags come from a canonical vocabulary with autocomplete; free text is not accepted, and a profile holds up to six tags.</li>
           <li>Leaving an editor with unsaved changes prompts before discarding them.</li>
         </ul>
@@ -112,7 +113,7 @@
 
         <h2 id="in-context-buttons">In-context profile buttons</h2>
         <p>Authoring profiles from the MESA tab means leaving whatever page you were on to look up an entity. The <strong>In-context profile buttons</strong> setting closes that gap. When you enable it, ATM adds a small <code>(+)</code> control to the rows of Home Assistant's own configuration lists, the All Entities list and the Automations, Scripts, Scenes, Helpers, and People pages, and to the integration and area detail pages. Clicking it opens the same profile editor you would use in the MESA tab, with the target already filled in, so you can describe an entity or area the moment you notice it needs a profile. Because the target is pre-set, this also works for entities that are not in the registry and so cannot otherwise be selected.</p>
-        <p>The setting lives under <strong>Settings &middot; Experimental</strong>, is admin-only, and is off by default. It is a convenience for the admin's own browser and is independent of the <a href="security.html">kill switch</a>; it never opens any agent-facing surface.</p>
+        <p>The setting lives under <strong>Settings &middot; Experimental</strong>, is admin-only, and is off by default. It is a convenience for the admin's own browser and is independent of the <a href="security.html">kill switch</a>; it never opens any agent-facing surface. It requires Home Assistant 2025.5.0 or newer (on older versions it simply adds nothing), and toggling it may need a full Home Assistant page reload to take effect.</p>
 
         <figure class="screenshot">
           <img src="assets/mesa-inject.png" alt="Home Assistant's native entity list with an ATM (+) / MESA control added to each row" loading="lazy" />

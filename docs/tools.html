@@ -401,7 +401,7 @@
 
         <div class="callout warn">
           <svg class="callout-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-9-9"/><path d="M16 4.5 21 3l-1.5 5"/></svg>
-          <div class="callout-body"><p class="callout-title">Reconnect after changing capabilities</p><p>A token only sees the tools its capabilities unlock, so after you change a capability your MCP client must reconnect to receive the updated tool list. In Claude Code, open <code>/mcp</code> and select <strong>Reconnect</strong>.</p></div>
+          <div class="callout-body"><p class="callout-title">Reconnect when the tool list changes</p><p>A token only sees the tools its capabilities unlock, so moving a capability between <code>deny</code> and <code>allow</code>/<code>confirm</code> (or changing write scope or <code>announce_all_tools</code>) changes the list and your MCP client must reconnect to pick it up. Switching a capability between <code>allow</code> and <code>confirm</code> takes effect on the next call with no reconnect needed, though some clients cache tool metadata. In Claude Code, open <code>/mcp</code> and select <strong>Reconnect</strong>.</p></div>
         </div>
 
         <nav class="pager" id="pager" aria-label="Page navigation"></nav>

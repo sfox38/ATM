@@ -60,7 +60,7 @@ X-RateLimit-Reset: 1712345678</code></pre>
             <tbody>
               <tr><td>Audit log flush interval</td><td>15 min</td><td>How often the in-memory log is snapshotted to disk; set to "Never" to disable persistence</td></tr>
               <tr><td>Disable all logging</td><td>Off</td><td>Suppresses all auditing</td></tr>
-              <tr><td>Kill switch</td><td>Off</td><td>When on, proxy and MCP routes are unregistered entirely</td></tr>
+              <tr><td>Kill switch</td><td>Off</td><td>When enabled at startup, ATM registers no client routes; enabling it at runtime makes the already-registered proxy, MCP, and skill routes refuse with 503 (HA cannot unregister them)</td></tr>
               <tr><td>Log allowed requests</td><td>On</td><td>Record successful requests</td></tr>
               <tr><td>Log client IP</td><td>On</td><td>Include caller IP in audit entries</td></tr>
               <tr><td>Log denied requests</td><td>On</td><td>Record blocked requests and unsupported MCP methods</td></tr>

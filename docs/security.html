@@ -98,7 +98,7 @@
         </div>
 
         <h2>Kill switch</h2>
-        <p>When the kill switch is enabled at startup, ATM registers no proxy or MCP routes at all. The endpoints do not exist; there is nothing to answer with a 503. The admin panel stays accessible so you can turn it back off, and disabling it re-registers every route immediately without a Home Assistant restart.</p>
+        <p>When the kill switch is enabled at startup, ATM registers no client routes at all: the proxy, MCP, and skill endpoints simply do not exist. If you enable it later, at runtime, those routes were already registered and Home Assistant's web server cannot unregister them, so they refuse service with a 503 instead. Either way no client request is served. The admin panel and admin API are separate and stay accessible so you can turn the kill switch back off, and disabling it re-registers every route immediately without a Home Assistant restart.</p>
 
         <h2>Request limits</h2>
         <dl class="kv">
