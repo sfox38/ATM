@@ -430,10 +430,10 @@ export function TokenDetailView({ tokenId, onBack, onRefresh }: Props) {
           title="Enable Pass-Through Mode"
           body={
             <div className="amber-block">
-              <p><strong>Pass-through gives this token full unrestricted access</strong> to every entity, service, and system operation in Home Assistant. It is equivalent to a Long-Lived Access Token. The ATM domain blocklist and sensitive attribute scrubbing still apply.</p>
+              <p><strong>Pass-through bypasses the permission tree and gives this token broad access</strong> to your Home Assistant entities and services. It is not unrestricted: the write, system, and irreversible capabilities (plus log reading) stay enforced as set in Capabilities, the per-entity MESA safety layer still applies, the ATM domain stays blocked, and sensitive attributes are still scrubbed.</p>
             </div>
           }
-          checkLabel="I understand this token will have full Home Assistant access"
+          checkLabel="I understand this token will have broad Home Assistant access"
           confirmLabel="Enable Pass-Through"
           confirmClass="btn-warning"
           loading={ptToggling}
@@ -462,7 +462,7 @@ export function TokenDetailView({ tokenId, onBack, onRefresh }: Props) {
         {token.pass_through && (
           <div className="pass-through-header-banner">
             <p>
-              <strong className="text-warning">This is a Pass Through token.</strong> It bypasses the permission tree and has unrestricted access to Home Assistant entities and services. Sensitive attributes are still scrubbed, and the exempt capabilities still apply (write, system, and irreversible caps, plus log reading, stay enforced as set). The ATM domain is always blocked regardless of token configuration.
+              <strong className="text-warning">This is a Pass Through token.</strong> It bypasses the permission tree and has broad access to Home Assistant entities and services. Sensitive attributes are still scrubbed, and the exempt capabilities still apply (write, system, and irreversible caps, plus log reading, stay enforced as set). The ATM domain is always blocked regardless of token configuration.
             </p>
           </div>
         )}
@@ -518,7 +518,7 @@ export function TokenDetailView({ tokenId, onBack, onRefresh }: Props) {
             <div className="card-header">Effective Permission Emulator</div>
             {token.pass_through ? (
               <p style={{ fontSize: 13, color: "var(--atm-text-2)", margin: 0 }}>
-                Pass Through tokens have unrestricted access to all non-ATM entities. No simulation needed.
+                Pass Through tokens bypass the permission tree, so every non-ATM entity resolves to write. No simulation needed.
               </p>
             ) : (
               <PermissionSimulator

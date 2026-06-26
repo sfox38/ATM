@@ -31,7 +31,7 @@ export const PassThroughNotice = React.memo(function PassThroughNotice({ token, 
     <div>
       <div className="pass-through-header-banner">
         <p>
-          <strong className="text-warning">Pass Through token.</strong> This token bypasses the permission tree and has unrestricted access to Home Assistant entities and services. Sensitive attributes are still scrubbed, and the exempt capabilities still apply. The ATM domain is always blocked.
+          <strong className="text-warning">Pass Through token.</strong> This token bypasses the permission tree and has broad access to Home Assistant entities and services. Sensitive attributes are still scrubbed, and the exempt capabilities still apply. The ATM domain is always blocked.
         </p>
         <p className="mt-8">
           Pass-through grants reads and everyday actions automatically, but the write, system, and irreversible capabilities (plus log reading) stay enforced exactly as set in the Capabilities section and must be enabled there individually. Capabilities set to Confirm remain gated even under pass-through.

@@ -16,6 +16,8 @@ from __future__ import annotations
 from aiohttp import web
 from homeassistant.components.http import HomeAssistantView
 
+from .const import DOMAIN
+
 ATM_SKILL_MARKDOWN = """---
 name: atm-home-assistant
 description: >-
@@ -184,6 +186,13 @@ class ATMSkillView(HomeAssistantView):
     requires_auth = False
 
     async def get(self, request: web.Request) -> web.Response:
+        # The skill guide is unauthenticated, but the kill switch should silence
+        # every client route. At startup the route is never registered; if the
+        # kill switch is flipped at runtime the route already exists (HA cannot
+        # unregister it), so refuse here the way the token-authenticated routes do.
+        data = self.hass.data.get(DOMAIN)
+        if data is None or data.shutting_down or data.store.get_settings().kill_switch:
+            return web.Response(status=503, text="Service unavailable.")
         return web.Response(text=ATM_SKILL_MARKDOWN, content_type="text/markdown")
 
 

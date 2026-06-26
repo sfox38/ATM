@@ -216,7 +216,7 @@ export function TokenCreateModal({ existingNames, onCreated, onClose }: Props) {
         <div className="toggle-row">
           <div className="toggle-label">
             <span>Pass-through mode</span>
-            <small>Bypasses all entity and capability checks. Equivalent to a Long-Lived Access Token.</small>
+            <small>Bypasses the permission tree for broad entity access. Exempt capabilities, MESA, the ATM blocklist, and attribute scrubbing still apply.</small>
           </div>
           <label className="toggle-switch">
             <input
@@ -231,10 +231,10 @@ export function TokenCreateModal({ existingNames, onCreated, onClose }: Props) {
         {passThrough ? (
           <div className="amber-block">
             <p>
-              <strong>This token will have unrestricted access to every entity, service, and system operation in Home Assistant.</strong> It is equivalent to a Long-Lived Access Token. Use only for tools you fully control. Revocation and expiry still apply. Works only with HTTP-based MCP clients, not stdio-based ones.
+              <strong>This token bypasses the permission tree and gets broad access to your Home Assistant entities and services.</strong> It is not unrestricted: the write, system, and irreversible capabilities (plus log reading) stay enforced exactly as set in Capabilities, the per-entity MESA safety layer still applies, the ATM domain stays blocked, sensitive attributes are still scrubbed, and rate limits, revocation, and expiry still apply. Grant it only to clients you trust. Works only with HTTP-based MCP clients, not stdio-based ones.
             </p>
             <div className="toggle-row mt-10">
-              <div className="toggle-label"><span>I understand this token has full Home Assistant access</span></div>
+              <div className="toggle-label"><span>I understand this token has broad Home Assistant access</span></div>
               <label className="toggle-switch">
                 <input
                   type="checkbox"
