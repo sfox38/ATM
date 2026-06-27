@@ -6,17 +6,19 @@
 [![HACS Custom](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://hacs.xyz)
 [![Home Assistant](https://img.shields.io/badge/Home%20Assistant-2024.5%2B-41BDF5?logo=home-assistant&logoColor=white)](https://www.home-assistant.io)
 
-Why give your AI agent unrestricted access to your home? ATM is more than a drop-in replacement for Home Assistant's native MCP server. It implements all 20 native HA MCP tools, so an existing AI client works without changes, and adds the control layer the native system has no place for: each client gets its own token, scoped to exactly the entities you allow, with its own rate limit, optional expiry, and a full audit trail. If a token is ever compromised, revoking it takes effect immediately, and its next request is rejected. ATM runs entirely inside Home Assistant: no extra process, no cloud dependency, and no configuration beyond the ATM panel.
+ATM gives your AI agents scoped, least-privilege access to Home Assistant. Each client gets its own token, limited to exactly the entities you allow, with its own capabilities, rate limit, and optional expiry. Every request is audited, any token can be revoked instantly, and a per-entity safety layer (MESA) can make a device confirm-only or off-limits by its nature, no matter what a token is granted.
+
+ATM runs entirely inside Home Assistant, with no extra process, no cloud dependency, and no setup beyond the ATM panel. It works with the MCP clients you already use (Claude Code, Cursor, ChatGPT/Codex, Gemini, and others), and a connect wizard takes you from a new token to a working agent in minutes, backed by a catalog of 86 tools for reading, controlling, and authoring your configuration.
 
 ## Documentation
 
-The full documentation, including the tool reference, permissions, capabilities, MESA, and the admin API, lives at **[sfox38.github.io/atm](https://sfox38.github.io/ATM/)**.
+The full documentation, including the tool reference, permissions, capabilities, MESA, and the admin API, lives at **[sfox38.github.io/ATM](https://sfox38.github.io/ATM/)**.
 
 New here? Start with the **[Quick start](https://sfox38.github.io/ATM/quickstart.html)**: it creates your first token, connects your agent, and tests the connection in a few minutes.
 
 ## How ATM compares
 
-We road-tested ATM against Home Assistant's built-in MCP server and the popular community server, one agent model, one synthetic home, the same tasks. ATM was the cheapest per completed task, the only server that left every off-limits device untouched, and the most capable. See the **[road test report](https://sfox38.github.io/atm-roadtest/)**, or reproduce it from the **[benchmark repository](https://github.com/sfox38/atm-roadtest)**.
+We road-tested ATM against the built-in and community MCP servers, one agent model, one synthetic home, the same tasks. ATM was the cheapest per completed task, the only server that left every off-limits device untouched, and the most capable. See the **[road test report](https://sfox38.github.io/atm-roadtest/)**, or reproduce it from the **[benchmark repository](https://github.com/sfox38/atm-roadtest)**.
 
 ## Requirements
 
