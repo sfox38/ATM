@@ -39,7 +39,7 @@ DEFAULT_TIMEOUT = 10.0
 # deliberate act. Keep in sync with the callers in mcp_view.py (helper CRUD +
 # list, backup read/create, lovelace dashboard CRUD). restore_backup is
 # deliberately absent (too destructive). The helper "list" read is used to
-# capture the pre-change config for version history (SPEC Section 16).
+# capture the pre-change config for version history.
 _HELPER_DOMAINS = (
     "input_boolean", "input_number", "input_text",
     "input_select", "input_datetime", "counter", "timer",

@@ -338,7 +338,7 @@ def refresh_orphans(hass: HomeAssistant, runtime: MesaRuntime) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Enforcement (Phase 3)
+# Enforcement
 # ---------------------------------------------------------------------------
 
 

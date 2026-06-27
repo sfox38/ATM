@@ -1,4 +1,4 @@
-"""Configuration version history store (SPEC Section 16).
+"""Configuration version history store.
 
 Immutable before/after snapshots of agent-driven create/edit/delete of
 automations, scripts, scenes, and helpers, with admin-only rollback. Records are

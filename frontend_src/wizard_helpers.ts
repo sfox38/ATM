@@ -185,7 +185,7 @@ export function buildSkillInstall(skillUrl: string, agentKey: string): AgentBloc
     case "codex":
       return [{
         title,
-        hint: "Download the guide, then add its contents to your AGENTS.md instructions file (or reference the file). Your agent can also fetch it on demand at the URL below.",
+        hint: "Download the guide, then add its contents to your Codex project instructions (or reference the file). Your agent can also fetch it on demand at the URL below.",
         fields: [{ label: "Skill guide URL", value: skillUrl }],
         code: `curl -fsSL ${skillUrl} -o atm-home-assistant.md`,
       }];

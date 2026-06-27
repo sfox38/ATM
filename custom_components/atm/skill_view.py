@@ -1,15 +1,4 @@
-"""ATM Agent Skill endpoint (skills workstream, Channel B host).
-
-Serves a plain Markdown usage guide for AI agents connected through ATM. The
-content is generic, non-sensitive guidance with no token or entity data, so the
-endpoint is unauthenticated and any agent that followed the link in the MCP
-`initialize` instructions (Channel A) can fetch it. It is registered with the
-kill-switch-gated client routes, so it is unreachable when ATM is disabled.
-
-Token-personalized guidance (which capabilities are gated for this token, etc.)
-is delivered separately in the MCP `initialize` `instructions` field (Channel A),
-which also links here.
-"""
+"""Unauthenticated Markdown skill guide endpoint for ATM agents."""
 
 from __future__ import annotations
 

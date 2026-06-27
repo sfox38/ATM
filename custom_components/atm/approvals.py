@@ -1,15 +1,4 @@
-"""Pending-approval queue and lifecycle for the admin-confirmation gate.
-
-When a token invokes a capability set to "confirm" mode, the request is
-recorded as a PendingApproval rather than executing immediately. The admin
-reviews the diff in the panel and approves or rejects. Approved actions
-re-validate the token's current state before executing; rejected and
-expired actions never run.
-
-State transitions out of "pending" are terminal and serialized under
-TokenStore.async_lock. See CAPABILITY_REDESIGN_PLAN.md for the full state
-machine and race-condition resolution.
-"""
+"""Pending-approval records and lifecycle helpers for confirm-gated actions."""
 
 from __future__ import annotations
 

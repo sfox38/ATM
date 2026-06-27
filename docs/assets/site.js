@@ -1,8 +1,4 @@
-/* ATM documentation - shared chrome and behavior.
-   Renders header, sidebar, footer and on-page TOC from one nav config,
-   then wires theme switching, the mobile drawer, copy buttons, light code
-   highlighting and reveal-on-scroll. Article content is static HTML; only the
-   surrounding chrome depends on this script. */
+/* ATM documentation chrome and behavior. */
 (function () {
   "use strict";
 

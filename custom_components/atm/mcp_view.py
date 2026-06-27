@@ -2313,9 +2313,7 @@ async def _tool_edit_automation(
 async def _execute_edit_automation(
     args: dict, token: TokenRecord, hass: Any, data: ATMData
 ) -> tuple[dict, str, str]:
-    # automation_id is not format-validated (unlike script_id which uses _SCRIPT_ID_RE).
-    # HA's async_validate_config_item rejects unknown IDs, so the impact is limited to
-    # accepting cosmetically wrong IDs that HA then rejects. Not a security concern.
+    # HA async_validate_config_item validates automation IDs.
     automation_id = args.get("automation_id", "").strip()
     if not automation_id:
         return _tool_error("automation_id is required."), "invalid_request", "edit_automation"
@@ -2795,21 +2793,7 @@ async def _resource_exists(hass: Any, resource_type: str, resource_id: str) -> b
 async def restore_version(
     record: Any, admin_user_id: str, hass: Any, data: ATMData, side: str | None = None
 ) -> tuple[dict, str, str]:
-    """Re-apply a stored config version under admin authority (SPEC Section 16.6).
-
-    `side` selects which snapshot to apply: "before" (the config prior to this
-    change) or "after" (the config this change produced). When omitted it falls
-    back to "after", or "before" if there is no after (a delete). The chosen side
-    must hold a config.
-
-    Reuses the create/edit executors with a synthetic pass-through admin token so
-    per-entity scope checks pass; an existing resource is edited, a deleted one is
-    recreated in place under its original id (automations, scenes, and scripts), so
-    the rollback lands on the same timeline and re-restoring is idempotent. Helpers
-    are the exception: HA's storage collection assigns the id, so a recreated helper
-    gets a fresh one. The resulting capture is stamped as a 'rollback' attributed to
-    the admin via _restore_ctx. Returns (tool_result, outcome, resource).
-    """
+    """Re-apply a stored config version under admin authority."""
     if side == "before":
         target = record.before
     elif side == "after":
@@ -4916,9 +4900,7 @@ async def _execute_delete_scene(
             filtered = [s for s in items if not (isinstance(s, dict) and str(s.get("id")) == scene_id)]
             await hass.async_add_executor_job(_write_scenes_yaml, path, filtered)
         await hass.services.async_call("scene", "reload", blocking=True)
-        # Remove the now-orphaned entity-registry entry so the scene does not
-        # linger as an "unavailable" entity (HA's native scene delete purges the
-        # registry too; reloading scenes.yaml alone does not).
+        # Reloading scenes.yaml does not remove the scene's entity-registry entry.
         registry = er.async_get(hass)
         for entry in list(registry.entities.values()):
             if entry.domain == "scene" and entry.unique_id == scene_id:

@@ -34,10 +34,10 @@ AUDIT_STORAGE_VERSION = 1
 # audit_flush_interval is stored and exposed in minutes (not seconds).
 # Valid values: 0 (disable periodic flush), 5, 10, 15, 30, 60.
 
-# Configuration version history (SPEC Section 16). Immutable before/after
-# snapshots of agent-driven create/edit/delete of automations, scripts, scenes,
-# and helpers, with admin-only rollback. Stored separately from tokens so the
-# schema versions evolve independently.
+# Configuration version history. Immutable before/after snapshots of
+# agent-driven create/edit/delete of automations, scripts, scenes, and helpers,
+# with admin-only rollback. Stored separately from tokens so the schema versions
+# evolve independently.
 VERSION_STORAGE_KEY = "atm_versions"
 VERSION_STORAGE_VERSION = 1
 # Per-resource FIFO retention: the newest N versions per (resource_type,
@@ -68,13 +68,8 @@ MESA_CONFIRM_CAP = "mesa_control_mode"
 # tool router, so a token cannot invoke the approved-bypass path directly.
 MESA_APPROVED_EXECUTOR = "call_service_mesa_approved"
 
-# Soft HA-version baseline for the optional in-context MESA profile injector
-# (mesa_inject_enabled). The injector DOM-patches HA's native config data tables,
-# which HA refactors periodically; below this version the module is not even
-# loaded. This is decoupled from MIN_HA_VERSION (the integration's real floor):
-# the injector is an experimental, admin-only, default-off convenience that
-# self-disables via in-page feature-detection regardless. Verified on 2026.6;
-# bump when the adapter is updated for a newer frontend era.
+# Minimum HA frontend version for the optional MESA profile injector.
+# Separate from MIN_HA_VERSION because the injector depends on frontend DOM shape.
 MESA_INJECT_MIN_HA = "2025.5.0"
 
 SENSITIVE_ATTRIBUTES = frozenset({
@@ -289,4 +284,3 @@ MAX_SUBSCRIPTION_SECONDS = 30
 FILESYSTEM_ALLOWED_DIRS = ("www", "themes", "custom_templates")
 # Maximum file size (bytes) the filesystem read/write tools will handle inline.
 MAX_FILE_BYTES = 1_048_576
-

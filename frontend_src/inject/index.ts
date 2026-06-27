@@ -8,7 +8,7 @@
  * config list pages (Automations, Scripts, Helpers, People, and integration
  * detail pages) so an admin can create or edit a MESA entity profile in place.
  *
- * Design rules (see the plan doc):
+ * Design rules:
  *  - Admin only: does nothing unless `hass.user.is_admin`.
  *  - Fully sandboxed: every entry point is wrapped so a thrown error logs and
  *    no-ops; it must never break the HA frontend.
@@ -41,9 +41,8 @@ function log(...args: unknown[]): void {
   console.debug(LOG, ...args);
 }
 
-// Opt-in loud diagnostics: localStorage["atm-inject-debug"] = "1" then reload.
-// Used to chase the "+/check toggles forever" report; logs every state change so
-// we can see whether `has` is flipping or buttons are duplicating.
+// Opt-in diagnostics: localStorage["atm-inject-debug"] = "1" then reload.
+// Logs injector state changes for duplicate-button and profile-state debugging.
 const DEBUG: boolean = (() => {
   try {
     return localStorage.getItem("atm-inject-debug") === "1";

@@ -31,9 +31,8 @@ class ATMData:
     # The HomeAssistant instance, set in __init__. Optional so direct constructions
     # (tests) need not supply it; used to fire bus events (e.g. atm_config_changed).
     hass: HomeAssistant | None = None
-    # Configuration version history (SPEC Section 16). Always present: __init__
-    # supplies a persistent store; direct constructions (tests) get an in-memory
-    # default so the field is never missing.
+    # Configuration version history. Always present: __init__ supplies a
+    # persistent store; direct constructions (tests) get an in-memory default.
     versions: VersionStore = field(default_factory=VersionStore)
     # MESA semantic-safety runtime (store, resolver, enforcer, validator).
     # None only if MESA setup failed; views guard accordingly.

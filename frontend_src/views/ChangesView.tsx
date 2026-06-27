@@ -1,7 +1,4 @@
-/** Configuration version history (SPEC Section 16): a recent-changes feed.
- * Clicking a change opens its before/after diff directly (one click); the
- * resource's other versions are listed in a timeline rail beside the diff, and
- * an admin can re-apply any version (recorded as a rollback). */
+/** Configuration version history view. */
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import type { VersionRecord, VersionSummary } from "../types";
 import { api } from "../api";

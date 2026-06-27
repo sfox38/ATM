@@ -691,9 +691,7 @@ class ATMEventsView(HomeAssistantView):
                  outcome="denied", client_ip=client_ip)
             return _error("forbidden", "Forbidden.", 403, request_id)
 
-        # This matches the native HA GET /api/events format exactly: a list of
-        # {"event": name, "listener_count": N} objects. This IS the "full native event
-        # list" described by spec §4.3. Not a bug - confirmed correct by the spec.
+        # Match the native HA GET /api/events list shape.
         listeners = hass.bus.async_listeners()
         events = [{"event": k, "listener_count": v} for k, v in sorted(listeners.items())]
 

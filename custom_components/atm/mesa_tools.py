@@ -9,7 +9,7 @@ scope-relative so there is no entity-enumeration oracle.
 
 Out-of-scope and ghost entity lookups return the byte-identical mesa-core
 not_found envelope, so an inaccessible entity is indistinguishable from a
-nonexistent one (CLAUDE.md information-leak rules).
+nonexistent one.
 """
 
 from __future__ import annotations

@@ -1607,7 +1607,7 @@ async def _approve_approval(hass: HomeAssistant, request: web.Request, approval_
 
 
 # ---------------------------------------------------------------------------
-# MESA profile administration (Phase 5)
+# MESA profile administration
 # ---------------------------------------------------------------------------
 
 

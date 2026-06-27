@@ -1,6 +1,4 @@
-// Small inline affordance that jumps to an entity's MESA profile. Shows "MESA"
-// when a profile exists (opens it), or "+" when none does (opens a prefilled
-// create form). Placed to the left of an entity name in the token cards.
+// Link from an entity row to its MESA profile editor.
 import React from "react";
 
 export function MesaProfileLink({
