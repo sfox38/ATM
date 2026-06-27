@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import type { ResolveResult } from "../types";
 import { api } from "../api";
+import { MesaProfileLink } from "./MesaProfileLink";
 
 type ResolveDepth = "entity" | "device" | "domain";
 
@@ -9,6 +10,8 @@ interface Props {
   externalEntityId?: string;
   resolveDepth?: ResolveDepth;
   triggerVersion?: number;
+  mesaProfileEntities?: Set<string>;
+  onOpenMesa?: (entityId: string) => void;
 }
 
 function filterPath(
@@ -37,7 +40,7 @@ const EFFECTIVE_CLASS: Record<string, string> = {
   NOT_FOUND: "state-GREY",
 };
 
-export function PermissionSimulator({ tokenId, externalEntityId, resolveDepth = "entity", triggerVersion }: Props) {
+export function PermissionSimulator({ tokenId, externalEntityId, resolveDepth = "entity", triggerVersion, mesaProfileEntities, onOpenMesa }: Props) {
   const [entityInput, setEntityInput] = useState(externalEntityId ?? "");
   const [result, setResult] = useState<ResolveResult | null>(null);
   const [loading, setLoading] = useState(false);
@@ -125,6 +128,18 @@ export function PermissionSimulator({ tokenId, externalEntityId, resolveDepth = 
                 {effective}
               </span>
             </div>
+            {onOpenMesa && entityInput.includes(".") && (
+              <div className="sim-mesa-row">
+                <MesaProfileLink
+                  entityId={entityInput.trim()}
+                  exists={!!mesaProfileEntities?.has(entityInput.trim())}
+                  onOpen={onOpenMesa}
+                />
+                <span className="sim-mesa-label">
+                  {mesaProfileEntities?.has(entityInput.trim()) ? "View MESA profile" : "No MESA profile - create one"}
+                </span>
+              </div>
+            )}
           </div>
         );
       })()}

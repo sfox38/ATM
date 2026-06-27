@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <script>(function(){try{var t=localStorage.getItem("atm-docs-theme");if(t==="light"||t==="dark")document.documentElement.setAttribute("data-theme",t);}catch(e){}})();</script>
+  <title>Quick start &middot; ATM docs</title>
+  <meta name="description" content="From nothing to a working scoped token in a few minutes: the guided setup creates your first token, connects your agent, and tests it." />
+  <link rel="icon" href="assets/atm-logo.png" type="image/png" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400..800&family=Hanken+Grotesk:wght@400..700&family=Roboto+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="assets/atm-docs.css" />
+</head>
+<body data-page="quickstart" data-toc>
+  <a class="skip-link" href="#main">Skip to content</a>
+  <header class="site-header" id="site-header"></header>
+  <div class="sidebar-backdrop" data-close-nav></div>
+
+  <div class="layout" id="layout">
+    <aside class="sidebar" id="sidebar"></aside>
+    <main class="main" id="main">
+      <div class="content prose">
+
+        <header class="page-head">
+          <p class="breadcrumb"><a href="index.html">Docs</a> / Getting started / Quick start</p>
+          <h1>Quick start</h1>
+          <p class="lede">The fastest way to your first scoped token is the guided setup built into the ATM panel. It creates a test token, gives it access to one device, walks you through connecting your agent, and confirms the connection. This page follows that flow step by step. Budget about five minutes.</p>
+        </header>
+
+        <div class="callout note">
+          <svg class="callout-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9.2"/><path d="M12 11v5"/><circle cx="12" cy="7.6" r="0.4" fill="currentColor"/></svg>
+          <div class="callout-body"><p class="callout-title">Before you start</p><p>ATM must be installed and added in Home Assistant (see <a href="install.html">Installation</a>), and you need at least one controllable device such as a light. Everything below happens in the <strong>ATM</strong> panel in your sidebar.</p></div>
+        </div>
+
+        <h2>The guided setup</h2>
+        <div class="steps">
+
+          <div class="step"><div class="step-body">
+            <h3>Open the panel and launch the guided setup</h3>
+            <p>Open the <strong>ATM</strong> panel from your Home Assistant sidebar. On the <strong>Tokens</strong> tab, start the guided setup ("Connect your first AI agent"). The wizard takes you from an empty token to a tested connection without leaving the panel.</p>
+          </div></div>
+
+          <div class="step"><div class="step-body">
+            <h3>Pick a persona</h3>
+            <p>A persona is a named preset that sets every capability at once: what the agent may read, what it may control, and what needs your approval. <strong>New user</strong> is preselected and is a safe starting point. It lets the agent read your home and control the devices you grant, while locks, alarms, and covers ask for your confirmation.</p>
+            <p>Choosing a persona modifies the entire capability set, not just a label; you can fine-tune any single capability later. The personas are described on <a href="capabilities.html#personas">Capabilities</a>.</p>
+            <figure class="screenshot">
+              <img src="assets/wizard1.png" alt="The wizard's persona step with New user selected" loading="lazy" />
+              <figcaption>The persona picker, with New user selected.</figcaption>
+            </figure>
+          </div></div>
+
+          <div class="step"><div class="step-body">
+            <h3>Name the test token</h3>
+            <p>The wizard suggests <code>test_token</code> so its purpose is obvious; change it if you like, and set an optional expiry. Name and expiry are fixed once the token is created, so if you want different ones, set them here.</p>
+          </div></div>
+
+          <div class="step"><div class="step-body">
+            <h3>Grant access to one device</h3>
+            <p>The wizard highlights your <code>light</code> domain. Expand it, find a light you can physically see, and click the <strong>W</strong> button on that row to grant full read and write access; its badge changes to "WRITE". Granting one device is enough to prove the connection; you can grant more later from the token's detail page.</p>
+            <figure class="screenshot">
+              <img src="assets/wizard3.png" alt="The wizard's access step, granting WRITE to a single light in the entity tree" loading="lazy" />
+              <figcaption>The entity tree, granting WRITE to a single light.</figcaption>
+            </figure>
+          </div></div>
+
+          <div class="step"><div class="step-body">
+            <h3>Copy your token</h3>
+            <div class="callout warn">
+              <svg class="callout-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.3 3.8 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.8a2 2 0 0 0-3.4 0z"/><path d="M12 9v4"/><circle cx="12" cy="17" r="0.4" fill="currentColor"/></svg>
+              <div class="callout-body"><p class="callout-title">Shown once</p><p>The token value appears once and cannot be retrieved later. Copy it now. The wizard also pre-fills it into the connection command on the next step.</p></div>
+            </div>
+          </div></div>
+
+          <div class="step"><div class="step-body">
+            <h3>Connect your agent</h3>
+            <p>The wizard shows a ready-to-paste command for your agent. Claude Code, for example,  is a single command line; substitute your Home Assistant address.</p>
+            <p>Other clients (Cursor, Codex, Gemini CLI, and any MCP-capable tool) connect the same way with their own command or config; the panel shows the exact form per agent, and so does <a href="connect.html">Connect an AI client</a>.</p>
+            <figure class="screenshot">
+              <img src="assets/wizard5.png" alt="The wizard's connect step with the MCP server URL, the token, and a ready-to-paste command per agent" loading="lazy" />
+              <figcaption>The connect step: the MCP server URL, your token, and a per-agent command.</figcaption>
+            </figure>
+          </div></div>
+
+          <div class="step"><div class="step-body">
+            <h3>Run a test</h3>
+            <p>Ask your agent to do something simple, like <em>"List my Home Assistant lights"</em>. The moment it calls ATM, the wizard detects the connection and confirms it. That is the whole loop: a scoped token, connected and verified.</p>
+            <figure class="screenshot">
+              <img src="assets/wizard6.png" alt="The wizard's test step showing Connected after the agent reached ATM" loading="lazy" />
+              <figcaption>The test step showing "Connected".</figcaption>
+            </figure>
+          </div></div>
+
+        </div>
+
+        <div class="callout note">
+          <svg class="callout-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9.2"/><path d="M12 11v5"/><circle cx="12" cy="7.6" r="0.4" fill="currentColor"/></svg>
+          <div class="callout-body"><p class="callout-title">If the persona step reports an error</p><p>The wizard creates the token first, then applies the persona. If that second step fails, the token already exists with its name and access intact. You do not need to start over: open it from the <strong>Tokens</strong> list and set the persona or individual capabilities from its detail page.</p></div>
+        </div>
+
+        <h2>What you end up with</h2>
+        <p>The result is a normal scoped token, no different from one you build by hand. You can widen or tighten its <a href="permissions.html">permission tree</a>, change its <a href="capabilities.html">capabilities</a>, or rotate its value at any time from the token's detail page. When you are done with it, open the token and choose <strong>Revoke</strong>; revoked tokens can then be deleted permanently from the Archived list.</p>
+
+        <h2>Where to go next</h2>
+        <div class="grid-2">
+          <a class="card card-link" href="permissions.html">
+            <span class="card-ix">Scope</span>
+            <h3>Permissions</h3>
+            <p>The four states and the two-pass resolver that turn the tree into one decision per entity.</p>
+            <span class="card-go">Permissions <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg></span>
+          </a>
+          <a class="card card-link" href="capabilities.html">
+            <span class="card-ix">Gate</span>
+            <h3>Capabilities &amp; pass-through</h3>
+            <p>The opt-in flags behind the powerful operations, and the personas that preset them.</p>
+            <span class="card-go">Capabilities <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg></span>
+          </a>
+          <a class="card card-link" href="panel.html">
+            <span class="card-ix">Operate</span>
+            <h3>Panel guide</h3>
+            <p>Everything the panel does: bulk select, the emulator, hints, approvals, and more.</p>
+            <span class="card-go">Panel guide <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg></span>
+          </a>
+          <a class="card card-link" href="connect.html">
+            <span class="card-ix">Connect</span>
+            <h3>Connect an AI client</h3>
+            <p>Per-agent commands and configs, the agent skill, and when to use a third-party server.</p>
+            <span class="card-go">Connect a client <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg></span>
+          </a>
+        </div>
+
+        <nav class="pager" id="pager" aria-label="Page navigation"></nav>
+      </div>
+    </main>
+    <aside class="toc" id="toc"></aside>
+  </div>
+
+  <footer class="site-footer" id="site-footer"></footer>
+  <script src="assets/site.js"></script>
+</body>
+</html>

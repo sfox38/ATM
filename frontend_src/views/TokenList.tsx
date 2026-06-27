@@ -35,11 +35,12 @@ interface Props {
   error: string | null;
   onRefresh: () => void;
   onOpenDetail: (id: string) => void;
+  onLaunchWizard: () => void;
   showCreate: boolean;
   onCloseCreate: () => void;
 }
 
-export function TokenListView({ tokens, loading, error, onRefresh, onOpenDetail, showCreate, onCloseCreate }: Props) {
+export function TokenListView({ tokens, loading, error, onRefresh, onOpenDetail, onLaunchWizard, showCreate, onCloseCreate }: Props) {
   const [filter, setFilter] = useState("");
   const [showArchived, setShowArchived] = useState(false);
   const [archived, setArchived] = useState<ArchivedTokenRecord[] | null>(null);
@@ -111,6 +112,32 @@ export function TokenListView({ tokens, loading, error, onRefresh, onOpenDetail,
     );
   }
 
+  // First run: no tokens and no filter. Show an onboarding hero that launches
+  // the wizard instead of the empty table. The create modal is still mounted
+  // here so the header "Create Token" button works in the empty state.
+  if (!loading && !error && tokens.length === 0 && !filter && !showArchived) {
+    return (
+      <div className="view-root">
+        <div className="card wizard-hero">
+          <div className="wizard-hero-title">No agents connected yet</div>
+          <p className="wizard-hero-sub">
+            ATM lets an AI agent control your Home Assistant through a scoped, revocable token. The wizard walks you through creating one and connecting your agent, step by step.
+          </p>
+          <div className="wizard-hero-actions">
+            <button className="btn btn-primary" onClick={onLaunchWizard}>Set up your first agent</button>
+          </div>
+        </div>
+        {showCreate && (
+          <TokenCreateModal
+            existingNames={tokens.map((t) => t.name)}
+            onCreated={handleCreated}
+            onClose={onCloseCreate}
+          />
+        )}
+      </div>
+    );
+  }
+
   return (
     <div className="view-root">
       {tokens.length >= MAX_ACTIVE_TOKENS_WARNING && (
@@ -128,6 +155,12 @@ export function TokenListView({ tokens, loading, error, onRefresh, onOpenDetail,
             onChange={(e) => setFilter(e.target.value)}
           />
           <div className="filter-row-right">
+            <button
+              className="btn btn-ghost btn-sm"
+              onClick={onLaunchWizard}
+            >
+              Set up an agent
+            </button>
             <button
               className="btn btn-ghost btn-sm"
               onClick={() => setShowArchived((v) => !v)}

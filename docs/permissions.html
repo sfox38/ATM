@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <script>(function(){try{var t=localStorage.getItem("atm-docs-theme");if(t==="light"||t==="dark")document.documentElement.setAttribute("data-theme",t);}catch(e){}})();</script>
+  <title>Permissions &middot; ATM docs</title>
+  <meta name="description" content="ATM's permission tree: four states, two-pass resolution, inheritance, and the indirect-control risks to watch for." />
+  <link rel="icon" href="assets/atm-logo.png" type="image/png" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400..800&family=Hanken+Grotesk:wght@400..700&family=Roboto+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="assets/atm-docs.css" />
+</head>
+<body data-page="permissions" data-toc>
+  <a class="skip-link" href="#main">Skip to content</a>
+  <header class="site-header" id="site-header"></header>
+  <div class="sidebar-backdrop" data-close-nav></div>
+
+  <div class="layout" id="layout">
+    <aside class="sidebar" id="sidebar"></aside>
+    <main class="main" id="main">
+      <div class="content prose">
+
+        <header class="page-head">
+          <p class="breadcrumb"><a href="index.html">Docs</a> / Concepts / Permissions</p>
+          <h1>Permissions</h1>
+          <p class="lede">Every token carries a permission tree of domains, devices, and entities. Each node holds one of four states, and a two-pass resolver turns the tree into a single decision for any entity a request touches.</p>
+        </header>
+
+        <h2>The four states</h2>
+        <p>Each node in the tree is set to one of four states. Color is never the only signal; the panel always pairs the color with a word.</p>
+
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th scope="col">State</th><th scope="col">Read</th><th scope="col">Write</th><th scope="col">What it means</th></tr></thead>
+            <tbody>
+              <tr>
+                <td><span class="state grey"><span class="swatch"></span>GREY</span></td>
+                <td>inherits</td><td>inherits</td>
+                <td>No opinion. The node inherits from its parent. This is the default for every node; all-grey means no access.</td>
+              </tr>
+              <tr>
+                <td><span class="state yellow"><span class="swatch"></span>YELLOW</span></td>
+                <td><span class="yes">yes</span></td><td><span class="no">no</span></td>
+                <td>Read-only. The token can read state but cannot call services that change it.</td>
+              </tr>
+              <tr>
+                <td><span class="state green"><span class="swatch"></span>GREEN</span></td>
+                <td><span class="yes">yes</span></td><td><span class="yes">yes</span></td>
+                <td>Read and write. The token can read state and call services.</td>
+              </tr>
+              <tr>
+                <td><span class="state red"><span class="swatch"></span>RED</span></td>
+                <td><span class="no">no</span></td><td><span class="no">no</span></td>
+                <td>Hard deny. Blocks this node and everything beneath it. No child can override it.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h2>The permission tree</h2>
+        <p>Domains sit at the top, devices nest underneath, and entities are the leaves. You rarely set every node. The usual pattern is to set a whole domain or device to <span class="state yellow"><span class="swatch"></span>YELLOW</span> or <span class="state green"><span class="swatch"></span>GREEN</span>, leave the children at <span class="state grey"><span class="swatch"></span>GREY</span> so they inherit, then use <span class="state red"><span class="swatch"></span>RED</span> to carve out exceptions.</p>
+
+        <figure class="diagram">
+          <div class="perm-tree" role="img" aria-label="A permission tree where a green light domain grants write to its grey children, a red child overrides it to deny, a grey lock domain has one explicitly green entity, and a yellow sensor domain grants read to its grey children.">
+            <div class="pt-row"><span class="state green"><span class="swatch"></span>GREEN</span><span class="pt-id">light</span><span class="pt-arrow">resolves to</span><span class="pt-out write">WRITE</span></div>
+            <div class="pt-row child"><span class="state grey"><span class="swatch"></span>GREY</span><span class="pt-id"><span class="tw">&#9492; </span>light.living_room</span><span class="pt-arrow">inherits</span><span class="pt-out write">WRITE</span></div>
+            <div class="pt-row child"><span class="state red"><span class="swatch"></span>RED</span><span class="pt-id"><span class="tw">&#9492; </span>light.guest_bedroom</span><span class="pt-arrow">override</span><span class="pt-out deny">DENY</span></div>
+            <div class="pt-row"><span class="state grey"><span class="swatch"></span>GREY</span><span class="pt-id">lock</span><span class="pt-arrow">no grant</span><span class="pt-out none">NO ACCESS</span></div>
+            <div class="pt-row child"><span class="state green"><span class="swatch"></span>GREEN</span><span class="pt-id"><span class="tw">&#9492; </span>lock.front_door</span><span class="pt-arrow">explicit</span><span class="pt-out write">WRITE</span></div>
+            <div class="pt-row"><span class="state yellow"><span class="swatch"></span>YELLOW</span><span class="pt-id">sensor</span><span class="pt-arrow">resolves to</span><span class="pt-out read">READ</span></div>
+            <div class="pt-row child"><span class="state grey"><span class="swatch"></span>GREY</span><span class="pt-id"><span class="tw">&#9492; </span>sensor.thermostat</span><span class="pt-arrow">inherits</span><span class="pt-out read">READ</span></div>
+          </div>
+          <figcaption>Children inherit their parent's grant until something more specific overrides it. <b>RED always wins</b>, even over a GREEN parent.</figcaption>
+        </figure>
+
+        <h2 id="how-a-permission-is-resolved">How a permission is resolved</h2>
+        <p>When a request arrives for an entity, ATM walks the ancestor chain (entity, then device, then domain) twice.</p>
+
+        <figure class="diagram">
+          <svg viewBox="0 0 720 300" role="img" xmlns="http://www.w3.org/2000/svg">
+            <title>Two-pass resolution: a RED scan, then the nearest non-grey grant</title>
+            <defs>
+              <marker id="ah" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                <path d="M0 0 L10 5 L0 10 z" class="dgm-ink-3"/>
+              </marker>
+            </defs>
+            <g class="dgm-body" font-size="13">
+              <!-- start -->
+              <rect x="8" y="118" width="120" height="58" rx="12" class="dgm-surface dgm-stroke" stroke-width="1.5"/>
+              <text x="68" y="143" text-anchor="middle" class="dgm-ink" font-weight="600">Request</text>
+              <text x="68" y="160" text-anchor="middle" class="dgm-ink-2" font-size="11">for an entity</text>
+              <line x1="128" y1="147" x2="156" y2="147" class="dgm-stroke" stroke-width="1.5" marker-end="url(#ah)"/>
+
+              <!-- pass 1 -->
+              <rect x="158" y="110" width="156" height="74" rx="12" class="dgm-surface dgm-stroke" stroke-width="1.5"/>
+              <text x="236" y="134" text-anchor="middle" class="dgm-accent dgm-mono" font-size="11" font-weight="700">PASS 1</text>
+              <text x="236" y="152" text-anchor="middle" class="dgm-ink" font-weight="600">Any ancestor</text>
+              <text x="236" y="169" text-anchor="middle" class="dgm-ink" font-weight="600">set to RED?</text>
+
+              <!-- pass1 yes -> deny -->
+              <line x1="236" y1="184" x2="236" y2="226" class="dgm-stroke" stroke-width="1.5" marker-end="url(#ah)"/>
+              <text x="248" y="208" class="dgm-ink-2" font-size="11">yes</text>
+              <rect x="186" y="226" width="100" height="46" rx="10" style="fill:var(--st-red-bg);stroke:var(--st-red)" stroke-width="1.5"/>
+              <text x="236" y="254" text-anchor="middle" style="fill:var(--st-red)" font-weight="700" class="dgm-mono" font-size="13">DENY</text>
+
+              <!-- pass1 no -> pass2 -->
+              <line x1="314" y1="147" x2="346" y2="147" class="dgm-stroke" stroke-width="1.5" marker-end="url(#ah)"/>
+              <text x="322" y="138" class="dgm-ink-2" font-size="11">no</text>
+
+              <!-- pass 2 -->
+              <rect x="348" y="110" width="160" height="74" rx="12" class="dgm-surface dgm-stroke" stroke-width="1.5"/>
+              <text x="428" y="134" text-anchor="middle" class="dgm-accent dgm-mono" font-size="11" font-weight="700">PASS 2</text>
+              <text x="428" y="152" text-anchor="middle" class="dgm-ink" font-weight="600">Nearest</text>
+              <text x="428" y="169" text-anchor="middle" class="dgm-ink" font-weight="600">non-grey grant</text>
+
+              <!-- outcomes -->
+              <line x1="508" y1="140" x2="556" y2="64" class="dgm-stroke" stroke-width="1.5" marker-end="url(#ah)"/>
+              <line x1="508" y1="147" x2="556" y2="147" class="dgm-stroke" stroke-width="1.5" marker-end="url(#ah)"/>
+              <line x1="508" y1="154" x2="556" y2="230" class="dgm-stroke" stroke-width="1.5" marker-end="url(#ah)"/>
+
+              <rect x="558" y="40" width="150" height="46" rx="10" style="fill:var(--st-green-bg);stroke:var(--st-green)" stroke-width="1.5"/>
+              <text x="575" y="62" style="fill:var(--st-green)" class="dgm-mono" font-size="11" font-weight="700">GREEN</text>
+              <text x="690" y="62" text-anchor="end" style="fill:var(--st-green)" font-weight="700" font-size="12">WRITE</text>
+              <text x="575" y="76" style="fill:var(--st-green)" font-size="10" opacity="0.8">nearest</text>
+
+              <rect x="558" y="124" width="150" height="46" rx="10" style="fill:var(--st-yellow-bg);stroke:var(--st-yellow)" stroke-width="1.5"/>
+              <text x="575" y="146" style="fill:var(--st-yellow)" class="dgm-mono" font-size="11" font-weight="700">YELLOW</text>
+              <text x="690" y="146" text-anchor="end" style="fill:var(--st-yellow)" font-weight="700" font-size="12">READ</text>
+              <text x="575" y="160" style="fill:var(--st-yellow)" font-size="10" opacity="0.85">nearest</text>
+
+              <rect x="558" y="208" width="150" height="46" rx="10" class="dgm-surface-2 dgm-stroke" stroke-width="1.5"/>
+              <text x="575" y="230" class="dgm-ink-3 dgm-mono" font-size="11" font-weight="700">NONE</text>
+              <text x="690" y="230" text-anchor="end" class="dgm-ink-2" font-weight="700" font-size="12">NO ACCESS</text>
+              <text x="575" y="244" class="dgm-ink-3" font-size="10">all grey</text>
+            </g>
+          </svg>
+          <figcaption><b>Pass 1</b> scans the whole ancestor chain for RED and denies on the first one it finds. Only if the chain is clear does <b>Pass 2</b> look for the nearest non-grey grant. To the caller, NO ACCESS and DENY are indistinguishable.</figcaption>
+        </figure>
+
+        <div class="callout note">
+          <svg class="callout-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9.2"/><path d="M12 11v5"/><circle cx="12" cy="7.6" r="0.4" fill="currentColor"/></svg>
+          <div class="callout-body"><p class="callout-title">Why two passes</p><p>Splitting the RED scan from the grant lookup is what makes a RED override absolute. A single pass that stopped at the first grant could let a GREEN child slip past a RED ancestor. Pass 2 closes that gap.</p></div>
+        </div>
+
+        <h2>Worked examples</h2>
+
+        <h3>Read every light, control only the living room</h3>
+        <div class="perm-tree">
+          <div class="pt-row"><span class="state yellow"><span class="swatch"></span>YELLOW</span><span class="pt-id">light</span><span class="pt-arrow">every light</span><span class="pt-out read">READ</span></div>
+          <div class="pt-row child"><span class="state green"><span class="swatch"></span>GREEN</span><span class="pt-id"><span class="tw">&#9492; </span>light.living_room</span><span class="pt-arrow">escalates</span><span class="pt-out write">WRITE</span></div>
+        </div>
+
+        <h3>Full access to lights, except the guest bedroom</h3>
+        <div class="perm-tree">
+          <div class="pt-row"><span class="state green"><span class="swatch"></span>GREEN</span><span class="pt-id">light</span><span class="pt-arrow">all writable</span><span class="pt-out write">WRITE</span></div>
+          <div class="pt-row child"><span class="state red"><span class="swatch"></span>RED</span><span class="pt-id"><span class="tw">&#9492; </span>guest bedroom device</span><span class="pt-arrow">RED wins</span><span class="pt-out deny">DENY</span></div>
+        </div>
+
+        <h3>Block one noisy sensor inside a permitted device</h3>
+        <div class="perm-tree">
+          <div class="pt-row"><span class="state green"><span class="swatch"></span>GREEN</span><span class="pt-id">media device</span><span class="pt-arrow">writable</span><span class="pt-out write">WRITE</span></div>
+          <div class="pt-row child"><span class="state red"><span class="swatch"></span>RED</span><span class="pt-id"><span class="tw">&#9492; </span>sensor.signal_strength</span><span class="pt-arrow">excluded</span><span class="pt-out deny">DENY</span></div>
+        </div>
+
+        <h2 id="indirect-control-risk">Indirect control risk</h2>
+        <p>Three domains carry a risk that is easy to overlook: <code>automation</code>, <code>script</code>, and <code>scene</code>. The permission tree marks them with a <span class="badge badge-error">!</span> badge.</p>
+
+        <div class="callout danger">
+          <svg class="callout-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.3 3.8 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.8a2 2 0 0 0-3.4 0z"/><path d="M12 9v4"/><circle cx="12" cy="17" r="0.4" fill="currentColor"/></svg>
+          <div class="callout-body">
+            <p class="callout-title">WRITE on these domains reaches past the tree</p>
+            <p>Granting <span class="state green"><span class="swatch"></span>GREEN</span> to an automation, script, or scene lets a client trigger it, and the triggered actions run under Home Assistant's full context, not ATM's. A token with <span class="state red"><span class="swatch"></span>RED</span> on a door but WRITE on <code>automation.*</code> can still unlock that door through a triggered automation.</p>
+          </div>
+        </div>
+
+        <p>Granting <span class="state yellow"><span class="swatch"></span>YELLOW</span> to these domains is safe: it allows reading whether an automation is enabled or a scene exists, without the ability to trigger anything.</p>
+
+        <h2>What ATM always blocks</h2>
+        <p>These apply to every token, including pass-through tokens, and are not configurable.</p>
+        <dl class="kv">
+          <div class="kv-row"><dt>atm domain</dt><dd>All internal ATM sensors are permanently blocked and invisible. A client cannot read its own telemetry through ATM.</dd></div>
+          <div class="kv-row"><dt>secrets</dt><dd>Attributes that can leak credentials (<code>access_token</code>, <code>entity_picture</code>, <code>stream_url</code>, <code>still_image_url</code>) are stripped from every state response.</dd></div>
+        </dl>
+
+        <h2>Working in the panel</h2>
+        <p>The panel has tools that make scoping faster than clicking every node: bulk select by area or label, an effective-permission emulator that runs the two-pass resolver for any entity, a sortable summary of every node set to something other than GREY, and per-entity hints (token-local or global) that clarify what an entity is for the connected AI. These all live in the <a href="panel.html">Panel guide</a>.</p>
+
+        <nav class="pager" id="pager" aria-label="Page navigation"></nav>
+      </div>
+    </main>
+    <aside class="toc" id="toc"></aside>
+  </div>
+
+  <footer class="site-footer" id="site-footer"></footer>
+  <script src="assets/site.js"></script>
+</body>
+</html>

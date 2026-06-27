@@ -14,17 +14,20 @@ from homeassistant.helpers import entity_registry as er_mod
 from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.helpers.storage import Store
 from .audit import AuditLog
-from .const import AUDIT_STORAGE_KEY, AUDIT_STORAGE_VERSION, DOMAIN, EXPIRY_CHECK_INTERVAL, FLUSH_INTERVAL, SENSOR_PUSH_INTERVAL
+from .version_store import VersionStore
+from .const import APPROVAL_SWEEP_INTERVAL, AUDIT_STORAGE_KEY, AUDIT_STORAGE_VERSION, DOMAIN, EXPIRY_CHECK_INTERVAL, FLUSH_INTERVAL, SENSOR_PUSH_INTERVAL, VERSION_STORAGE_KEY, VERSION_STORAGE_VERSION
 from .data import ATMData
-from .helpers import archive_expired_token, cancel_expiry_timer, schedule_expiry_timer, terminate_token_connections
+from .helpers import archive_expired_token, cancel_expiry_timer, schedule_expiry_timer
 from .policy_engine import template_blocklist_vars
 from .rate_limiter import RateLimiter
 from .token_store import TokenStore
 
-# HA template globals that are safe (no entity state access). When the runtime
-# audit runs, any global not in this set and not in the blocklist triggers a
-# warning so new HA globals don't silently bypass ATM filtering.
-_SAFE_TEMPLATE_GLOBALS = frozenset({
+# HA-added template names (globals, filters, and tests) that are safe: pure
+# math/string/data helpers with no entity state or registry access. When the
+# runtime audit runs, any name HA adds to the render environment that is not in
+# this set and not in the blocklist triggers a warning so new HA template
+# functions don't silently bypass ATM filtering.
+_SAFE_TEMPLATE_NAMES = frozenset({
     "bool", "float", "int", "version", "typeof", "is_number",
     "zip", "apply", "combine", "iif", "as_function", "pack", "unpack",
     "merge_response", "e", "pi", "tau", "sin", "cos", "tan",
@@ -38,6 +41,14 @@ _SAFE_TEMPLATE_GLOBALS = frozenset({
     "timedelta", "now", "utcnow", "relative_time", "time_since",
     "time_until", "today_at",
     "range", "lipsum", "dict", "cycler", "joiner", "namespace", "undefined",
+    # Filter-only names.
+    "add", "base64_decode", "base64_encode", "contains", "from_hex",
+    "from_json", "is_defined", "multiply", "ord", "ordinal",
+    "regex_findall", "regex_findall_index", "regex_match", "regex_replace",
+    "regex_search", "timestamp_custom", "timestamp_local", "timestamp_utc",
+    "to_json", "random", "round",
+    # Test-only names.
+    "datetime", "list", "match", "search", "string_like",
 })
 
 _LOGGER = logging.getLogger(__name__)
@@ -45,28 +56,41 @@ _LOGGER = logging.getLogger(__name__)
 PLATFORMS = ["sensor"]
 
 
-def _audit_template_sandbox(hass: HomeAssistant) -> None:
-    """Warn about HA template globals not covered by ATM's blocklist.
+def _audit_template_sandbox() -> None:
+    """Warn about unrecognized names in ATM's template render environment.
 
-    Runs once at setup. Any unrecognized global triggers a log warning so
-    future HA versions adding new template functions don't silently bypass
-    ATM entity filtering.
+    Runs once at setup. Audits the hass-less environment actually used by
+    render_template_for_token() across globals, filters, AND tests (Jinja2
+    render variables cannot shadow filters or tests, so every name HA registers
+    there is reachable). Any unrecognized name triggers a log warning so future
+    HA versions adding new template functions don't silently bypass ATM
+    entity filtering.
     """
     try:
-        from homeassistant.helpers.template import TemplateEnvironment
+        import jinja2.sandbox
+
+        from .helpers import safe_template_env
+
         blocked = set(template_blocklist_vars().keys())
         overridden = {"states", "state_attr", "is_state", "is_state_attr", "has_value"}
-        known = blocked | overridden | _SAFE_TEMPLATE_GLOBALS
-        env = TemplateEnvironment(hass, limited=False, log_fn=None)
-        for name in env.globals:
-            if name not in known and not name.startswith("_"):
-                _LOGGER.warning(
-                    "ATM template sandbox: unrecognized HA global '%s' - "
-                    "this function is not blocked and may bypass entity filtering",
-                    name,
-                )
+        known = blocked | overridden | _SAFE_TEMPLATE_NAMES
+        env = safe_template_env()
+        base = jinja2.sandbox.ImmutableSandboxedEnvironment()
+        for kind, names, base_names in (
+            ("global", env.globals, base.globals),
+            ("filter", env.filters, base.filters),
+            ("test", env.tests, base.tests),
+        ):
+            for name in set(names) - set(base_names):
+                if name not in known and not name.startswith("_"):
+                    _LOGGER.warning(
+                        "ATM template sandbox: unrecognized HA template %s '%s' - "
+                        "this function is not blocked and may bypass entity filtering",
+                        kind,
+                        name,
+                    )
     except Exception:
-        _LOGGER.debug("ATM: could not audit template globals", exc_info=True)
+        _LOGGER.debug("ATM: could not audit template environment", exc_info=True)
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -83,16 +107,43 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     audit = AuditLog(store=audit_store, maxlen=store.get_settings().audit_log_maxlen)
     await audit.async_load()
 
+    versions = VersionStore(store=Store(hass, VERSION_STORAGE_VERSION, VERSION_STORAGE_KEY))
+    await versions.async_load()
+
     data = ATMData(
+        hass=hass,
         store=store,
         rate_limiter=rate_limiter,
         audit=audit,
-        sse_connections={},
+        versions=versions,
     )
     # hass.data is keyed by DOMAIN (not config entry ID). This is intentional: the config
     # flow enforces a single ATM instance via async_abort("already_configured"), so there
     # is always at most one entry. Keying by entry ID would add complexity for no benefit.
     hass.data[DOMAIN] = data
+
+    # Build the MESA runtime unconditionally (even under the kill switch): the
+    # admin profile API must work regardless, and the enforcement gate is simply
+    # never reached when no proxy/MCP routes are registered. A failure here must
+    # not block ATM setup; MESA degrades to off (data.mesa stays None).
+    from .mesa import async_setup_mesa
+    try:
+        data.mesa = await async_setup_mesa(hass, store.get_settings().mesa_mode)
+    except Exception:  # noqa: BLE001 - MESA must never block ATM startup
+        _LOGGER.exception("ATM: MESA runtime setup failed; MESA disabled this session")
+        data.mesa = None
+
+    # Surface, once at startup, any HA-internal drift that would break the
+    # in-process WS dispatch used by helper CRUD. Per-call failures still
+    # degrade to a clean error; this just makes the cause visible early.
+    from .ws_dispatch import check_ws_dispatch_compat
+    _ws_incompat = check_ws_dispatch_compat(hass)
+    if _ws_incompat is not None:
+        _LOGGER.warning(
+            "ATM: in-process WebSocket dispatch may be incompatible with this HA "
+            "version (%s); helper CRUD tools may be unavailable.",
+            _ws_incompat,
+        )
 
     from .admin_view import ALL_ADMIN_VIEWS
     for view_cls in ALL_ADMIN_VIEWS:
@@ -100,8 +151,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         view.hass = hass
         hass.http.register_view(view)
 
-    from .panel import async_register_atm_panel
+    from .panel import async_register_atm_panel, async_sync_mesa_inject
     await async_register_atm_panel(hass)
+    # Optional, experimental, default-off: inject the in-context profile control
+    # into HA's native config pages. Independent of the kill switch (admin-only).
+    await async_sync_mesa_inject(hass)
 
     settings = store.get_settings()
 
@@ -109,7 +163,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         """Register the proxy and MCP views. Skipped when kill switch is active."""
         from .proxy_view import ALL_VIEWS
         from .mcp_view import ALL_MCP_VIEWS
-        for view_cls in ALL_VIEWS + ALL_MCP_VIEWS:
+        from .skill_view import ALL_SKILL_VIEWS
+        for view_cls in ALL_VIEWS + ALL_MCP_VIEWS + ALL_SKILL_VIEWS:
             view = view_cls()
             view.hass = hass
             hass.http.register_view(view)
@@ -182,6 +237,30 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     entry.async_on_unload(cancel_expiry)
     entry.async_on_unload(lambda: [cancel_expiry_timer(data, tid) for tid in list(data.expiry_timers)])
 
+    async def _sweep_expired_approvals(_now=None) -> None:
+        from .approvals import (  # noqa: PLC0415
+            dismiss_approval_notification,
+            expire_overdue_approval_records,
+            fire_approval_resolved_event,
+        )
+
+        async with store.async_lock:
+            expired = await expire_overdue_approval_records(
+                store,
+                skip_ids=data.approvals_in_progress,
+            )
+        for approval in expired:
+            dismiss_approval_notification(hass, approval.id)
+            fire_approval_resolved_event(hass, approval)
+
+    await _sweep_expired_approvals()
+    cancel_approval_sweep = async_track_time_interval(
+        hass,
+        _sweep_expired_approvals,
+        APPROVAL_SWEEP_INTERVAL,
+    )
+    entry.async_on_unload(cancel_approval_sweep)
+
     async def _on_stop(event: Event) -> None:
         audit_task.cancel()
         await store.async_flush_last_used()
@@ -191,7 +270,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STOP, _on_stop)
     )
 
-    _audit_template_sandbox(hass)
+    _audit_template_sandbox()
 
     def _invalidate_entity_tree(_event=None) -> None:
         data.entity_tree_cache_valid = False
@@ -205,19 +284,49 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             hass.bus.async_listen(_registry_event, _invalidate_entity_tree)
         )
 
+    if data.mesa is not None:
+        from .mesa import (
+            async_import_sidecar_profiles,
+            async_refresh_trigger_issues,
+            refresh_orphans,
+        )
+
+        async def _mesa_startup() -> None:
+            """Import sidecar profiles and prime trigger/orphan caches."""
+            try:
+                count = await async_import_sidecar_profiles(hass, data.mesa)
+                if count:
+                    _LOGGER.info("ATM MESA: imported %d developer domain profile(s)", count)
+                await async_refresh_trigger_issues(hass, data.mesa)
+                refresh_orphans(hass, data.mesa)
+            except Exception:  # noqa: BLE001 - background priming must not crash setup
+                _LOGGER.warning("ATM MESA: startup priming failed", exc_info=True)
+
+        mesa_task = hass.async_create_background_task(_mesa_startup(), "atm_mesa_startup")
+        entry.async_on_unload(mesa_task.cancel)
+
+        async def _on_automation_reloaded(_event=None) -> None:
+            await async_refresh_trigger_issues(hass, data.mesa)
+            refresh_orphans(hass, data.mesa)
+
+        # "automation_reloaded" is fired by HA's automation component on reload;
+        # listen by string so we do not force-import that component.
+        entry.async_on_unload(
+            hass.bus.async_listen("automation_reloaded", _on_automation_reloaded)
+        )
+
     return True
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    """Tear down ATM: terminate SSE connections, unload sensor platform, remove panel."""
+    """Tear down ATM: unload sensor platform, remove panel."""
     data: ATMData = hass.data.get(DOMAIN)
     if data is not None:
         data.shutting_down = True
-        for token_id in list(data.sse_connections.keys()):
-            await terminate_token_connections(token_id, data.sse_connections)
         await data.audit.async_save()
 
-    from .panel import remove_atm_panel
+    from .panel import remove_atm_panel, remove_mesa_inject
+    remove_mesa_inject(hass)
     remove_atm_panel(hass)
 
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)

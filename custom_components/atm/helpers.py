@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-import asyncio
 import hashlib
 import json
 import logging
 import re
 import time
+from dataclasses import dataclass
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
@@ -16,8 +16,26 @@ from homeassistant.core import callback
 from homeassistant.helpers.event import async_call_later
 from homeassistant.util.dt import parse_datetime, utcnow
 
-from .const import BLOCKED_DOMAINS, DOMAIN, MAX_REQUEST_BODY_BYTES, SENSITIVE_ATTRIBUTES, TOKEN_LENGTH, TOKEN_PREFIX
-from .policy_engine import Permission, parse_relative_time, resolve
+from .const import (
+    BLOCKED_DOMAINS,
+    CAP_ALLOW,
+    CAP_CONFIRM,
+    CAP_DENY,
+    CAPABILITY_NAMES,
+    DOMAIN,
+    MAX_REQUEST_BODY_BYTES,
+    PASS_THROUGH_EXEMPT_CAPS,
+    SENSITIVE_ATTRIBUTES,
+    TOKEN_LENGTH,
+    TOKEN_PREFIX,
+)
+from .policy_engine import (
+    Permission,
+    is_sensitive_key,
+    parse_relative_time,
+    resolve,
+    template_blocklist_vars,
+)
 from .token_store import token_name_slug
 
 if TYPE_CHECKING:
@@ -141,6 +159,7 @@ def log_request(
     outcome: str,
     client_ip: str,
     payload: dict | None = None,
+    mesa_advisory: bool = False,
 ) -> None:
     """Record an audit entry and update in-memory token counters."""
     data.audit.record(
@@ -154,6 +173,7 @@ def log_request(
         settings=data.store.get_settings(),
         pass_through=token.pass_through,
         payload=payload,
+        mesa_advisory=mesa_advisory,
     )
     update_token_counter(data, token.id, outcome)
 
@@ -346,9 +366,8 @@ async def archive_expired_token(
 ) -> None:
     """Move an expired token to the archive and perform full cleanup.
 
-    Archives the record to storage, terminates SSE connections, destroys
-    rate limiter and counter state, fires the atm_token_expired bus event,
-    and removes sensor entities.
+    Archives the record to storage, destroys rate limiter and counter state,
+    fires the atm_token_expired bus event, and removes sensor entities.
     """
     now = utcnow()
     slug = token_name_slug(token.name)
@@ -356,7 +375,6 @@ async def archive_expired_token(
     archived = await data.store.async_archive_token(token.id, revoked=False, revoked_at=now)
     if archived is None:
         return
-    await terminate_token_connections(token.id, data.sse_connections)
     data.rate_limiter.destroy(token.id)
     data.rate_limit_notified.pop(token.id, None)
     data.token_counters.pop(token.id, None)
@@ -372,46 +390,6 @@ async def archive_expired_token(
             _LOGGER.warning(
                 "Sensor cleanup failed for expired token %s", token.id, exc_info=True,
             )
-
-
-async def terminate_token_connections(
-    token_id: str,
-    sse_connections: dict[str, set[asyncio.Queue]],
-) -> None:
-    """Signal all SSE queues for a token to close and remove them from the registry.
-
-    Puts None (the sentinel) into each queue so the SSE loop exits cleanly.
-    """
-    queues = sse_connections.pop(token_id, set())
-    for queue in queues:
-        try:
-            queue.put_nowait(None)
-        except asyncio.QueueFull:
-            # Queue is at capacity (slow/disconnected client). Evict one message to
-            # make room for the sentinel so the SSE loop exits without blocking.
-            try:
-                queue.get_nowait()
-            except asyncio.QueueEmpty:
-                pass
-            queue.put_nowait(None)
-
-
-def notify_tools_list_changed(
-    token_id: str,
-    sse_connections: dict[str, set[asyncio.Queue]],
-) -> None:
-    """Push a notifications/tools/list_changed MCP notification to all SSE sessions for a token.
-
-    Non-blocking - uses put_nowait and silently drops if a queue is full.
-    Does not remove connections from the registry.
-    """
-    notification = {"jsonrpc": "2.0", "method": "notifications/tools/list_changed"}
-    queues = sse_connections.get(token_id, set())
-    for queue in queues:
-        try:
-            queue.put_nowait(notification)
-        except asyncio.QueueFull:
-            pass
 
 
 class _ContextProxy(dict):
@@ -537,9 +515,190 @@ class FilteredStates:
         return _DomainFilteredStates(entities)
 
 
+_SAFE_TEMPLATE_ENV = None
+
+
+def safe_template_env():
+    """Return the cached hass-less TemplateEnvironment used for token template renders.
+
+    A TemplateEnvironment constructed without hass never registers the hass-aware
+    helpers (states, expand, area_entities, integration_entities, ...) as globals,
+    filters, or tests, so entity access exists only through the permission-filtered
+    variables ATM injects. Rendering in the full hass environment and shadowing
+    globals with render variables is NOT safe: Jinja2 variables never shadow
+    filters or tests, so {{ 'sensor.x' | states }} would bypass the sandbox.
+    """
+    global _SAFE_TEMPLATE_ENV
+    if _SAFE_TEMPLATE_ENV is None:
+        from homeassistant.helpers.template import TemplateEnvironment  # noqa: PLC0415
+        _SAFE_TEMPLATE_ENV = TemplateEnvironment(None)
+    return _SAFE_TEMPLATE_ENV
+
+
+def render_template_for_token(template_str: str, token: TokenRecord, hass: HomeAssistant) -> str:
+    """Render a Jinja2 template against the token's permitted entity state.
+
+    Renders in safe_template_env() with permission-restricted replacements for the
+    HA state helpers and pure dt_util shims for the time helpers the hass-less
+    environment lacks. Raises (TemplateError, ValueError, jinja2 errors) on any
+    failure; callers map exceptions to an invalid_request response.
+    """
+    from homeassistant.helpers.template import MAX_TEMPLATE_OUTPUT  # noqa: PLC0415
+    from homeassistant.exceptions import TemplateError  # noqa: PLC0415
+    from homeassistant.util import dt as dt_util  # noqa: PLC0415
+
+    permitted = build_permitted_states(token, hass)
+    filtered_states = FilteredStates(permitted)
+
+    # Permission-restricted versions of the HA template state helpers.
+    def _state_attr(entity_id: str, attr: str):
+        s = permitted.get(entity_id)
+        return s.attributes.get(attr) if s is not None else None
+
+    def _is_state(entity_id: str, value: str) -> bool:
+        s = permitted.get(entity_id)
+        return s is not None and s.state == value
+
+    def _is_state_attr(entity_id: str, attr: str, value) -> bool:
+        s = permitted.get(entity_id)
+        return s is not None and s.attributes.get(attr) == value
+
+    def _has_value(entity_id: str) -> bool:
+        s = permitted.get(entity_id)
+        return s is not None and s.state not in ("unknown", "unavailable")
+
+    # Time helpers absent from the hass-less environment. These mirror HA's
+    # DateTimeExtension implementations; they touch only dt_util, never entities.
+    def _today_at(time_str: str = "") -> datetime:
+        today = dt_util.start_of_local_day()
+        if not time_str:
+            return today
+        parsed = dt_util.parse_time(time_str)
+        if parsed is None:
+            raise ValueError(f"could not convert str to datetime: '{time_str}'")
+        return datetime.combine(today, parsed, today.tzinfo)
+
+    def _localize(value: datetime) -> datetime:
+        return value if value.tzinfo else dt_util.as_local(value)
+
+    def _relative_time(value):
+        if not isinstance(value, datetime):
+            return value
+        value = _localize(value)
+        return value if dt_util.now() < value else dt_util.get_age(value)
+
+    def _time_since(value, precision: int = 1):
+        if not isinstance(value, datetime):
+            return value
+        value = _localize(value)
+        return value if dt_util.now() < value else dt_util.get_age(value, precision)
+
+    def _time_until(value, precision: int = 1):
+        if not isinstance(value, datetime):
+            return value
+        value = _localize(value)
+        return value if dt_util.now() > value else dt_util.get_time_remaining(value, precision)
+
+    variables = {
+        "states": filtered_states,
+        "state_attr": _state_attr,
+        "is_state": _is_state,
+        "is_state_attr": _is_state_attr,
+        "has_value": _has_value,
+        "now": dt_util.now,
+        "utcnow": dt_util.utcnow,
+        "today_at": _today_at,
+        "relative_time": _relative_time,
+        "time_since": _time_since,
+        "time_until": _time_until,
+        # Defense in depth: these names do not exist in the hass-less environment,
+        # but spec section 3.4 requires the enumeration helpers to return empty
+        # values rather than raise, so keep the stubs as render variables.
+        **template_blocklist_vars(),
+    }
+
+    compiled = safe_template_env().from_string(template_str)
+    rendered = compiled.render(variables)
+    if len(rendered) > MAX_TEMPLATE_OUTPUT:
+        raise TemplateError(
+            f"Template output exceeded maximum size of {MAX_TEMPLATE_OUTPUT} characters"
+        )
+    return rendered.strip()
+
+
 _LOG_LEVEL_RANK: dict[str, int] = {"DEBUG": 0, "INFO": 1, "WARNING": 2, "ERROR": 3, "CRITICAL": 3}
 _ATM_TOKEN_SCRUB_RE = re.compile(r"atm_[0-9a-f]{64}", re.IGNORECASE)
+# Home Assistant long-lived access tokens (and other JWTs) are three base64url
+# segments whose header always begins "eyJ". Redact so a leaked LLAT in a log
+# line is not handed back to a token holding cap_log_read.
+_JWT_SCRUB_RE = re.compile(r"eyJ[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{6,}")
+# Credentials embedded in URLs/log text: query params (token=..., api_password=...)
+# and userinfo (https://user:pass@host). Over-redaction in logs is acceptable.
+_URL_CRED_QUERY_RE = re.compile(
+    r"(?i)(access_token|refresh_token|api_password|password|api_key|apikey|client_secret|secret|token|auth)=[^\s&\"';]+"
+)
+_URL_CRED_USERINFO_RE = re.compile(r"://[^/\s:@]+:[^/\s:@]+@")
 _ATM_LOGGER_PREFIXES = ("homeassistant.components.atm", "custom_components.atm")
+
+
+def _scrub_log_text(text: str) -> str:
+    """Redact ATM tokens, JWTs/LLATs, and URL-embedded credentials from a log line."""
+    text = _ATM_TOKEN_SCRUB_RE.sub("<atm-token>", text)
+    text = _JWT_SCRUB_RE.sub("<token>", text)
+    text = _URL_CRED_QUERY_RE.sub(r"\1=<redacted>", text)
+    text = _URL_CRED_USERINFO_RE.sub("://<redacted>@", text)
+    return text
+
+
+# A "key: value" or "key = value" line in a YAML/config diff, capturing the
+# leading key so its value can be redacted when the key name looks sensitive.
+_CONFIG_SECRET_LINE_RE = re.compile(r"^(\s*)([\w.\-]+)(\s*[:=]\s*)(\S.*)$")
+
+
+def redact_secrets_in_text(text: str | None) -> str | None:
+    """Redact secret-valued config lines and embedded credentials from diff text.
+
+    Applied to approval diffs (file writes, configuration.yaml edits) before they
+    persist to .storage so secrets are not copied to disk verbatim. A line whose
+    key name is sensitive (is_sensitive_key) has its value replaced; JWTs and
+    URL-embedded credentials anywhere in the text are scrubbed too. The structure
+    of the change stays visible to the reviewing admin.
+    """
+    if not text:
+        return text
+    out: list[str] = []
+    for line in text.split("\n"):
+        m = _CONFIG_SECRET_LINE_RE.match(line)
+        if m is not None and is_sensitive_key(m.group(2)):
+            out.append(f"{m.group(1)}{m.group(2)}{m.group(3)}<redacted>")
+        else:
+            out.append(line)
+    return _scrub_log_text("\n".join(out))
+
+
+def redact_structure(obj: Any, _depth: int = 0) -> Any:
+    """Recursively redact secrets from a JSON-able structure.
+
+    A dict value whose key name is sensitive (is_sensitive_key) becomes
+    "<redacted>"; string values are scrubbed for secret-valued config lines and
+    embedded credentials (redact_secrets_in_text). Other scalars pass through
+    unchanged. Used for audit payloads and the admin-facing copy of approval
+    args so secrets are never serialised verbatim. Recursion is depth-bounded so
+    a pathologically nested payload cannot raise RecursionError on the logging
+    path; subtrees past the limit collapse to "<redacted>".
+    """
+    if _depth > 25:
+        return "<redacted>"
+    if isinstance(obj, dict):
+        return {
+            k: "<redacted>" if is_sensitive_key(k) else redact_structure(v, _depth + 1)
+            for k, v in obj.items()
+        }
+    if isinstance(obj, list):
+        return [redact_structure(item, _depth + 1) for item in obj]
+    if isinstance(obj, str):
+        return redact_secrets_in_text(obj)
+    return obj
 
 
 def collect_log_entries(hass: Any, level: str, integration: str | None, limit: int) -> list[dict]:
@@ -577,8 +736,8 @@ def collect_log_entries(hass: Any, level: str, integration: str | None, limit: i
             "first_occurred": getattr(record, "first_occurred", 0),
             "level": record_level,
             "logger": logger_name,
-            "message": _ATM_TOKEN_SCRUB_RE.sub("<atm-token>", msg),
-            "exception": _ATM_TOKEN_SCRUB_RE.sub("<atm-token>", exc_str) if exc_str else None,
+            "message": _scrub_log_text(msg),
+            "exception": _scrub_log_text(exc_str) if exc_str else None,
             "occurrences": getattr(record, "count", 1),
         })
     entries.sort(key=lambda e: e["timestamp"], reverse=True)
@@ -608,3 +767,127 @@ def update_token_counter(data: ATMData, token_id: str, outcome: str) -> None:
     for sensor in data.token_id_sensors.get(token_id, []):
         if sensor.hass is not None:
             sensor.async_write_ha_state()
+
+
+# Capability evaluation
+# ---------------------
+# evaluate_capability returns one of three results:
+#   ("allow", None)          -> proceed to side-effect.
+#   ("deny", None)           -> return forbidden to caller.
+#   ("confirm", approval_id) -> create pending approval, return pending response.
+#
+# effective_cap collapses pass_through interaction into a single value used by
+# self-summary endpoints. It is NOT a substitute for evaluate_capability when
+# enforcing a check, because it does not go through the approval queue.
+
+
+def effective_cap(token: TokenRecord, cap_name: str) -> str:
+    """Return the cap mode after applying pass_through interaction rules.
+
+    Exempt caps are unaffected by pass_through. For non-exempt caps under
+    pass_through, "deny" becomes "allow" but "confirm" is preserved
+    (the admin's intent to gate is honored).
+    """
+    raw = getattr(token, cap_name, CAP_DENY)
+    if cap_name in PASS_THROUGH_EXEMPT_CAPS:
+        return raw
+    if token.pass_through:
+        if raw == CAP_CONFIRM:
+            return CAP_CONFIRM
+        return CAP_ALLOW
+    return raw
+
+
+def token_has_write_scope(token: TokenRecord) -> bool:
+    """True if the token can write to at least one entity.
+
+    Used to decide whether to announce the control tools (call_service, the
+    native Hass* action tools) in the MCP tools/list. Pass-through always has
+    write scope; otherwise any GREEN grant in the permission tree counts. This
+    is an advisory over-approximation (a GREEN under a RED ancestor still counts
+    here), which is fine: the per-call permission check is the real gate.
+    """
+    if token.pass_through:
+        return True
+    tree = token.permissions
+    for nodes in (tree.domains, tree.devices, tree.entities):
+        for node in nodes.values():
+            if node.state == "GREEN":
+                return True
+    return False
+
+
+def effective_caps(token: TokenRecord) -> dict[str, str]:
+    """Return the full cap_*->effective_mode mapping for a token."""
+    return {name: effective_cap(token, name) for name in CAPABILITY_NAMES}
+
+
+@dataclass
+class CapabilityResult:
+    """Outcome of an evaluate_capability call.
+
+    mode is one of "allow" / "deny" / "confirm". When mode is "confirm",
+    approval is the freshly created PendingApproval record and the caller
+    must return a pending response without executing.
+    """
+
+    mode: str
+    approval: Any | None = None
+
+    @property
+    def is_allow(self) -> bool:
+        return self.mode == CAP_ALLOW
+
+    @property
+    def is_deny(self) -> bool:
+        return self.mode == CAP_DENY
+
+    @property
+    def is_pending(self) -> bool:
+        return self.mode == CAP_CONFIRM
+
+
+async def evaluate_capability(
+    cap_name: str,
+    token: TokenRecord,
+    hass: HomeAssistant,
+    data: ATMData,
+    *,
+    tool_name: str,
+    args: dict,
+    request_id: str,
+    diff: dict | None = None,
+    client_ip: str | None = None,
+) -> CapabilityResult:
+    """Resolve a capability check into Allow / Deny / Pending(approval).
+
+    Reads the effective cap mode (after pass-through interaction) and either
+    permits, denies, or creates a pending approval and returns a Confirm result.
+    Diff is supplied by the caller; it appears in the admin review UI.
+    """
+    from .approvals import (  # noqa: PLC0415
+        create_approval_notification,
+        create_pending_approval,
+        fire_approval_requested_event,
+    )
+
+    mode = effective_cap(token, cap_name)
+    if mode == CAP_ALLOW:
+        return CapabilityResult(CAP_ALLOW)
+    if mode == CAP_DENY:
+        return CapabilityResult(CAP_DENY)
+    async with data.store.async_lock:
+        approval = await create_pending_approval(
+            data.store,
+            token_id=token.id,
+            token_name=token.name,
+            tool_name=tool_name,
+            cap_name=cap_name,
+            args=args,
+            diff=diff or {},
+            request_id=request_id,
+            client_ip=client_ip,
+        )
+    create_approval_notification(hass, approval)
+    fire_approval_requested_event(hass, approval)
+    return CapabilityResult(CAP_CONFIRM, approval=approval)

@@ -8,7 +8,7 @@ import json
 import logging
 import re
 import uuid
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from aiohttp import web
 from homeassistant.components.http import HomeAssistantView
@@ -16,11 +16,29 @@ from homeassistant.components.http.const import KEY_AUTHENTICATED, KEY_HASS_USER
 from homeassistant.helpers import entity_registry as er_mod
 from homeassistant.util.dt import parse_datetime, utcnow
 
-from .const import ATM_VERSION, BLOCKED_DOMAINS, DOMAIN, GITHUB_URL, MAX_REQUEST_BODY_BYTES, MIN_HA_VERSION, TOKEN_NAME_REGEX
+from .const import (
+    ATM_VERSION,
+    BLOCKED_DOMAINS,
+    CAP_CONFIRM,
+    CAP_MODES,
+    CAPABILITY_NAMES,
+    CONFIRM_AVAILABLE_CAPS,
+    DOMAIN,
+    GITHUB_URL,
+    MAX_REQUEST_BODY_BYTES,
+    MESA_CONFIRM_CAP,
+    MESA_MODES,
+    MIN_HA_VERSION,
+    PERSONA_NAMES,
+    TOKEN_NAME_REGEX,
+)
 from .data import ATMData
-from .helpers import cancel_expiry_timer, notify_tools_list_changed, terminate_token_connections
+from .helpers import cancel_expiry_timer
 from .policy_engine import Permission, get_effective_hint, resolve
 from .token_store import PermissionTree, VALID_NODE_STATES, token_name_slug
+
+if TYPE_CHECKING:
+    from homeassistant.core import HomeAssistant
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -163,10 +181,12 @@ def _build_entity_tree(hass: Any) -> dict:
     from homeassistant.helpers import area_registry as ar
     from homeassistant.helpers import device_registry as dr
     from homeassistant.helpers import entity_registry as er
+    from homeassistant.helpers import label_registry as lr
 
     entity_reg = er.async_get(hass)
     device_reg = dr.async_get(hass)
     area_reg = ar.async_get(hass)
+    label_reg = lr.async_get(hass)
 
     tree: dict[str, dict] = {}
 
@@ -207,12 +227,27 @@ def _build_entity_tree(hass: Any) -> dict:
             area = area_reg.async_get_area(area_id)
             area_name = area.name if area else None
 
+        # Effective labels follow HA label-target semantics: the entity's own
+        # labels plus those of its device. Used by the "Select by Label" picker.
+        label_ids: set[str] = set(entry.labels)
+        if entry.device_id:
+            dev_for_labels = device_reg.async_get(entry.device_id)
+            if dev_for_labels:
+                label_ids |= dev_for_labels.labels
+        labels = []
+        for lid in label_ids:
+            lbl = label_reg.async_get_label(lid)
+            if lbl is not None:
+                labels.append({"id": lid, "name": lbl.name})
+        labels.sort(key=lambda x: x["name"].lower())
+
         entity_info: dict[str, Any] = {
             "entity_id": entity_id,
             "friendly_name": friendly_name,
             "device_id": entry.device_id,
             "area_id": area_id,
             "area_name": area_name,
+            "labels": labels,
         }
 
         if entry.device_id:
@@ -453,26 +488,55 @@ class ATMAdminTokenView(HomeAssistantView):
         if isinstance(body, web.Response):
             return body
 
-        if "name" in body or "expires_at" in body:
-            return _err("invalid_request", "name and expires_at are immutable after token creation.", 400, rid)
+        if "expires_at" in body:
+            return _err("invalid_request", "expires_at is immutable after token creation.", 400, rid)
 
+        old_name: str | None = None
         async with data.store.async_lock:
             token = data.store.get_token_by_id(token_id)
             if token is None:
                 return _err("not_found", "Token not found.", 404, rid)
+            old_name = token.name
+
+            if "name" in body:
+                new_name = body["name"]
+                if not new_name or not isinstance(new_name, str):
+                    return _err("invalid_request", "name is required.", 400, rid)
+                if not TOKEN_NAME_REGEX.match(new_name):
+                    return _err("invalid_request", "name must be 3-32 characters: letters, numbers, hyphens, or underscores.", 400, rid)
+                if data.store.name_slug_exists(new_name, exclude_token_id=token_id):
+                    return _err("invalid_request", "A token with this name already exists.", 400, rid)
 
             if "pass_through" in body:
                 enabling = bool(body["pass_through"])
                 if enabling and not token.pass_through and not body.get("confirm_pass_through"):
                     return _err("invalid_request", "confirm_pass_through: true is required when enabling pass_through.", 400, rid)
 
-            patchable = {
-                k: v for k, v in body.items()
-                if k in ("pass_through", "use_assist_exposure", "rate_limit_requests", "rate_limit_burst",
-                         "allow_automation_write", "allow_script_write", "allow_config_read",
-                         "allow_template_render", "allow_restart", "allow_physical_control",
-                         "allow_service_response", "allow_broadcast", "allow_log_read")
-            }
+            allowed_keys = {
+                "name", "pass_through", "use_assist_exposure", "announce_all_tools",
+                "rate_limit_requests", "rate_limit_burst", "persona",
+            } | set(CAPABILITY_NAMES)
+            patchable = {k: v for k, v in body.items() if k in allowed_keys}
+            if "announce_all_tools" in patchable and not isinstance(patchable["announce_all_tools"], bool):
+                return _err("invalid_request", "announce_all_tools must be a boolean.", 400, rid)
+            for cap_name in set(CAPABILITY_NAMES) & patchable.keys():
+                value = patchable[cap_name]
+                if value not in CAP_MODES:
+                    return _err(
+                        "invalid_request",
+                        f"{cap_name} must be one of: deny, allow, confirm.",
+                        400,
+                        rid,
+                    )
+                if value == CAP_CONFIRM and cap_name not in CONFIRM_AVAILABLE_CAPS:
+                    return _err(
+                        "invalid_request",
+                        f"{cap_name} does not support 'confirm' mode.",
+                        400,
+                        rid,
+                    )
+            if "persona" in patchable and patchable["persona"] not in PERSONA_NAMES:
+                return _err("invalid_request", "Unknown persona.", 400, rid)
             if "use_assist_exposure" in patchable:
                 resulting_pass_through = bool(patchable.get("pass_through", token.pass_through))
                 if not resulting_pass_through:
@@ -489,14 +553,6 @@ class ATMAdminTokenView(HomeAssistantView):
                         return _err("invalid_request", f"{rl_field} must not exceed 100000.", 400, rid)
             updated = await data.store.async_patch_token(token_id, **patchable)
 
-        _TOOLS_LIST_FLAGS = {
-            "pass_through", "use_assist_exposure", "allow_automation_write", "allow_script_write",
-            "allow_config_read", "allow_template_render", "allow_restart",
-            "allow_physical_control", "allow_service_response", "allow_broadcast", "allow_log_read",
-        }
-        if patchable.keys() & _TOOLS_LIST_FLAGS:
-            notify_tools_list_changed(token_id, data.sse_connections)
-
         user = request[KEY_HASS_USER]
         data.audit.record(
             request_id=rid,
@@ -508,11 +564,28 @@ class ATMAdminTokenView(HomeAssistantView):
             client_ip=request.remote or "",
             settings=data.store.get_settings(),
         )
+
+        # A rename changes the token-name slug that the per-token sensors and
+        # device are keyed on, so rebuild them under the new name (remove the old
+        # slug's entities, recreate for the new). Best-effort: never fail the patch.
+        if updated is not None and old_name is not None and updated.name != old_name:
+            old_slug = token_name_slug(old_name)
+            if data.async_on_token_archived:
+                try:
+                    await data.async_on_token_archived(old_slug)
+                except Exception:  # noqa: BLE001
+                    _LOGGER.warning("Sensor cleanup failed renaming token %s; registry may have a ghost entry", token_id, exc_info=True)
+            if data.async_on_token_created:
+                try:
+                    await data.async_on_token_created(updated)
+                except Exception:  # noqa: BLE001
+                    _LOGGER.warning("Sensor recreate failed renaming token %s", token_id, exc_info=True)
+
         return _ok(updated.to_dict(), request_id=rid)
 
     @require_admin
     async def delete(self, request: web.Request, token_id: str) -> web.Response:
-        """Revoke a token. Archives it, terminates its SSE connections, fires the bus event."""
+        """Revoke a token. Archives it and fires the bus event."""
 
         rid = request["atm_rid"]
         hass = self.hass
@@ -530,7 +603,6 @@ class ATMAdminTokenView(HomeAssistantView):
             await data.store.async_archive_token(token_id, revoked=True, revoked_at=now)
             cancel_expiry_timer(data, token_id)
 
-        await terminate_token_connections(token_id, data.sse_connections)
         data.rate_limiter.destroy(token_id)
         data.rate_limit_notified.pop(token_id, None)
         data.token_counters.pop(token_id, None)
@@ -737,7 +809,7 @@ class ATMAdminResolveView(HomeAssistantView):
             Permission.NOT_FOUND: "NOT_FOUND",
         }
 
-        effective_hint = get_effective_hint(token, entity_id, hass)
+        effective_hint = get_effective_hint(token, entity_id, hass, data.store.get_entity_hints())
 
         return _ok({
             "entity_id": entity_id,
@@ -799,17 +871,8 @@ class ATMAdminScopeView(HomeAssistantView):
             "token_name": token.name,
             "readable": sorted(readable),
             "writable": sorted(writable),
-            "capability_flags": {
-                "allow_config_read": token.allow_config_read,
-                "allow_template_render": token.allow_template_render,
-                "allow_automation_write": token.allow_automation_write,
-                "allow_script_write": token.allow_script_write,
-                "allow_service_response": token.allow_service_response,
-                "allow_restart": token.allow_restart,
-                "allow_physical_control": token.allow_physical_control,
-                "allow_broadcast": token.allow_broadcast,
-                "allow_log_read": token.allow_log_read,
-            },
+            "persona": token.persona,
+            "capability_flags": {name: getattr(token, name) for name in CAPABILITY_NAMES},
         }, request_id=rid)
 
 
@@ -846,6 +909,67 @@ class ATMAdminEntityTreeView(HomeAssistantView):
         )
 
 
+class ATMAdminEntityHintsView(HomeAssistantView):
+    """GET /api/atm/admin/entity-hints - the global entity-hint map (entity_id -> hint)."""
+
+    url = "/api/atm/admin/entity-hints"
+    name = "api:atm:admin:entity_hints"
+    requires_auth = True
+
+    @require_admin
+    async def get(self, request: web.Request) -> web.Response:
+        rid = request["atm_rid"]
+        data: ATMData = self.hass.data[DOMAIN]
+        return _ok({"entity_hints": dict(data.store.get_entity_hints())}, request_id=rid)
+
+
+class ATMAdminEntityHintView(HomeAssistantView):
+    """PUT /api/atm/admin/entity-hints/{entity_id} - set or clear one global entity hint.
+
+    A global hint applies to every token that can see the entity. It is distinct
+    from a per-token permission-node hint, which always takes precedence.
+    """
+
+    url = "/api/atm/admin/entity-hints/{entity_id}"
+    name = "api:atm:admin:entity_hint"
+    requires_auth = True
+
+    @require_admin
+    async def put(self, request: web.Request, entity_id: str) -> web.Response:
+        rid = request["atm_rid"]
+        if not _ENTITY_RE.match(entity_id):
+            return _err("invalid_request", "Invalid entity ID format.", 400, rid)
+        data: ATMData = self.hass.data[DOMAIN]
+
+        body = await _read_body(request, rid)
+        if isinstance(body, web.Response):
+            return body
+
+        hint = body.get("hint")
+        if hint is not None:
+            if not isinstance(hint, str):
+                return _err("invalid_request", "hint must be a string.", 400, rid)
+            hint = hint.strip()
+            if len(hint) > 200:
+                return _err("invalid_request", "hint must be 200 characters or fewer.", 400, rid)
+
+        async with data.store.async_lock:
+            await data.store.async_set_entity_hint(entity_id, hint or None)
+
+        user = request[KEY_HASS_USER]
+        data.audit.record(
+            request_id=rid,
+            token_id="admin",
+            token_name=f"admin:{user.id}",
+            method=request.method,
+            resource=request.path,
+            outcome="allowed",
+            client_ip=request.remote or "",
+            settings=data.store.get_settings(),
+        )
+        return _ok({"entity_hints": dict(data.store.get_entity_hints())}, request_id=rid)
+
+
 class ATMAdminTokenStatsView(HomeAssistantView):
     """GET /api/atm/admin/tokens/{token_id}/stats - in-memory counters for one token."""
 
@@ -879,6 +1003,36 @@ class ATMAdminTokenStatsView(HomeAssistantView):
             "rate_limit_hits": counters["rate_limit_hits"],
             "last_used_at": last_used,
             "status": status,
+        }, request_id=rid)
+
+
+class ATMAdminTokenConnectionView(HomeAssistantView):
+    """GET /api/atm/admin/tokens/{token_id}/connection - connection signals.
+
+    Used by the onboarding wizard to detect when a token's MCP client has
+    connected. The Streamable HTTP transport is stateless and registers no
+    session, so ``request_count`` is the signal: any authenticated MCP request
+    bumps it. The wizard treats the token as connected once it is above zero.
+    """
+
+    url = "/api/atm/admin/tokens/{token_id}/connection"
+    name = "api:atm:admin:token_connection"
+    requires_auth = True
+
+    @require_admin
+    async def get(self, request: web.Request, token_id: str) -> web.Response:
+        rid = request["atm_rid"]
+        data: ATMData = self.hass.data[DOMAIN]
+        token = data.store.get_token_by_id(token_id)
+        if token is None:
+            return _err("not_found", "Token not found.", 404, rid)
+
+        counters = data.token_counters.get(token_id, {})
+        last_used = token.last_used_at.isoformat() if token.last_used_at else None
+
+        return _ok({
+            "last_used_at": last_used,
+            "request_count": counters.get("request_count", 0),
         }, request_id=rid)
 
 
@@ -980,15 +1134,20 @@ class ATMAdminSettingsView(HomeAssistantView):
         _BOOL_SETTINGS = frozenset({
             "kill_switch", "disable_all_logging", "log_allowed", "log_denied",
             "log_rate_limited", "log_entity_names", "log_client_ip", "notify_on_rate_limit",
+            "notify_on_approval", "mesa_inject_enabled",
         })
         patchable = {
             k: v for k, v in body.items()
-            if k in _BOOL_SETTINGS | {"audit_flush_interval", "audit_log_maxlen"}
+            if k in _BOOL_SETTINGS | {"audit_flush_interval", "audit_log_maxlen", "mesa_mode"}
         }
         for key in _BOOL_SETTINGS:
             if key in patchable:
                 if not isinstance(patchable[key], bool):
                     return _err("invalid_request", f"{key!r} must be a boolean (true or false).", 400, rid)
+
+        if "mesa_mode" in patchable:
+            if patchable["mesa_mode"] not in MESA_MODES:
+                return _err("invalid_request", f"mesa_mode must be one of: {sorted(MESA_MODES)}.", 400, rid)
 
         if "audit_flush_interval" in patchable:
             try:
@@ -1013,17 +1172,20 @@ class ATMAdminSettingsView(HomeAssistantView):
         if "audit_log_maxlen" in patchable:
             data.audit.resize(patchable["audit_log_maxlen"])
 
-        if "kill_switch" in patchable:
-            new_kill_switch = updated.kill_switch
-            if not old_kill_switch and new_kill_switch:
-                # Kill switch just activated: terminate all open SSE connections.
-                for token_id in list(data.sse_connections.keys()):
-                    await terminate_token_connections(token_id, data.sse_connections)
-            elif old_kill_switch and not new_kill_switch:
-                # Kill switch just deactivated: re-register routes if not already registered.
-                if not data.routes_registered and data.async_register_routes:
-                    await data.async_register_routes()
-                    data.routes_registered = True
+        if "mesa_mode" in patchable and data.mesa is not None:
+            data.mesa.set_mode(updated.mesa_mode)
+
+        if "kill_switch" in patchable and old_kill_switch and not updated.kill_switch:
+            # Kill switch just deactivated: re-register routes if not already registered.
+            if not data.routes_registered and data.async_register_routes:
+                await data.async_register_routes()
+                data.routes_registered = True
+
+        if "mesa_inject_enabled" in patchable:
+            # Add/remove the in-context profile injector module. Takes effect on the
+            # next full HA page load (already-open tabs are unaffected).
+            from .panel import async_sync_mesa_inject
+            await async_sync_mesa_inject(self.hass)
 
         user = request[KEY_HASS_USER]
         data.audit.record(
@@ -1061,25 +1223,17 @@ class ATMAdminWipeView(HomeAssistantView):
         user = request[KEY_HASS_USER]
 
         async with data.store.async_lock:
-            for token_id in list(data.sse_connections.keys()):
-                await terminate_token_connections(token_id, data.sse_connections)
-
             data.rate_limiter.destroy_all()
             data.rate_limit_notified.clear()
             data.token_counters.clear()
             await data.audit.async_wipe()
+            await data.versions.async_wipe()
 
             for _tid in list(data.expiry_timers):
                 cancel_expiry_timer(data, _tid)
 
             active_slugs = [token_name_slug(t.name) for t in data.store.list_tokens()]
             await data.store.async_wipe()
-
-        # Clear mcp_sessions after storage wipe so any sessions created during the
-        # async yields above (audit wipe, lock acquisition) are also removed.
-        # Increment wipe_epoch so any ghost SSE heartbeat loops detect the wipe and exit.
-        data.mcp_sessions.clear()
-        data.wipe_epoch += 1
 
         if not data.routes_registered and data.async_register_routes:
             await data.async_register_routes()
@@ -1099,11 +1253,6 @@ class ATMAdminWipeView(HomeAssistantView):
         # be called for token IDs that no longer exist. Since the wipe removes all
         # tokens, there are no valid sensors left regardless.
         data.token_id_sensors.clear()
-
-        # Second pass: terminate any SSE connections established during the race window
-        # between the first termination pass and the storage wipe completing.
-        for token_id in list(data.sse_connections.keys()):
-            await terminate_token_connections(token_id, data.sse_connections)
 
         data.audit.record(
             request_id=rid,
@@ -1141,8 +1290,6 @@ class ATMAdminTokenRotateView(HomeAssistantView):
 
         token, raw_token = result
 
-        await terminate_token_connections(token_id, data.sse_connections)
-
         hass.bus.async_fire("atm_token_rotated", {
             "token_id": token.id,
             "token_name": token.name,
@@ -1166,6 +1313,964 @@ class ATMAdminTokenRotateView(HomeAssistantView):
         return _ok(response_body, request_id=rid)
 
 
+class ATMAdminApprovalsView(HomeAssistantView):
+    """GET /api/atm/admin/approvals - list approvals, optionally filtered by status/token."""
+
+    url = "/api/atm/admin/approvals"
+    name = "api:atm:admin:approvals"
+    requires_auth = True
+
+    @require_admin
+    async def get(self, request: web.Request) -> web.Response:
+        from .approvals import list_approvals  # noqa: PLC0415
+
+        rid = request["atm_rid"]
+        hass = self.hass
+        data: ATMData = hass.data[DOMAIN]
+        status = request.query.get("status")
+        token_id = request.query.get("token_id")
+        try:
+            limit = int(request.query.get("limit", "50"))
+        except (TypeError, ValueError):
+            limit = 50
+        try:
+            offset = int(request.query.get("offset", "0"))
+        except (TypeError, ValueError):
+            offset = 0
+        records = list_approvals(data.store, status=status, token_id=token_id)
+        total = len(records)
+        records = records[offset:offset + limit]
+        return _ok({
+            "approvals": [r.to_dict() for r in records],
+            "total": total,
+            "limit": limit,
+            "offset": offset,
+        }, request_id=rid)
+
+
+class ATMAdminApprovalView(HomeAssistantView):
+    """GET / DELETE /api/atm/admin/approvals/{approval_id}.
+
+    DELETE is an alias for reject with reason 'admin_cancelled'.
+    """
+
+    url = "/api/atm/admin/approvals/{approval_id}"
+    name = "api:atm:admin:approval"
+    requires_auth = True
+
+    @require_admin
+    async def get(self, request: web.Request, approval_id: str) -> web.Response:
+        from .approvals import get_approval  # noqa: PLC0415
+
+        rid = request["atm_rid"]
+        hass = self.hass
+        data: ATMData = hass.data[DOMAIN]
+        record = get_approval(data.store, approval_id)
+        if record is None:
+            return _err("not_found", "Approval not found.", 404, rid)
+        return _ok(record.to_dict(), request_id=rid)
+
+    @require_admin
+    async def delete(self, request: web.Request, approval_id: str) -> web.Response:
+        return await _resolve_approval(
+            self.hass, request, approval_id,
+            terminal_status="cancelled",
+            auto_reason="admin_cancelled",
+        )
+
+
+class ATMAdminApprovalApproveView(HomeAssistantView):
+    """POST /api/atm/admin/approvals/{approval_id}/approve."""
+
+    url = "/api/atm/admin/approvals/{approval_id}/approve"
+    name = "api:atm:admin:approval_approve"
+    requires_auth = True
+
+    @require_admin
+    async def post(self, request: web.Request, approval_id: str) -> web.Response:
+        return await _approve_approval(self.hass, request, approval_id)
+
+
+class ATMAdminApprovalRejectView(HomeAssistantView):
+    """POST /api/atm/admin/approvals/{approval_id}/reject."""
+
+    url = "/api/atm/admin/approvals/{approval_id}/reject"
+    name = "api:atm:admin:approval_reject"
+    requires_auth = True
+
+    @require_admin
+    async def post(self, request: web.Request, approval_id: str) -> web.Response:
+        rid = request["atm_rid"]
+        body = await _read_body(request, rid)
+        if isinstance(body, web.Response):
+            return body
+        reason = body.get("reason") if isinstance(body, dict) else None
+        if reason is not None and not isinstance(reason, str):
+            return _err("invalid_request", "reason must be a string.", 400, rid)
+        return await _resolve_approval(
+            self.hass, request, approval_id,
+            terminal_status="rejected",
+            auto_reason=reason,
+        )
+
+
+async def _resolve_approval(
+    hass,
+    request: web.Request,
+    approval_id: str,
+    *,
+    terminal_status: str,
+    auto_reason: str | None,
+) -> web.Response:
+    """Reject or cancel a pending approval. Idempotent on already-resolved records."""
+    from .approvals import (  # noqa: PLC0415
+        dismiss_approval_notification,
+        fire_approval_resolved_event,
+        get_approval,
+        update_approval_status,
+    )
+
+    rid = request["atm_rid"]
+    data: ATMData = hass.data[DOMAIN]
+    user = request[KEY_HASS_USER]
+    async with data.store.async_lock:
+        record = get_approval(data.store, approval_id)
+        if record is None:
+            return _err("not_found", "Approval not found.", 404, rid)
+        if record.is_terminal():
+            return _ok(record.to_dict(), request_id=rid)
+        if approval_id in data.approvals_in_progress:
+            return _err("conflict", "Approval is already being processed.", 409, rid)
+        updated = await update_approval_status(
+            data.store,
+            approval_id,
+            status=terminal_status,
+            approved_by_user_id=user.id,
+            rejected_reason=auto_reason,
+        )
+    if updated is None:
+        return _err("not_found", "Approval not found.", 404, rid)
+    dismiss_approval_notification(hass, approval_id)
+    fire_approval_resolved_event(hass, updated)
+    data.audit.record(
+        request_id=rid,
+        token_id="admin",
+        token_name=f"admin:{user.id}",
+        method=f"approval/{terminal_status}",
+        resource=f"approval:{updated.tool_name}:{approval_id}",
+        outcome="denied",
+        client_ip="",
+        settings=data.store.get_settings(),
+    )
+    return _ok(updated.to_dict(), request_id=rid)
+
+
+async def _approve_approval(hass: HomeAssistant, request: web.Request, approval_id: str) -> web.Response:
+    """Validate, execute, and finalize a previously-pending approval."""
+    from .approvals import (  # noqa: PLC0415
+        REASON_CAPABILITY_DENIED,
+        REASON_KILL_SWITCH,
+        REASON_TOKEN_INACTIVE,
+        STATUS_APPROVED,
+        STATUS_CANCELLED,
+        STATUS_REJECTED,
+        dismiss_approval_notification,
+        fire_approval_resolved_event,
+        get_approval,
+        update_approval_status,
+    )
+    from .helpers import effective_cap  # noqa: PLC0415
+    from .mcp_view import execute_approved_tool  # noqa: PLC0415
+
+    rid = request["atm_rid"]
+    data: ATMData = hass.data[DOMAIN]
+    user = request[KEY_HASS_USER]
+
+    async with data.store.async_lock:
+        record = get_approval(data.store, approval_id)
+        if record is None:
+            return _err("not_found", "Approval not found.", 404, rid)
+        if record.is_terminal():
+            return _ok(record.to_dict(), request_id=rid)
+
+        token = data.store.get_token_by_id(record.token_id)
+        if token is None or not token.is_valid():
+            await update_approval_status(
+                data.store, approval_id,
+                status=STATUS_CANCELLED,
+                approved_by_user_id=user.id,
+                rejected_reason=REASON_TOKEN_INACTIVE,
+            )
+            updated = get_approval(data.store, approval_id)
+            if updated:
+                dismiss_approval_notification(hass, approval_id)
+                fire_approval_resolved_event(hass, updated)
+            return _err("not_found", "Token no longer active.", 409, rid)
+
+        # The MESA sentinel cap is not a real token capability, so effective_cap
+        # would auto-deny it. The MESA re-evaluation happens inside the executor
+        # instead (it rejects entities that became prohibited/read_only).
+        if record.cap_name != MESA_CONFIRM_CAP and effective_cap(token, record.cap_name) == "deny":
+            await update_approval_status(
+                data.store, approval_id,
+                status=STATUS_REJECTED,
+                approved_by_user_id=user.id,
+                rejected_reason=REASON_CAPABILITY_DENIED,
+            )
+            updated = get_approval(data.store, approval_id)
+            if updated:
+                dismiss_approval_notification(hass, approval_id)
+                fire_approval_resolved_event(hass, updated)
+            return _err("forbidden", "Capability is now denied for this token.", 409, rid)
+
+        settings = data.store.get_settings()
+        if settings.kill_switch:
+            await update_approval_status(
+                data.store, approval_id,
+                status=STATUS_CANCELLED,
+                approved_by_user_id=user.id,
+                rejected_reason=REASON_KILL_SWITCH,
+            )
+            updated = get_approval(data.store, approval_id)
+            if updated:
+                dismiss_approval_notification(hass, approval_id)
+                fire_approval_resolved_event(hass, updated)
+            return _err("service_unavailable", "Kill switch engaged.", 503, rid)
+
+        # Atomic claim before releasing the lock: a second concurrent approve
+        # that finds this id already claimed is rejected, so the saved side
+        # effect runs exactly once even under a double-click / double POST.
+        if approval_id in data.approvals_in_progress:
+            return _err("conflict", "Approval is already being processed.", 409, rid)
+        data.approvals_in_progress.add(approval_id)
+
+    # Execute outside the lock so the tool can use it freely. The claim is
+    # released in the finally below so a failed execution stays retryable while
+    # a successful one cannot be re-run.
+    try:
+        try:
+            tool_result, outcome, _resource = await execute_approved_tool(
+                record.tool_name, record.args, token, hass, data,
+            )
+        except KeyError:
+            return _err("invalid_request", "No executor registered for this tool.", 400, rid)
+        except Exception:
+            _LOGGER.exception("Approval execution failed for %s", approval_id)
+            return _err("internal_error", "Execution failed.", 500, rid)
+
+        is_error = bool(tool_result.get("isError"))
+        saved_result = {"tool_result": tool_result, "outcome": outcome}
+        final_status = STATUS_REJECTED if is_error else STATUS_APPROVED
+        auto_reason = "execution_failed" if is_error else None
+        audit_outcome = "allowed" if final_status == STATUS_APPROVED else "denied"
+
+        def _record_execution_audit(payload: dict | None = None) -> None:
+            data.audit.record(
+                request_id=rid,
+                token_id=record.token_id,
+                token_name=record.token_name,
+                method=f"approval/{final_status}",
+                resource=f"approval:{record.tool_name}:{approval_id}",
+                outcome=audit_outcome,
+                client_ip="",
+                settings=settings,
+                payload=payload,
+            )
+
+        async with data.store.async_lock:
+            updated = await update_approval_status(
+                data.store, approval_id,
+                status=final_status,
+                approved_by_user_id=user.id,
+                rejected_reason=auto_reason,
+                result=saved_result,
+            )
+        if updated is None:
+            _record_execution_audit({
+                "finalization": "missing_after_execution",
+                "executor_outcome": outcome,
+            })
+            return _err("not_found", "Approval not found.", 404, rid)
+        if updated.status != final_status:
+            _record_execution_audit({
+                "finalization": "conflict",
+                "stored_status": updated.status,
+                "executor_outcome": outcome,
+            })
+            return _err("conflict", "Approval was already resolved.", 409, rid)
+        dismiss_approval_notification(hass, approval_id)
+        fire_approval_resolved_event(hass, updated)
+        _record_execution_audit()
+        return _ok(updated.to_dict(), request_id=rid)
+    finally:
+        data.approvals_in_progress.discard(approval_id)
+
+
+# ---------------------------------------------------------------------------
+# MESA profile administration
+# ---------------------------------------------------------------------------
+
+
+def _mesa_runtime(hass, rid):
+    """Return the MESA runtime, or an error response when MESA is unavailable."""
+    data: ATMData = hass.data[DOMAIN]
+    if data.mesa is None:
+        return None, _err("service_unavailable", "MESA is not available.", 503, rid)
+    return data.mesa, None
+
+
+def _audit_admin(hass, request, rid, resource) -> None:
+    data: ATMData = hass.data[DOMAIN]
+    user = request[KEY_HASS_USER]
+    data.audit.record(
+        request_id=rid,
+        token_id="admin",
+        token_name=f"admin:{user.id}",
+        method=request.method,
+        resource=resource,
+        outcome="allowed",
+        client_ip=request.remote or "",
+        settings=data.store.get_settings(),
+    )
+
+
+class ATMAdminMesaProfilesView(HomeAssistantView):
+    """GET /api/atm/admin/mesa/profiles - list stored entity profiles (paginated)."""
+
+    url = "/api/atm/admin/mesa/profiles"
+    name = "api:atm:admin:mesa:profiles"
+    requires_auth = True
+
+    @require_admin
+    async def get(self, request: web.Request) -> web.Response:
+        rid = request["atm_rid"]
+        runtime, err = _mesa_runtime(self.hass, rid)
+        if err is not None:
+            return err
+
+        from .mesa_core.exceptions import InvalidCursorError  # noqa: PLC0415
+
+        q = request.query
+        tag = q.get("tag")
+        area = q.get("area")
+        try:
+            limit = int(q.get("limit", 50))
+        except (TypeError, ValueError):
+            return _err("invalid_request", "limit must be an integer.", 400, rid)
+        try:
+            domain = q.get("domain")
+            result = runtime.store.query(
+                domains=[domain] if domain else None,
+                tags=[tag] if tag else None,
+                areas=[area] if area else None,
+                origin=q.get("origin"),
+                include_inferred=True,  # admin sees every origin, including inferred
+                limit=limit,
+                cursor=q.get("cursor"),
+            )
+        except InvalidCursorError as exc:
+            return _err("invalid_request", str(exc), 400, rid)
+        except ValueError as exc:
+            return _err("invalid_request", str(exc), 400, rid)
+
+        return _ok(
+            {
+                "profiles": [
+                    {"entity_id": row.entity_id, "document": row.stored.to_dict()}
+                    for row in result.rows
+                ],
+                "total_matched": result.total_matched,
+                "has_more": result.has_more,
+                "next_cursor": result.next_cursor,
+            },
+            request_id=rid,
+        )
+
+
+class ATMAdminMesaProfileView(HomeAssistantView):
+    """GET/PUT/DELETE /api/atm/admin/mesa/profiles/{entity_id} - one entity profile."""
+
+    url = "/api/atm/admin/mesa/profiles/{entity_id}"
+    name = "api:atm:admin:mesa:profile"
+    requires_auth = True
+
+    @require_admin
+    async def get(self, request: web.Request, entity_id: str) -> web.Response:
+        rid = request["atm_rid"]
+        runtime, err = _mesa_runtime(self.hass, rid)
+        if err is not None:
+            return err
+        stored = runtime.store.get(entity_id)
+        effective = runtime.store.get_effective(entity_id)
+        explanation = runtime.resolver.explain(entity_id)
+        return _ok(
+            {
+                "entity_id": entity_id,
+                "stored": stored.to_dict() if stored is not None else None,
+                "effective": effective.to_dict(),
+                "explanation": explanation.to_dict(),
+            },
+            request_id=rid,
+        )
+
+    @require_admin
+    async def put(self, request: web.Request, entity_id: str) -> web.Response:
+        rid = request["atm_rid"]
+        runtime, err = _mesa_runtime(self.hass, rid)
+        if err is not None:
+            return err
+
+        if not _ENTITY_RE.match(entity_id):
+            return _err("invalid_request", "Invalid entity ID format.", 400, rid)
+
+        body = await _read_body(request, rid)
+        if isinstance(body, web.Response):
+            return body
+
+        from .mesa import read_automation_configs  # noqa: PLC0415
+        from .mesa_core import MetadataOrigin, SemanticProfile  # noqa: PLC0415
+        from .mesa_core.exceptions import MesaValidationError  # noqa: PLC0415
+
+        try:
+            profile = SemanticProfile.from_dict(
+                entity_id, body, default_origin=MetadataOrigin.USER
+            )
+        except MesaValidationError as exc:
+            return _err("invalid_request", str(exc), 400, rid)
+
+        async with runtime.lock:
+            runtime.store.set(entity_id, profile)
+            await runtime.async_save()
+
+        # Cross-check the new profile against the automation registry.
+        configs = await self.hass.async_add_executor_job(read_automation_configs, self.hass)
+        issues = runtime.validator.validate_entity(entity_id, lambda: configs)
+
+        _audit_admin(self.hass, request, rid, request.path)
+        return _ok(
+            {
+                "entity_id": entity_id,
+                "stored": profile.to_dict(),
+                "warnings": [_issue_to_dict(i) for i in issues],
+            },
+            request_id=rid,
+        )
+
+    @require_admin
+    async def delete(self, request: web.Request, entity_id: str) -> web.Response:
+        rid = request["atm_rid"]
+        runtime, err = _mesa_runtime(self.hass, rid)
+        if err is not None:
+            return err
+        async with runtime.lock:
+            runtime.store.delete(entity_id)
+            await runtime.async_save()
+        _audit_admin(self.hass, request, rid, request.path)
+        return _ok({"entity_id": entity_id, "deleted": True}, request_id=rid)
+
+
+class ATMAdminMesaDomainsView(HomeAssistantView):
+    """GET /api/atm/admin/mesa/domains - list all stored domain-level profiles."""
+
+    url = "/api/atm/admin/mesa/domains"
+    name = "api:atm:admin:mesa:domains"
+    requires_auth = True
+
+    @require_admin
+    async def get(self, request: web.Request) -> web.Response:
+        rid = request["atm_rid"]
+        runtime, err = _mesa_runtime(self.hass, rid)
+        if err is not None:
+            return err
+        domains = []
+        for domain in sorted(runtime.store.domain_keys()):
+            stored = runtime.store.get_domain_profile(domain)
+            if stored is not None:
+                domains.append({"domain": domain, "document": stored.to_dict()})
+        return _ok({"domains": domains}, request_id=rid)
+
+
+class ATMAdminMesaAreasView(HomeAssistantView):
+    """GET /api/atm/admin/mesa/areas - list all stored area-level profiles."""
+
+    url = "/api/atm/admin/mesa/areas"
+    name = "api:atm:admin:mesa:areas"
+    requires_auth = True
+
+    @require_admin
+    async def get(self, request: web.Request) -> web.Response:
+        rid = request["atm_rid"]
+        runtime, err = _mesa_runtime(self.hass, rid)
+        if err is not None:
+            return err
+        areas = []
+        for area_id in sorted(runtime.store.area_keys()):
+            stored = runtime.store.get_area_profile(area_id)
+            if stored is not None:
+                areas.append({"area_id": area_id, "document": stored.to_dict()})
+        return _ok({"areas": areas}, request_id=rid)
+
+
+class ATMAdminMesaDomainView(HomeAssistantView):
+    """GET/PUT/DELETE /api/atm/admin/mesa/domains/{domain} - one domain-level profile."""
+
+    url = "/api/atm/admin/mesa/domains/{domain}"
+    name = "api:atm:admin:mesa:domain"
+    requires_auth = True
+
+    @require_admin
+    async def get(self, request: web.Request, domain: str) -> web.Response:
+        rid = request["atm_rid"]
+        runtime, err = _mesa_runtime(self.hass, rid)
+        if err is not None:
+            return err
+        stored = runtime.store.get_domain_profile(domain)
+        return _ok(
+            {"domain": domain, "stored": stored.to_dict() if stored is not None else None},
+            request_id=rid,
+        )
+
+    @require_admin
+    async def put(self, request: web.Request, domain: str) -> web.Response:
+        rid = request["atm_rid"]
+        runtime, err = _mesa_runtime(self.hass, rid)
+        if err is not None:
+            return err
+        if not _DOMAIN_RE.match(domain):
+            return _err("invalid_request", "Invalid domain name.", 400, rid)
+        body = await _read_body(request, rid)
+        if isinstance(body, web.Response):
+            return body
+
+        from .mesa_core import MetadataOrigin, SemanticProfile  # noqa: PLC0415
+        from .mesa_core.exceptions import MesaValidationError  # noqa: PLC0415
+
+        try:
+            profile = SemanticProfile.from_dict(domain, body, default_origin=MetadataOrigin.USER)
+        except MesaValidationError as exc:
+            return _err("invalid_request", str(exc), 400, rid)
+
+        async with runtime.lock:
+            runtime.store.set_domain_profile(domain, profile)
+            await runtime.async_save()
+        _audit_admin(self.hass, request, rid, request.path)
+        return _ok({"domain": domain, "stored": profile.to_dict()}, request_id=rid)
+
+    @require_admin
+    async def delete(self, request: web.Request, domain: str) -> web.Response:
+        rid = request["atm_rid"]
+        runtime, err = _mesa_runtime(self.hass, rid)
+        if err is not None:
+            return err
+        async with runtime.lock:
+            runtime.store.delete_domain_profile(domain)
+            await runtime.async_save()
+        _audit_admin(self.hass, request, rid, request.path)
+        return _ok({"domain": domain, "deleted": True}, request_id=rid)
+
+
+class ATMAdminMesaIntegrationsView(HomeAssistantView):
+    """GET /api/atm/admin/mesa/integrations - list all stored integration-level profiles.
+
+    Integration profiles (MESA inheritance level between area and domain) are keyed
+    by the integration's component name and govern the entities that integration
+    created, regardless of entity domain. Vendor sidecars import here.
+    """
+
+    url = "/api/atm/admin/mesa/integrations"
+    name = "api:atm:admin:mesa:integrations"
+    requires_auth = True
+
+    @require_admin
+    async def get(self, request: web.Request) -> web.Response:
+        rid = request["atm_rid"]
+        runtime, err = _mesa_runtime(self.hass, rid)
+        if err is not None:
+            return err
+        integrations = []
+        for integration in sorted(runtime.store.integration_keys()):
+            stored = runtime.store.get_integration_profile(integration)
+            if stored is not None:
+                integrations.append({"integration": integration, "document": stored.to_dict()})
+        return _ok({"integrations": integrations}, request_id=rid)
+
+
+class ATMAdminMesaIntegrationView(HomeAssistantView):
+    """GET/PUT/DELETE /api/atm/admin/mesa/integrations/{integration} - one profile."""
+
+    url = "/api/atm/admin/mesa/integrations/{integration}"
+    name = "api:atm:admin:mesa:integration"
+    requires_auth = True
+
+    @require_admin
+    async def get(self, request: web.Request, integration: str) -> web.Response:
+        rid = request["atm_rid"]
+        runtime, err = _mesa_runtime(self.hass, rid)
+        if err is not None:
+            return err
+        stored = runtime.store.get_integration_profile(integration)
+        return _ok(
+            {"integration": integration, "stored": stored.to_dict() if stored is not None else None},
+            request_id=rid,
+        )
+
+    @require_admin
+    async def put(self, request: web.Request, integration: str) -> web.Response:
+        rid = request["atm_rid"]
+        runtime, err = _mesa_runtime(self.hass, rid)
+        if err is not None:
+            return err
+        # Integration/component names share HA's domain character set.
+        if not _DOMAIN_RE.match(integration):
+            return _err("invalid_request", "Invalid integration name.", 400, rid)
+        body = await _read_body(request, rid)
+        if isinstance(body, web.Response):
+            return body
+
+        from .mesa_core import MetadataOrigin, SemanticProfile  # noqa: PLC0415
+        from .mesa_core.exceptions import MesaValidationError  # noqa: PLC0415
+
+        try:
+            profile = SemanticProfile.from_dict(integration, body, default_origin=MetadataOrigin.USER)
+        except MesaValidationError as exc:
+            return _err("invalid_request", str(exc), 400, rid)
+
+        async with runtime.lock:
+            runtime.store.set_integration_profile(integration, profile)
+            await runtime.async_save()
+        _audit_admin(self.hass, request, rid, request.path)
+        return _ok({"integration": integration, "stored": profile.to_dict()}, request_id=rid)
+
+    @require_admin
+    async def delete(self, request: web.Request, integration: str) -> web.Response:
+        rid = request["atm_rid"]
+        runtime, err = _mesa_runtime(self.hass, rid)
+        if err is not None:
+            return err
+        async with runtime.lock:
+            runtime.store.delete_integration_profile(integration)
+            await runtime.async_save()
+        _audit_admin(self.hass, request, rid, request.path)
+        return _ok({"integration": integration, "deleted": True}, request_id=rid)
+
+
+class ATMAdminMesaIntegrationOptionsView(HomeAssistantView):
+    """GET /api/atm/admin/mesa/integration-options - integrations that have entities.
+
+    Powers the "Add integration profile" picker. `id` is the component name (the key
+    an integration profile is stored under); `name` is the integration's friendly
+    title. Limited to integrations that created entities, since those are the only
+    ones an integration profile can govern. ATM's own domain is excluded.
+    """
+
+    url = "/api/atm/admin/mesa/integration-options"
+    name = "api:atm:admin:mesa:integration-options"
+    requires_auth = True
+
+    @require_admin
+    async def get(self, request: web.Request) -> web.Response:
+        rid = request["atm_rid"]
+        registry = er_mod.async_get(self.hass)
+        domains = sorted(
+            {e.platform for e in registry.entities.values() if e.platform and e.platform != DOMAIN}
+        )
+        names: dict[str, str] = {}
+        try:
+            from homeassistant.loader import async_get_integrations  # noqa: PLC0415
+
+            for dom, integ in (await async_get_integrations(self.hass, domains)).items():
+                if not isinstance(integ, BaseException):
+                    names[dom] = getattr(integ, "name", None) or dom
+        except Exception:  # noqa: BLE001 - friendly names are best-effort
+            pass
+        options = [{"id": dom, "name": names.get(dom, dom)} for dom in domains]
+        return _ok({"integrations": options}, request_id=rid)
+
+
+class ATMAdminMesaAreaView(HomeAssistantView):
+    """GET/PUT/DELETE /api/atm/admin/mesa/areas/{area_id} - one area-level profile."""
+
+    url = "/api/atm/admin/mesa/areas/{area_id}"
+    name = "api:atm:admin:mesa:area"
+    requires_auth = True
+
+    @require_admin
+    async def get(self, request: web.Request, area_id: str) -> web.Response:
+        rid = request["atm_rid"]
+        runtime, err = _mesa_runtime(self.hass, rid)
+        if err is not None:
+            return err
+        stored = runtime.store.get_area_profile(area_id)
+        return _ok(
+            {"area_id": area_id, "stored": stored.to_dict() if stored is not None else None},
+            request_id=rid,
+        )
+
+    @require_admin
+    async def put(self, request: web.Request, area_id: str) -> web.Response:
+        rid = request["atm_rid"]
+        runtime, err = _mesa_runtime(self.hass, rid)
+        if err is not None:
+            return err
+        node_err = _validate_node_id("area", area_id, rid)
+        if node_err is not None:
+            return node_err
+        body = await _read_body(request, rid)
+        if isinstance(body, web.Response):
+            return body
+
+        from .mesa_core import MetadataOrigin, SemanticProfile  # noqa: PLC0415
+        from .mesa_core.exceptions import MesaValidationError  # noqa: PLC0415
+
+        try:
+            profile = SemanticProfile.from_dict(area_id, body, default_origin=MetadataOrigin.USER)
+        except MesaValidationError as exc:
+            return _err("invalid_request", str(exc), 400, rid)
+
+        async with runtime.lock:
+            runtime.store.set_area_profile(area_id, profile)
+            await runtime.async_save()
+        _audit_admin(self.hass, request, rid, request.path)
+        return _ok({"area_id": area_id, "stored": profile.to_dict()}, request_id=rid)
+
+    @require_admin
+    async def delete(self, request: web.Request, area_id: str) -> web.Response:
+        rid = request["atm_rid"]
+        runtime, err = _mesa_runtime(self.hass, rid)
+        if err is not None:
+            return err
+        async with runtime.lock:
+            runtime.store.delete_area_profile(area_id)
+            await runtime.async_save()
+        _audit_admin(self.hass, request, rid, request.path)
+        return _ok({"area_id": area_id, "deleted": True}, request_id=rid)
+
+
+class ATMAdminMesaVocabularyView(HomeAssistantView):
+    """GET /api/atm/admin/mesa/vocabulary - the canonical MESA tag registry.
+
+    Lets the admin UI source tag autocomplete from mesa-core directly, so the
+    frontend never duplicates (and never drifts from) the canonical vocabulary.
+    """
+
+    url = "/api/atm/admin/mesa/vocabulary"
+    name = "api:atm:admin:mesa:vocabulary"
+    requires_auth = True
+
+    @require_admin
+    async def get(self, request: web.Request) -> web.Response:
+        rid = request["atm_rid"]
+        from .mesa_core import vocabulary  # noqa: PLC0415
+        return _ok(
+            {
+                "canonical_tags": sorted(vocabulary.CANONICAL_TAGS),
+                "canonical_roots": sorted(vocabulary.CANONICAL_ROOTS),
+            },
+            request_id=rid,
+        )
+
+
+class ATMAdminMesaDefaultsView(HomeAssistantView):
+    """GET/PUT /api/atm/admin/mesa/defaults - deployment defaults for unprofiled entities."""
+
+    url = "/api/atm/admin/mesa/defaults"
+    name = "api:atm:admin:mesa:defaults"
+    requires_auth = True
+
+    @require_admin
+    async def get(self, request: web.Request) -> web.Response:
+        rid = request["atm_rid"]
+        runtime, err = _mesa_runtime(self.hass, rid)
+        if err is not None:
+            return err
+        defaults = runtime.store.get_deployment_defaults()
+        return _ok(
+            {"deployment_defaults": defaults.to_dict() if defaults is not None else None},
+            request_id=rid,
+        )
+
+    @require_admin
+    async def put(self, request: web.Request) -> web.Response:
+        rid = request["atm_rid"]
+        runtime, err = _mesa_runtime(self.hass, rid)
+        if err is not None:
+            return err
+        body = await _read_body(request, rid)
+        if isinstance(body, web.Response):
+            return body
+        try:
+            async with runtime.lock:
+                runtime.store.set_deployment_defaults(body)
+                await runtime.async_save()
+        except (ValueError, KeyError) as exc:
+            return _err("invalid_request", f"Invalid deployment defaults: {exc}", 400, rid)
+        _audit_admin(self.hass, request, rid, request.path)
+        stored = runtime.store.get_deployment_defaults()
+        return _ok(
+            {"deployment_defaults": stored.to_dict() if stored is not None else None},
+            request_id=rid,
+        )
+
+
+class ATMAdminMesaIssuesView(HomeAssistantView):
+    """GET /api/atm/admin/mesa/issues - TriggerValidator issues and orphaned profiles."""
+
+    url = "/api/atm/admin/mesa/issues"
+    name = "api:atm:admin:mesa:issues"
+    requires_auth = True
+
+    @require_admin
+    async def get(self, request: web.Request) -> web.Response:
+        rid = request["atm_rid"]
+        runtime, err = _mesa_runtime(self.hass, rid)
+        if err is not None:
+            return err
+        if request.query.get("refresh"):
+            from .mesa import async_refresh_trigger_issues, refresh_orphans  # noqa: PLC0415
+
+            await async_refresh_trigger_issues(self.hass, runtime)
+            refresh_orphans(self.hass, runtime)
+        return _ok(
+            {
+                "issues": [_issue_to_dict(i) for i in runtime.trigger_issues],
+                "orphans": list(runtime.orphans),
+                "orphan_areas": list(runtime.orphan_areas),
+                "orphan_integrations": list(runtime.orphan_integrations),
+            },
+            request_id=rid,
+        )
+
+
+def _issue_to_dict(issue) -> dict:
+    """Serialise a mesa-core ValidationIssue dataclass."""
+    import dataclasses  # noqa: PLC0415
+
+    return dataclasses.asdict(issue)
+
+
+def _version_summary(r) -> dict:
+    """Compact list projection that omits the (potentially large) before/after configs."""
+    return {
+        "id": r.id,
+        "resource_type": r.resource_type,
+        "resource_id": r.resource_id,
+        "alias": r.alias,
+        "action": r.action,
+        "token_id": r.token_id,
+        "token_name": r.token_name,
+        "approved_by_user_id": r.approved_by_user_id,
+        "timestamp": r.timestamp,
+        "has_before": r.before is not None,
+        "has_after": r.after is not None,
+    }
+
+
+class ATMAdminVersionsView(HomeAssistantView):
+    """GET /api/atm/admin/versions - configuration version history for one resource.
+
+    Requires resource_type and resource_id query params. Returns compact summaries
+    (no before/after); fetch a single version for the full diff payload.
+    """
+
+    url = "/api/atm/admin/versions"
+    name = "api:atm:admin:versions"
+    requires_auth = True
+
+    @require_admin
+    async def get(self, request: web.Request) -> web.Response:
+        rid = request["atm_rid"]
+        data: ATMData = self.hass.data[DOMAIN]
+        resource_type = request.query.get("resource_type")
+        resource_id = request.query.get("resource_id")
+        if resource_type and resource_id:
+            records = data.versions.list_for(resource_type, resource_id)
+        elif not resource_type and not resource_id:
+            try:
+                limit = int(request.query.get("limit", "50"))
+            except (TypeError, ValueError):
+                limit = 50
+            records = data.versions.list_recent(limit)
+        else:
+            return _err("invalid_request", "Provide both resource_type and resource_id, or neither for the recent feed.", 400, rid)
+        return _ok({
+            "resource_type": resource_type,
+            "resource_id": resource_id,
+            "versions": [_version_summary(r) for r in records],
+            "total": len(records),
+        }, request_id=rid)
+
+
+class ATMAdminVersionView(HomeAssistantView):
+    """GET /api/atm/admin/versions/{version_id} - one version with full before/after."""
+
+    url = "/api/atm/admin/versions/{version_id}"
+    name = "api:atm:admin:version"
+    requires_auth = True
+
+    @require_admin
+    async def get(self, request: web.Request, version_id: str) -> web.Response:
+        rid = request["atm_rid"]
+        data: ATMData = self.hass.data[DOMAIN]
+        record = data.versions.get(version_id)
+        if record is None:
+            return _err("not_found", "Version not found.", 404, rid)
+        return _ok(record.to_dict(), request_id=rid)
+
+
+class ATMAdminVersionRestoreView(HomeAssistantView):
+    """POST /api/atm/admin/versions/{version_id}/restore - re-apply a stored version.
+
+    Existing resources are edited; deleted ones are recreated. Runs with admin
+    authority and records the change as a 'rollback' attributed to the admin.
+    """
+
+    url = "/api/atm/admin/versions/{version_id}/restore"
+    name = "api:atm:admin:version:restore"
+    requires_auth = True
+
+    @require_admin
+    async def post(self, request: web.Request, version_id: str) -> web.Response:
+        from .mcp_view import restore_version  # noqa: PLC0415
+
+        rid = request["atm_rid"]
+        user = request[KEY_HASS_USER]
+        data: ATMData = self.hass.data[DOMAIN]
+        record = data.versions.get(version_id)
+        if record is None:
+            return _err("not_found", "Version not found.", 404, rid)
+        try:
+            body = await request.json()
+        except Exception:  # noqa: BLE001 - empty/invalid body means default side
+            body = {}
+        side = body.get("side") if isinstance(body, dict) else None
+        if side not in (None, "before", "after"):
+            return _err("invalid_request", "side must be 'before' or 'after'.", 400, rid)
+        try:
+            tool_result, _outcome, _resource = await restore_version(record, user.id, self.hass, data, side)
+        except Exception:  # noqa: BLE001
+            _LOGGER.exception("Version restore failed for %s", version_id)
+            return _err("internal_error", "Restore failed.", 500, rid)
+        is_error = bool(tool_result.get("isError"))
+        data.audit.record(
+            request_id=rid,
+            token_id=record.token_id,
+            token_name=record.token_name,
+            method="version/restore",
+            resource=f"version_restore:{record.resource_type}:{record.resource_id}",
+            outcome="denied" if is_error else "allowed",
+            client_ip="",
+            settings=data.store.get_settings(),
+        )
+        if is_error:
+            return _err("invalid_request", "Restore could not be applied to the current configuration.", 400, rid)
+        return _ok({
+            "restored": True,
+            "version_id": version_id,
+            "resource_type": record.resource_type,
+            "resource_id": record.resource_id,
+        }, request_id=rid)
+
+
 ALL_ADMIN_VIEWS: list[type[HomeAssistantView]] = [
     ATMAdminInfoView,
     ATMAdminArchivedTokensView,
@@ -1180,9 +2285,31 @@ ALL_ADMIN_VIEWS: list[type[HomeAssistantView]] = [
     ATMAdminTokenRotateView,
     ATMAdminScopeView,
     ATMAdminEntityTreeView,
+    ATMAdminEntityHintsView,
+    ATMAdminEntityHintView,
     ATMAdminTokenStatsView,
+    ATMAdminTokenConnectionView,
     ATMAdminTokenAuditView,
     ATMAdminAuditView,
     ATMAdminSettingsView,
     ATMAdminWipeView,
+    ATMAdminApprovalsView,
+    ATMAdminApprovalView,
+    ATMAdminApprovalApproveView,
+    ATMAdminApprovalRejectView,
+    ATMAdminVersionsView,
+    ATMAdminVersionView,
+    ATMAdminVersionRestoreView,
+    ATMAdminMesaProfilesView,
+    ATMAdminMesaProfileView,
+    ATMAdminMesaDomainsView,
+    ATMAdminMesaDomainView,
+    ATMAdminMesaIntegrationsView,
+    ATMAdminMesaIntegrationView,
+    ATMAdminMesaIntegrationOptionsView,
+    ATMAdminMesaAreasView,
+    ATMAdminMesaAreaView,
+    ATMAdminMesaVocabularyView,
+    ATMAdminMesaDefaultsView,
+    ATMAdminMesaIssuesView,
 ]

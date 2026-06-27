@@ -1,6 +1,8 @@
 import React, { useState, useCallback, useEffect } from "react";
 import type { EntityTree, DomainTree, PermissionTree, NodeState } from "../types";
 import { PermissionSelector } from "./PermissionSelector";
+import { MesaProfileLink } from "./MesaProfileLink";
+import { Modal } from "./Modal";
 import { api } from "../api";
 import { HIGH_RISK_DOMAINS } from "../utils";
 
@@ -14,6 +16,23 @@ interface Props {
   onPermissionsChange: (tree: PermissionTree) => void;
   onEntityClick?: (entityId: string, depth?: "entity" | "device" | "domain") => void;
   collapseKey?: number;
+  // When set, only these domains render. Used by the onboarding wizard to show
+  // a single, less-daunting domain (e.g. ["light"]).
+  domainAllowlist?: string[];
+  // When set, the tree expands the path to this entity and scrolls it into view
+  // (e.g. after selecting it in the Permission Summary card).
+  revealEntity?: string;
+  // Which node the reveal targets. For "domain"/"device" the matching group
+  // header is flashed and scrolled to (revealEntity is a representative child);
+  // for "entity" the entity row itself is the target. Defaults to "entity".
+  revealDepth?: "entity" | "device" | "domain";
+  // Bumped by the parent on every reveal request so re-selecting the same
+  // target still re-runs the expand/scroll effects.
+  revealNonce?: number;
+  // Entities that have a MESA profile, and the handler to open one. When given,
+  // each entity row shows a "MESA"/"+" jump to its profile.
+  mesaProfileEntities?: Set<string>;
+  onOpenMesa?: (entityId: string) => void;
 }
 
 function effectivePermission(
@@ -63,27 +82,45 @@ interface HintInputProps {
   tokenId: string;
   entityId: string;
   currentHint: string | null;
+  globalHint: string | null;
   currentState: NodeState;
   onSaved: (tree: PermissionTree) => void;
+  onGlobalHintsChange: (hints: Record<string, string>) => void;
 }
 
-function HintInput({ tokenId, entityId, currentHint, currentState, onSaved }: HintInputProps) {
+function HintInput({ tokenId, entityId, currentHint, globalHint, currentState, onSaved, onGlobalHintsChange }: HintInputProps) {
   const [open, setOpen] = useState(false);
-  const [value, setValue] = useState(currentHint ?? "");
+  const [allTokens, setAllTokens] = useState(true);
+  const [value, setValue] = useState("");
   const [saving, setSaving] = useState(false);
 
-  useEffect(() => {
-    setValue(currentHint ?? "");
-  }, [currentHint]);
+  function openModal() {
+    setAllTokens(true);
+    setValue(globalHint ?? "");
+    setOpen(true);
+  }
+
+  function switchScope(all: boolean) {
+    setAllTokens(all);
+    // Load the target scope's saved hint if it has one, but never wipe the box:
+    // switching scope must not discard text the admin is in the middle of writing.
+    const target = all ? globalHint : currentHint;
+    if (target) setValue(target);
+  }
 
   async function save() {
     setSaving(true);
     try {
-      const tree = await api.patchEntityPermission(tokenId, entityId, {
-        state: currentState,
-        hint: value.trim() || null,
-      });
-      onSaved(tree);
+      if (allTokens) {
+        const r = await api.setEntityHint(entityId, value.trim() || null);
+        onGlobalHintsChange(r.entity_hints);
+      } else {
+        const tree = await api.patchEntityPermission(tokenId, entityId, {
+          state: currentState,
+          hint: value.trim() || null,
+        });
+        onSaved(tree);
+      }
       setOpen(false);
     } catch {
       // ignore
@@ -93,28 +130,52 @@ function HintInput({ tokenId, entityId, currentHint, currentState, onSaved }: Hi
   }
 
   if (!open) {
+    const hasHint = !!currentHint || !!globalHint;
     return (
-      <button className="tree-hint-link" onClick={() => setOpen(true)}>
-        {currentHint ? "Edit hint" : "Add hint"}
+      <button className="tree-hint-link" onClick={openModal}>
+        {hasHint ? "Edit hint" : "Add hint"}
       </button>
     );
   }
 
   return (
-    <span className="hint-input-row">
+    <Modal titleId="hint-modal-title" onClose={saving ? undefined : () => setOpen(false)}>
+      <h3 className="modal-title" id="hint-modal-title">Entity hint</h3>
+      <p className="hint-modal-entity">{entityId}</p>
       <input
-        className="tree-hint-input"
+        className="input"
         value={value}
         onChange={(e) => setValue(e.target.value)}
-        placeholder="Hint for LLM..."
+        placeholder="Hint for the AI agent..."
+        maxLength={200}
         onKeyDown={(e) => { if (e.key === "Enter") save(); if (e.key === "Escape") setOpen(false); }}
         autoFocus
       />
-      <button className="btn btn-primary btn-sm" onClick={save} disabled={saving}>
-        {saving ? "..." : "Save"}
-      </button>
-      <button className="btn btn-text btn-sm" onClick={() => setOpen(false)}>Cancel</button>
-    </span>
+      <div className="hint-scope">
+        <span className={allTokens ? "" : "hint-scope-active"}>This token only</span>
+        <label className={`toggle-switch${saving ? " disabled" : ""}`}>
+          <input
+            type="checkbox"
+            checked={allTokens}
+            disabled={saving}
+            onChange={(e) => switchScope(e.target.checked)}
+          />
+          <span className="toggle-switch-track" />
+        </label>
+        <span className={allTokens ? "hint-scope-active" : ""}>All tokens</span>
+      </div>
+      <p className="hint-scope-note">
+        {allTokens
+          ? "Saved globally: applies to every token that can see this entity."
+          : "Saved for this token only. A token-level hint overrides the global one."}
+      </p>
+      <div className="modal-actions">
+        <button className="btn btn-primary" onClick={save} disabled={saving}>
+          {saving ? "Saving..." : "Save"}
+        </button>
+        <button className="btn btn-text" onClick={() => setOpen(false)} disabled={saving}>Cancel</button>
+      </div>
+    </Modal>
   );
 }
 
@@ -125,20 +186,35 @@ interface EntityRowProps {
   domainKey: string;
   permissions: PermissionTree;
   tokenId: string;
-  indent: number;
   filterText: string;
   isGhost: boolean;
   onPermChange: (tree: PermissionTree) => void;
   onEntityClick?: (entityId: string, depth?: "entity" | "device" | "domain") => void;
+  revealEntity?: string;
+  revealDepth?: "entity" | "device" | "domain";
+  revealNonce?: number;
+  mesaProfileEntities?: Set<string>;
+  onOpenMesa?: (entityId: string) => void;
+  globalHints: Record<string, string>;
+  onGlobalHintsChange: (hints: Record<string, string>) => void;
 }
 
 function EntityRow({
   entityId, friendlyName, deviceId, domainKey, permissions,
-  tokenId, indent, filterText, isGhost, onPermChange, onEntityClick,
+  tokenId, filterText, isGhost, onPermChange, onEntityClick, revealEntity, revealDepth, revealNonce, mesaProfileEntities, onOpenMesa, globalHints, onGlobalHintsChange,
 }: EntityRowProps) {
   const entityNode = permissions.entities[entityId];
   const state: NodeState = entityNode?.state ?? "GREY";
   const effective = effectivePermission(entityId, domainKey, deviceId, permissions);
+  const rowRef = React.useRef<HTMLDivElement>(null);
+  const isRevealed = (revealDepth ?? "entity") === "entity" && revealEntity === entityId;
+
+  // When this row becomes the reveal target, scroll it into view and flash it.
+  useEffect(() => {
+    if (isRevealed && rowRef.current) {
+      rowRef.current.scrollIntoView({ block: "center", behavior: "smooth" });
+    }
+  }, [isRevealed, revealNonce]);
 
   if (filterText) {
     const q = filterText.toLowerCase();
@@ -160,8 +236,11 @@ function EntityRow({
   }
 
   return (
-    <div className="tree-node" role="treeitem" aria-label={friendlyName ?? entityId} style={{ paddingLeft: `${indent * 20 + 6}px` }}>
+    <div ref={rowRef} className={`tree-node${isRevealed ? " tree-node-revealed" : ""}`} role="treeitem" aria-label={friendlyName ?? entityId}>
       <span className="tree-spacer" />
+      {onOpenMesa && !isGhost && (
+        <MesaProfileLink entityId={entityId} exists={!!mesaProfileEntities?.has(entityId)} onOpen={onOpenMesa} />
+      )}
       <div
         className={`tree-name${onEntityClick ? " tree-cursor-pointer" : ""}`}
         onClick={() => onEntityClick?.(entityId, "entity")}
@@ -179,8 +258,10 @@ function EntityRow({
           tokenId={tokenId}
           entityId={entityId}
           currentHint={entityNode?.hint ?? null}
+          globalHint={globalHints[entityId] ?? null}
           currentState={state}
           onSaved={onPermChange}
+          onGlobalHintsChange={onGlobalHintsChange}
         />
       )}
       <PermissionSelector value={state} onChange={setEntityState} />
@@ -201,25 +282,58 @@ interface DeviceGroupProps {
   onPermChange: (tree: PermissionTree) => void;
   onEntityClick?: (entityId: string, depth?: "entity" | "device" | "domain") => void;
   collapseKey?: number;
+  revealEntity?: string;
+  revealDepth?: "entity" | "device" | "domain";
+  revealNonce?: number;
+  mesaProfileEntities?: Set<string>;
+  onOpenMesa?: (entityId: string) => void;
+  globalHints: Record<string, string>;
+  onGlobalHintsChange: (hints: Record<string, string>) => void;
 }
 
 function DeviceGroup({
   deviceId, deviceName, domainKey, entityIds, domainData,
-  permissions, tokenId, filterText, allEntityIds, onPermChange, onEntityClick, collapseKey,
+  permissions, tokenId, filterText, allEntityIds, onPermChange, onEntityClick, collapseKey, revealEntity, revealDepth, revealNonce, mesaProfileEntities, onOpenMesa, globalHints, onGlobalHintsChange,
 }: DeviceGroupProps) {
   const [expanded, setExpanded] = useState(false);
   const deviceNode = permissions.devices[deviceId];
   const state: NodeState = deviceNode?.state ?? "GREY";
   const effective = effectiveForNode("device", deviceId, domainKey, permissions);
   const isDynamic = state !== "GREY";
+  const headerRef = React.useRef<HTMLDivElement>(null);
+  const isRevealed = revealDepth === "device" && !!revealEntity && entityIds.includes(revealEntity);
+
+  // Entities sorted by friendly name (falling back to entity id).
+  const sortedEntityIds = [...entityIds].sort((a, b) => {
+    const an = domainData.entity_details[a]?.friendly_name ?? a;
+    const bn = domainData.entity_details[b]?.friendly_name ?? b;
+    return an.localeCompare(bn);
+  });
 
   // Expand if filter matches
   useEffect(() => {
     if (filterText) setExpanded(true);
   }, [filterText]);
 
-  // Collapse when collapseKey changes
+  // Expand when an entity inside this device is the reveal target. Skip for
+  // domain-depth reveals: those target the domain header, not every device.
   useEffect(() => {
+    if (revealDepth !== "domain" && revealEntity && entityIds.includes(revealEntity)) setExpanded(true);
+  }, [revealDepth, revealEntity, entityIds, revealNonce]);
+
+  // When this device is the reveal target, scroll its header into view and flash it.
+  useEffect(() => {
+    if (isRevealed && headerRef.current) {
+      headerRef.current.scrollIntoView({ block: "center", behavior: "smooth" });
+    }
+  }, [isRevealed, revealNonce]);
+
+  // Collapse when collapseKey changes, but NOT on initial mount: this group is
+  // lazily mounted when its domain expands (often due to a reveal), and a
+  // mount-time collapse would immediately undo the reveal-driven expand above.
+  const skipFirstCollapse = React.useRef(true);
+  useEffect(() => {
+    if (skipFirstCollapse.current) { skipFirstCollapse.current = false; return; }
     setExpanded(false);
   }, [collapseKey]);
 
@@ -246,9 +360,9 @@ function DeviceGroup({
 
   return (
     <div role="treeitem" aria-expanded={expanded} aria-label={deviceName}>
-      <div className="tree-node tree-device-indent">
+      <div ref={headerRef} className={`tree-node${isRevealed ? " tree-node-revealed" : ""}`}>
         <button className="tree-expand" onClick={() => setExpanded((x) => !x)} aria-label={expanded ? `Collapse ${deviceName}` : `Expand ${deviceName}`}>
-          {expanded ? "v" : ">"}
+          <span className={`collapsible-chevron${expanded ? " open" : ""}`} aria-hidden="true" />
         </button>
         <div className="tree-name tree-cursor-pointer" onClick={() => setExpanded((x) => !x)}>
           <span className="tree-friendly">{deviceName}</span>
@@ -260,8 +374,8 @@ function DeviceGroup({
         <PermissionSelector value={state} onChange={setDeviceState} />
       </div>
       {expanded && (
-        <div className="tree-children" role="group">
-          {entityIds.map((eid) => {
+        <div className="tree-children-flat" role="group">
+          {sortedEntityIds.map((eid) => {
             const detail = domainData.entity_details[eid];
             return (
               <EntityRow
@@ -272,11 +386,17 @@ function DeviceGroup({
                 domainKey={domainKey}
                 permissions={permissions}
                 tokenId={tokenId}
-                indent={2}
                 filterText={filterText}
                 isGhost={!allEntityIds.has(eid)}
                 onPermChange={onPermChange}
                 onEntityClick={onEntityClick}
+                revealEntity={revealEntity}
+                revealDepth={revealDepth}
+                revealNonce={revealNonce}
+                mesaProfileEntities={mesaProfileEntities}
+                onOpenMesa={onOpenMesa}
+                globalHints={globalHints}
+                onGlobalHintsChange={onGlobalHintsChange}
               />
             );
           })}
@@ -296,10 +416,17 @@ interface DomainGroupProps {
   onPermChange: (tree: PermissionTree) => void;
   onEntityClick?: (entityId: string, depth?: "entity" | "device" | "domain") => void;
   collapseKey?: number;
+  revealEntity?: string;
+  revealDepth?: "entity" | "device" | "domain";
+  revealNonce?: number;
+  mesaProfileEntities?: Set<string>;
+  onOpenMesa?: (entityId: string) => void;
+  globalHints: Record<string, string>;
+  onGlobalHintsChange: (hints: Record<string, string>) => void;
 }
 
 function DomainGroup({
-  domainKey, domainData, permissions, tokenId, filterText, allEntityIds, onPermChange, onEntityClick, collapseKey,
+  domainKey, domainData, permissions, tokenId, filterText, allEntityIds, onPermChange, onEntityClick, collapseKey, revealEntity, revealDepth, revealNonce, mesaProfileEntities, onOpenMesa, globalHints, onGlobalHintsChange,
 }: DomainGroupProps) {
   const [expanded, setExpanded] = useState(false);
   const domainNode = permissions.domains[domainKey];
@@ -308,13 +435,29 @@ function DomainGroup({
   const isRisk = HIGH_RISK_DOMAINS.has(domainKey);
   const isIndirect = INDIRECT_CONTROL_DOMAINS.has(domainKey);
   const isDynamic = state !== "GREY";
+  const headerRef = React.useRef<HTMLDivElement>(null);
+  const isRevealed = revealDepth === "domain" && !!revealEntity && revealEntity.split(".")[0] === domainKey;
 
   useEffect(() => {
     if (filterText) setExpanded(true);
   }, [filterText]);
 
-  // Collapse when collapseKey changes
+  // Expand when the reveal target lives in this domain.
   useEffect(() => {
+    if (revealEntity && revealEntity.split(".")[0] === domainKey) setExpanded(true);
+  }, [revealEntity, domainKey, revealNonce]);
+
+  // When this domain is the reveal target, scroll its header into view and flash it.
+  useEffect(() => {
+    if (isRevealed && headerRef.current) {
+      headerRef.current.scrollIntoView({ block: "center", behavior: "smooth" });
+    }
+  }, [isRevealed, revealNonce]);
+
+  // Collapse when collapseKey changes, but NOT on initial mount (see DeviceGroup).
+  const skipFirstCollapse = React.useRef(true);
+  useEffect(() => {
+    if (skipFirstCollapse.current) { skipFirstCollapse.current = false; return; }
     setExpanded(false);
   }, [collapseKey]);
 
@@ -346,9 +489,9 @@ function DomainGroup({
 
   return (
     <div className="tree-domain-group" role="treeitem" aria-expanded={expanded} aria-label={domainKey}>
-      <div className="tree-node">
+      <div ref={headerRef} className={`tree-node${isRevealed ? " tree-node-revealed" : ""}`}>
         <button className="tree-expand" onClick={() => setExpanded((x) => !x)} aria-label={expanded ? `Collapse ${domainKey}` : `Expand ${domainKey}`}>
-          {expanded ? "v" : ">"}
+          <span className={`collapsible-chevron${expanded ? " open" : ""}`} aria-hidden="true" />
         </button>
         <div className="tree-name tree-cursor-pointer" onClick={() => setExpanded((x) => !x)}>
           <span className="tree-friendly tree-domain-label">{domainKey}</span>
@@ -367,55 +510,72 @@ function DomainGroup({
       </div>
       {expanded && (
         <div className="tree-children" role="group">
-          {Object.entries(domainData.devices).map(([deviceId, device]) => (
-            <DeviceGroup
-              key={deviceId}
-              deviceId={deviceId}
-              deviceName={device.name}
-              domainKey={domainKey}
-              entityIds={device.entities}
-              domainData={domainData}
-              permissions={permissions}
-              tokenId={tokenId}
-              filterText={filterText}
-              allEntityIds={allEntityIds}
-              onPermChange={onPermChange}
-              onEntityClick={onEntityClick}
-              collapseKey={collapseKey}
-            />
-          ))}
           {domainData.deviceless_entities.length > 0 && (
             <div>
               {Object.keys(domainData.devices).length > 0 && (
-                <div className="tree-node tree-device-indent">
+                <div className="tree-node">
                   <span className="tree-spacer" />
                   <span className="tree-name tree-orphan-label">
                     Deviceless Entities
                   </span>
                 </div>
               )}
-              {domainData.deviceless_entities.map((eid) => {
-                const detail = domainData.entity_details[eid];
-                return (
-                  <EntityRow
-                    key={eid}
-                    entityId={eid}
-                    friendlyName={detail?.friendly_name ?? null}
-                    deviceId={null}
-                    domainKey={domainKey}
-                    permissions={permissions}
-                    tokenId={tokenId}
-                    indent={1}
-                    filterText={filterText}
-                    isGhost={!allEntityIds.has(eid)}
-                    onPermChange={onPermChange}
-                    onEntityClick={onEntityClick}
-                  />
-                );
-              })}
+              {[...domainData.deviceless_entities]
+                .sort((a, b) => (domainData.entity_details[a]?.friendly_name ?? a).localeCompare(domainData.entity_details[b]?.friendly_name ?? b))
+                .map((eid) => {
+                  const detail = domainData.entity_details[eid];
+                  return (
+                    <EntityRow
+                      key={eid}
+                      entityId={eid}
+                      friendlyName={detail?.friendly_name ?? null}
+                      deviceId={null}
+                      domainKey={domainKey}
+                      permissions={permissions}
+                      tokenId={tokenId}
+                      filterText={filterText}
+                      isGhost={!allEntityIds.has(eid)}
+                      onPermChange={onPermChange}
+                      onEntityClick={onEntityClick}
+                      revealEntity={revealEntity}
+                      revealDepth={revealDepth}
+                      revealNonce={revealNonce}
+                      mesaProfileEntities={mesaProfileEntities}
+                      onOpenMesa={onOpenMesa}
+                      globalHints={globalHints}
+                      onGlobalHintsChange={onGlobalHintsChange}
+                    />
+                  );
+                })}
             </div>
           )}
-          {ghostEntityIds.map((eid) => (
+          {Object.entries(domainData.devices)
+            .sort(([, a], [, b]) => a.name.localeCompare(b.name))
+            .map(([deviceId, device]) => (
+              <DeviceGroup
+                key={deviceId}
+                deviceId={deviceId}
+                deviceName={device.name}
+                domainKey={domainKey}
+                entityIds={device.entities}
+                domainData={domainData}
+                permissions={permissions}
+                tokenId={tokenId}
+                filterText={filterText}
+                allEntityIds={allEntityIds}
+                onPermChange={onPermChange}
+                onEntityClick={onEntityClick}
+                collapseKey={collapseKey}
+                revealEntity={revealEntity}
+                revealDepth={revealDepth}
+                revealNonce={revealNonce}
+                mesaProfileEntities={mesaProfileEntities}
+                onOpenMesa={onOpenMesa}
+                globalHints={globalHints}
+                onGlobalHintsChange={onGlobalHintsChange}
+              />
+            ))}
+          {[...ghostEntityIds].sort().map((eid) => (
             <EntityRow
               key={eid}
               entityId={eid}
@@ -424,11 +584,17 @@ function DomainGroup({
               domainKey={domainKey}
               permissions={permissions}
               tokenId={tokenId}
-              indent={1}
               filterText={filterText}
               isGhost={true}
               onPermChange={onPermChange}
               onEntityClick={onEntityClick}
+              revealEntity={revealEntity}
+              revealDepth={revealDepth}
+              revealNonce={revealNonce}
+              mesaProfileEntities={mesaProfileEntities}
+              onOpenMesa={onOpenMesa}
+              globalHints={globalHints}
+              onGlobalHintsChange={onGlobalHintsChange}
             />
           ))}
         </div>
@@ -437,11 +603,12 @@ function DomainGroup({
   );
 }
 
-export function EntityTree({ tokenId, permissions, onPermissionsChange, onEntityClick, collapseKey }: Props) {
+export function EntityTree({ tokenId, permissions, onPermissionsChange, onEntityClick, collapseKey, domainAllowlist, revealEntity, revealDepth, revealNonce, mesaProfileEntities, onOpenMesa }: Props) {
   const [tree, setTree] = useState<EntityTree | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState("");
+  const [globalHints, setGlobalHints] = useState<Record<string, string>>({});
 
   const loadTree = useCallback(async (force = false) => {
     setLoading(true);
@@ -457,6 +624,7 @@ export function EntityTree({ tokenId, permissions, onPermissionsChange, onEntity
   }, []);
 
   useEffect(() => { loadTree(); }, [loadTree]);
+  useEffect(() => { api.getEntityHints().then((r) => setGlobalHints(r.entity_hints)).catch(() => undefined); }, []);
 
   const allEntityIds = React.useMemo(() => {
     if (!tree) return new Set<string>();
@@ -471,7 +639,9 @@ export function EntityTree({ tokenId, permissions, onPermissionsChange, onEntity
   if (error) return <div className="banner banner-error">{error}</div>;
   if (!tree) return null;
 
-  const domainKeys = Object.keys(tree).sort();
+  const domainKeys = Object.keys(tree)
+    .filter((d) => !domainAllowlist || domainAllowlist.includes(d))
+    .sort();
 
   return (
     <div>
@@ -500,6 +670,13 @@ export function EntityTree({ tokenId, permissions, onPermissionsChange, onEntity
             onPermChange={onPermissionsChange}
             onEntityClick={onEntityClick}
             collapseKey={collapseKey}
+            revealEntity={revealEntity}
+            revealDepth={revealDepth}
+            revealNonce={revealNonce}
+            mesaProfileEntities={mesaProfileEntities}
+            onOpenMesa={onOpenMesa}
+            globalHints={globalHints}
+            onGlobalHintsChange={setGlobalHints}
           />
         ))}
       </div>

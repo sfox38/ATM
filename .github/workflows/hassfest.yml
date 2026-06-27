@@ -1,0 +1,19 @@
+name: Hassfest
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+  schedule:
+    # Daily, so a new Home Assistant manifest rule is caught even with no commits.
+    - cron: "23 5 * * *"
+  workflow_dispatch:
+
+jobs:
+  validate:
+    name: Hassfest validation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Hassfest
+        uses: home-assistant/actions/hassfest@master

@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import re
 from datetime import timedelta
 from typing import Any
 
@@ -18,6 +17,8 @@ from .audit import generate_request_id
 
 from .const import (
     BLOCKED_DOMAINS,
+    CAP_ALLOW,
+    CAP_DENY,
     DOMAIN,
     DUAL_GATE_SERVICES,
     HIGH_RISK_DOMAINS,
@@ -27,18 +28,18 @@ from .const import (
     PROXY_TIMEOUT_SECONDS,
 )
 from .data import ATMData
+from .mesa import apply_mesa_to_call, fire_mesa_blocked_event
 from .helpers import (
-    FilteredStates as _FilteredStates,
     build_error_response as _error,
     build_permitted_entity_ids as _build_permitted_entity_ids,
-    build_permitted_states as _build_permitted_states,
     collect_log_entries as _collect_log_entries,
-    fire_rate_limit_events as _fire_rate_limit_events,
+    effective_cap,
     get_authenticated_token as _get_authenticated_token,
     get_client_ip as _get_client_ip,
     log_request as _log,
     parse_time_param as _parse_time_param,
     read_json_body as _read_json_body,
+    render_template_for_token as _render_template_for_token,
 )
 from .policy_engine import (
     EntityCreationNotPermitted,
@@ -49,10 +50,8 @@ from .policy_engine import (
     resolve_service_targets,
     scrub_sensitive_attributes,
     scrub_state_dict as _scrub_state_dict,
-    template_blocklist_vars,
 )
 from .rate_limiter import RateLimitResult
-from .token_store import TokenRecord
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -204,12 +203,12 @@ class ATMServiceView(HomeAssistantView):
             return body
 
         service_key = f"{domain}/{service}"
-        if service_key in DUAL_GATE_SERVICES and not token.allow_restart:
+        if service_key in DUAL_GATE_SERVICES and effective_cap(token, "cap_restart") != CAP_ALLOW:
             _log(data, token, request_id=request_id, method="POST", resource=resource,
                  outcome="denied", client_ip=client_ip, payload=body)
             return _error("forbidden", "Forbidden.", 403, request_id)
 
-        if service_key in PHYSICAL_GATE_SERVICES and not token.allow_physical_control:
+        if service_key in PHYSICAL_GATE_SERVICES and effective_cap(token, "cap_physical_control") != CAP_ALLOW:
             _log(data, token, request_id=request_id, method="POST", resource=resource,
                  outcome="denied", client_ip=client_ip, payload=body)
             return _error("forbidden", "Forbidden.", 403, request_id)
@@ -221,7 +220,7 @@ class ATMServiceView(HomeAssistantView):
 
         # DUAL_GATE_SERVICES (homeassistant/restart, homeassistant/stop) have no
         # entities in hass.states. Routing them through resolve_service_targets
-        # always produces an empty list and a spurious 403. The allow_restart
+        # always produces an empty list and a spurious 403. The cap_restart
         # gate above is the only permission check required for these services.
         if service_key in DUAL_GATE_SERVICES:
             if domain in HIGH_RISK_DOMAINS:
@@ -268,6 +267,35 @@ class ATMServiceView(HomeAssistantView):
                  outcome="denied", client_ip=client_ip, payload=body)
             return _error("forbidden", "Forbidden.", 403, request_id)
 
+        # MESA enforcement runs on the flattened, ATM-permitted entity list.
+        mesa_outcome = await apply_mesa_to_call(
+            hass, data, token,
+            domain=domain, service=service, service_data=service_data,
+            entities=permitted_entities,
+            request_id=request_id, client_ip=client_ip, session_id=request_id,
+        )
+        if mesa_outcome.blocked:
+            fire_mesa_blocked_event(hass, token, mesa_outcome.blocked)
+        if mesa_outcome.decision == "pending":
+            approval = mesa_outcome.approval
+            _log(data, token, request_id=request_id, method="POST", resource=resource,
+                 outcome="pending_approval", client_ip=client_ip, payload=body)
+            return _json_response(
+                {
+                    "status": "pending_approval",
+                    "approval_id": approval.id,
+                    "expires_at": approval.expires_at.isoformat() if approval.expires_at else None,
+                    "review_url": f"/atm#approvals/{approval.id}",
+                    "message": "This action requires admin approval. The admin has been notified.",
+                },
+                202, request_id, rl_result,
+            )
+        if mesa_outcome.decision == "deny":
+            _log(data, token, request_id=request_id, method="POST", resource=resource,
+                 outcome="denied", client_ip=client_ip, payload=body)
+            return _error("forbidden", "Forbidden.", 403, request_id)
+        permitted_entities = mesa_outcome.entities
+
         if domain in HIGH_RISK_DOMAINS:
             _LOGGER.info(
                 "High-risk service call %s/%s by token %s rid=%s",
@@ -284,7 +312,7 @@ class ATMServiceView(HomeAssistantView):
         }
 
         use_return_response = False
-        if token.allow_service_response or token.pass_through:
+        if effective_cap(token, "cap_service_response") != CAP_DENY:
             try:
                 from homeassistant.core import SupportsResponse as _SR
                 handler = hass.services.async_services().get(domain, {}).get(service)
@@ -306,7 +334,8 @@ class ATMServiceView(HomeAssistantView):
                 )
         except asyncio.TimeoutError:
             _log(data, token, request_id=request_id, method="POST", resource=resource,
-                 outcome="allowed", client_ip=client_ip, payload=body)
+                 outcome="allowed", client_ip=client_ip, payload=body,
+                 mesa_advisory=bool(mesa_outcome.warnings))
             return _json_response(
                 {"success": True, "partial": True, "message": "Service dispatched but HA did not respond within the timeout window."},
                 200, request_id, rl_result, extra_headers=extra,
@@ -326,11 +355,14 @@ class ATMServiceView(HomeAssistantView):
         filtered_response = filter_service_response(svc_response, token, hass) if svc_response is not None else None
 
         _log(data, token, request_id=request_id, method="POST", resource=resource,
-             outcome="allowed", client_ip=client_ip, payload=body)
+             outcome="allowed", client_ip=client_ip, payload=body,
+             mesa_advisory=bool(mesa_outcome.warnings))
 
         resp_body: dict[str, Any] = {"success": True}
         if filtered_response is not None:
             resp_body["service_response"] = filtered_response
+        if mesa_outcome.warnings:
+            resp_body["mesa_advisory"] = mesa_outcome.warnings
 
         return _json_response(resp_body, 200, request_id, rl_result, extra_headers=extra)
 
@@ -551,7 +583,7 @@ class ATMStatisticsView(HomeAssistantView):
 
 
 class ATMConfigView(HomeAssistantView):
-    """GET /api/atm/config - HA configuration (requires allow_config_read or pass_through)."""
+    """GET /api/atm/config - HA configuration (requires cap_config_read)."""
 
     url = "/api/atm/config"
     name = "api:atm:config"
@@ -569,7 +601,7 @@ class ATMConfigView(HomeAssistantView):
             return result
         token, rl_result = result
 
-        if not token.allow_config_read and not token.pass_through:
+        if effective_cap(token, "cap_config_read") == CAP_DENY:
             _log(data, token, request_id=request_id, method="GET", resource=resource,
                  outcome="denied", client_ip=client_ip)
             return _error("forbidden", "Forbidden.", 403, request_id)
@@ -604,7 +636,7 @@ class ATMTemplateView(HomeAssistantView):
             return result
         token, rl_result = result
 
-        if not token.allow_template_render and not token.pass_through:
+        if effective_cap(token, "cap_template_render") == CAP_DENY:
             _log(data, token, request_id=request_id, method="POST", resource=resource,
                  outcome="denied", client_ip=client_ip)
             return _error("forbidden", "Forbidden.", 403, request_id)
@@ -618,38 +650,7 @@ class ATMTemplateView(HomeAssistantView):
             return _error("invalid_request", "Missing or invalid 'template' field.", 400, request_id)
 
         try:
-            from homeassistant.helpers import template as template_helper
-
-            permitted = _build_permitted_states(token, hass)
-
-            filtered_states = _FilteredStates(permitted)
-
-            # Override all HA template state helpers with permission-restricted versions.
-            def _state_attr(entity_id: str, attr: str):
-                s = permitted.get(entity_id)
-                return s.attributes.get(attr) if s is not None else None
-
-            def _is_state(entity_id: str, value: str) -> bool:
-                s = permitted.get(entity_id)
-                return s is not None and s.state == value
-
-            def _is_state_attr(entity_id: str, attr: str, value) -> bool:
-                s = permitted.get(entity_id)
-                return s is not None and s.attributes.get(attr) == value
-
-            def _has_value(entity_id: str) -> bool:
-                s = permitted.get(entity_id)
-                return s is not None and s.state not in ("unknown", "unavailable")
-
-            tmpl = template_helper.Template(template_str, hass)
-            rendered = tmpl.async_render(variables={
-                "states": filtered_states,
-                "state_attr": _state_attr,
-                "is_state": _is_state,
-                "is_state_attr": _is_state_attr,
-                "has_value": _has_value,
-                **template_blocklist_vars(),
-            })
+            rendered = _render_template_for_token(template_str, token, hass)
         except Exception:
             _log(data, token, request_id=request_id, method="POST", resource=resource,
                  outcome="invalid_request", client_ip=client_ip)
@@ -667,7 +668,7 @@ class ATMTemplateView(HomeAssistantView):
 
 
 class ATMEventsView(HomeAssistantView):
-    """GET /api/atm/events - HA event bus listener counts (requires allow_config_read)."""
+    """GET /api/atm/events - HA event bus listener counts (requires cap_config_read)."""
 
     url = "/api/atm/events"
     name = "api:atm:events"
@@ -685,14 +686,12 @@ class ATMEventsView(HomeAssistantView):
             return result
         token, rl_result = result
 
-        if not token.allow_config_read and not token.pass_through:
+        if effective_cap(token, "cap_config_read") == CAP_DENY:
             _log(data, token, request_id=request_id, method="GET", resource=resource,
                  outcome="denied", client_ip=client_ip)
             return _error("forbidden", "Forbidden.", 403, request_id)
 
-        # This matches the native HA GET /api/events format exactly: a list of
-        # {"event": name, "listener_count": N} objects. This IS the "full native event
-        # list" described by spec §4.3. Not a bug - confirmed correct by the spec.
+        # Match the native HA GET /api/events list shape.
         listeners = hass.bus.async_listeners()
         events = [{"event": k, "listener_count": v} for k, v in sorted(listeners.items())]
 
@@ -763,7 +762,7 @@ _DEFAULT_LOG_LIMIT = 50
 
 
 class ATMLogsView(HomeAssistantView):
-    """GET /api/atm/logs - HA system log entries (requires allow_log_read)."""
+    """GET /api/atm/logs - HA system log entries (requires cap_log_read)."""
 
     url = "/api/atm/logs"
     name = "api:atm:logs"
@@ -781,7 +780,7 @@ class ATMLogsView(HomeAssistantView):
             return result
         token, rl_result = result
 
-        if not token.allow_log_read:
+        if effective_cap(token, "cap_log_read") == CAP_DENY:
             _log(data, token, request_id=request_id, method="GET", resource=resource,
                  outcome="denied", client_ip=client_ip)
             return _error("forbidden", "Forbidden.", 403, request_id)

@@ -7,9 +7,16 @@ interface Props {
   children: React.ReactNode;
 }
 
+// A stack of open modals so Escape only closes the topmost one (nested dialogs
+// like the discard-confirm prompt must not also dismiss the editor behind them).
+// Module-scoped per bundle; the panel and the injector never share a render tree.
+const modalStack: Array<() => void> = [];
+
 export function Modal({ titleId, onClose, children }: Props) {
   const modalRef = useRef<HTMLDivElement>(null);
   const previousFocus = useRef<HTMLElement | null>(null);
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
 
   useEffect(() => {
     previousFocus.current = document.activeElement as HTMLElement | null;
@@ -20,12 +27,28 @@ export function Modal({ titleId, onClose, children }: Props) {
     return () => { previousFocus.current?.focus(); };
   }, []);
 
+  // Escape is bound on the document, not the modal div, so it fires even when
+  // focus has fallen outside the dialog (e.g. after clicking a non-focusable
+  // label, which lands focus on <body>). Keyboard events are composed, so this
+  // also catches Escape from inside the injector's shadow-root modal.
+  useEffect(() => {
+    const close = () => onCloseRef.current?.();
+    modalStack.push(close);
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && modalStack[modalStack.length - 1] === close) {
+        e.stopPropagation();
+        close();
+      }
+    };
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      const i = modalStack.lastIndexOf(close);
+      if (i !== -1) modalStack.splice(i, 1);
+    };
+  }, []);
+
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
-    if (e.key === "Escape" && onClose) {
-      e.stopPropagation();
-      onClose();
-      return;
-    }
     if (e.key !== "Tab") return;
     const modal = modalRef.current;
     if (!modal) return;
@@ -42,7 +65,7 @@ export function Modal({ titleId, onClose, children }: Props) {
       e.preventDefault();
       first.focus();
     }
-  }, [onClose]);
+  }, []);
 
   return (
     <div className="modal-backdrop" onClick={onClose}>

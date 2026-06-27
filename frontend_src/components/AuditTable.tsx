@@ -8,6 +8,10 @@ interface Props {
   page: number;
   pageSize: number;
   onPageChange: (page: number) => void;
+  // Current token_id -> name, so a renamed token's existing audit rows show its
+  // current name. The stored entry.token_name is the fallback for tokens no
+  // longer active (archived/revoked) and for admin actions.
+  tokenNames?: Record<string, string>;
 }
 
 function formatTokenName(name: string): string {
@@ -33,6 +37,8 @@ const OUTCOME_LABEL: Record<Outcome, string> = {
   not_found: "Not Found",
   rate_limited: "Rate Limited",
   not_implemented: "Not Implemented",
+  invalid_request: "Invalid Request",
+  pending_approval: "Pending Approval",
 };
 
 const OUTCOME_CLASS: Record<Outcome, string> = {
@@ -41,6 +47,8 @@ const OUTCOME_CLASS: Record<Outcome, string> = {
   not_found: "outcome-not_found",
   rate_limited: "outcome-rate_limited",
   not_implemented: "outcome-not_implemented",
+  invalid_request: "outcome-invalid_request",
+  pending_approval: "outcome-pending_approval",
 };
 
 type SortKey = "timestamp" | "token_name" | "method" | "resource" | "outcome" | "client_ip";
@@ -60,7 +68,7 @@ function DetailRow({ label, value, mono }: { label: string; value: string; mono?
   );
 }
 
-function EntryDetailModal({ entry, onClose }: { entry: AuditEntry; onClose: () => void }) {
+function EntryDetailModal({ entry, tokenName, onClose }: { entry: AuditEntry; tokenName: string; onClose: () => void }) {
   const prettyPayload = entry.payload
     ? (() => { try { return JSON.stringify(JSON.parse(entry.payload), null, 2); } catch { return entry.payload; } })()
     : null;
@@ -68,11 +76,17 @@ function EntryDetailModal({ entry, onClose }: { entry: AuditEntry; onClose: () =
     <Modal titleId="audit-detail-title" onClose={onClose}>
       <h3 className="modal-title audit-section-title" id="audit-detail-title">Audit Entry</h3>
       <DetailRow label="Time" value={formatTs(entry.timestamp)} />
-      <DetailRow label="Token" value={formatTokenName(entry.token_name)} />
+      <DetailRow
+        label="Token"
+        value={tokenName !== entry.token_name
+          ? `${formatTokenName(tokenName)} (${formatTokenName(entry.token_name)})`
+          : formatTokenName(tokenName)}
+      />
       <DetailRow label="Mode" value={entry.pass_through ? "Pass Through" : "Scoped"} />
       <DetailRow label="Method" value={entry.method} mono />
       <DetailRow label="Resource" value={entry.resource} mono />
       <DetailRow label="Outcome" value={OUTCOME_LABEL[entry.outcome] ?? entry.outcome} />
+      {entry.mesa_advisory && <DetailRow label="MESA" value="Advisory: proceeded with a warning (would require approval if enforced)" />}
       <DetailRow label="IP" value={entry.client_ip} mono />
       <DetailRow label="Request ID" value={entry.request_id} mono />
       {prettyPayload && (
@@ -88,10 +102,14 @@ function EntryDetailModal({ entry, onClose }: { entry: AuditEntry; onClose: () =
   );
 }
 
-export function AuditTable({ entries, loading, page, pageSize, onPageChange }: Props) {
+export function AuditTable({ entries, loading, page, pageSize, onPageChange, tokenNames }: Props) {
   const [selected, setSelected] = useState<AuditEntry | null>(null);
   const [sortKey, setSortKey] = useState<SortKey>("timestamp");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
+
+  // Prefer the token's current name (by id) over the snapshot stored on the row,
+  // so a rename is reflected in its historical audit entries.
+  const displayName = (e: AuditEntry): string => tokenNames?.[e.token_id] ?? e.token_name;
 
   if (loading) {
     return <div className="loading-wrap"><div className="spinner" /><span>Loading...</span></div>;
@@ -107,8 +125,8 @@ export function AuditTable({ entries, loading, page, pageSize, onPageChange }: P
   }
 
   const sorted = [...entries].sort((a, b) => {
-    const va = a[sortKey] ?? "";
-    const vb = b[sortKey] ?? "";
+    const va = sortKey === "token_name" ? displayName(a) : (a[sortKey] ?? "");
+    const vb = sortKey === "token_name" ? displayName(b) : (b[sortKey] ?? "");
     if (va < vb) return sortDir === "asc" ? -1 : 1;
     if (va > vb) return sortDir === "asc" ? 1 : -1;
     return 0;
@@ -130,7 +148,7 @@ export function AuditTable({ entries, loading, page, pageSize, onPageChange }: P
 
   return (
     <div>
-      {selected && <EntryDetailModal entry={selected} onClose={() => setSelected(null)} />}
+      {selected && <EntryDetailModal entry={selected} tokenName={displayName(selected)} onClose={() => setSelected(null)} />}
       <table className="data-table audit-table">
         <thead>
           <tr>
@@ -153,8 +171,11 @@ export function AuditTable({ entries, loading, page, pageSize, onPageChange }: P
                 <span className={`outcome-badge ${OUTCOME_CLASS[entry.outcome]}`}>
                   {OUTCOME_LABEL[entry.outcome] ?? entry.outcome}
                 </span>
+                {entry.mesa_advisory && (
+                  <span className="outcome-badge mesa-advisory-badge" title="MESA advisory: proceeded with a warning">MESA</span>
+                )}
               </td>
-              <td title={formatTokenName(entry.token_name)}>{formatTokenNameShort(entry.token_name)}</td>
+              <td title={formatTokenName(displayName(entry))}>{formatTokenNameShort(displayName(entry))}</td>
               <td>
                 <span className="audit-time-full">{formatTs(entry.timestamp)}</span>
                 <span className="audit-time-short">{formatTsShort(entry.timestamp)}</span>

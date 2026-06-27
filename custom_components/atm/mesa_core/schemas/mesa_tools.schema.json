@@ -1,0 +1,117 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mesa-spec.org/schemas/mesa_tools.schema.json",
+  "title": "MESA MCP tool input schemas",
+  "description": "Input schemas for the MESA retrieval API tools (MESA Specification Section 9). Lease tools (mesa_request_lease, mesa_release_lease) ship in mesa-core v1.1.",
+  "tools": {
+    "mesa_query_profiles": {
+      "description": "Query MESA semantic profiles by domain, tag, area, intent, or origin, with pagination. Returns effective (inheritance-resolved) profiles.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "domains": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "tags_match": {
+            "enum": [
+              "any",
+              "all"
+            ],
+            "default": "any"
+          },
+          "areas": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "intents": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "min_origin_authority": {
+            "enum": [
+              "inferred_ai",
+              "hybrid",
+              "user",
+              "developer"
+            ]
+          },
+          "include_inferred": {
+            "type": "boolean",
+            "default": false
+          },
+          "include_fields": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "limit": {
+            "type": "integer",
+            "default": 50,
+            "minimum": 1,
+            "maximum": 200
+          },
+          "cursor": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "mesa_get_profile": {
+      "description": "Retrieve the complete effective MESA profile for one entity, optionally including its diagnostic profile.",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "entity_id"
+        ],
+        "properties": {
+          "entity_id": {
+            "type": "string"
+          },
+          "include_diagnostic": {
+            "type": "boolean",
+            "default": true
+          }
+        }
+      }
+    },
+    "mesa_explain_profile": {
+      "description": "Return the full inheritance resolution path for an entity: which profile level contributed each effective field and why. The first tool to reach for when agent behaviour is unexpected.",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "entity_id"
+        ],
+        "properties": {
+          "entity_id": {
+            "type": "string"
+          },
+          "show_conflicts": {
+            "type": "boolean",
+            "default": true
+          }
+        }
+      }
+    },
+    "mesa_get_caller_context": {
+      "description": "Retrieve caller identity and roles for the current session.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      }
+    }
+  }
+}

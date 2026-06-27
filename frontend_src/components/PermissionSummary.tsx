@@ -1,10 +1,13 @@
 import React, { useState, useMemo } from "react";
 import type { PermissionTree, NodeState, EntityTree } from "../types";
+import { MesaProfileLink } from "./MesaProfileLink";
 
 interface Props {
   permissions: PermissionTree;
   entityTree?: EntityTree | null;
   onEntityClick?: (entityId: string, depth?: "entity" | "device" | "domain") => void;
+  mesaProfileEntities?: Set<string>;
+  onOpenMesa?: (entityId: string) => void;
 }
 
 const STATE_LABEL: Record<NodeState, string> = {
@@ -91,7 +94,6 @@ function resolvedState(
     const domain = deviceDomain.get(item.id);
     if (domain) toCheck.push(permissions.domains[domain]?.state ?? "GREY");
   }
-  toCheck.push(permissions.global?.state ?? "GREY");
   if (toCheck.some((s) => s === "RED")) return "RED";
   // Pass 2: item's own state is the most specific non-GREY grant
   return item.state;
@@ -132,7 +134,7 @@ function EffectiveCell({ permissions, item, entityToDevice, deviceDomain }: {
   return <td className="perm-summary-td"><span className={STATE_CLASS[eff]}>{STATE_LABEL[eff]}</span></td>;
 }
 
-export function PermissionSummary({ permissions, entityTree, onEntityClick }: Props) {
+export function PermissionSummary({ permissions, entityTree, onEntityClick, mesaProfileEntities, onOpenMesa }: Props) {
   const [sortCol, setSortCol] = useState<SortCol>("type");
   const [sortDir, setSortDir] = useState<SortDir>("asc");
 
@@ -208,7 +210,7 @@ export function PermissionSummary({ permissions, entityTree, onEntityClick }: Pr
           <SortHeader label="Type" col="type" current={sortCol} dir={sortDir} onSort={handleSort} />
           <SortHeader label="Name" col="friendly" current={sortCol} dir={sortDir} onSort={handleSort} />
           <SortHeader label="ID" col="id" current={sortCol} dir={sortDir} onSort={handleSort} />
-          <SortHeader label="Effective" col="state" current={sortCol} dir={sortDir} onSort={handleSort} />
+          <SortHeader label="State" col="state" current={sortCol} dir={sortDir} onSort={handleSort} />
         </tr>
       </thead>
       <tbody>
@@ -228,12 +230,23 @@ export function PermissionSummary({ permissions, entityTree, onEntityClick }: Pr
                   {TYPE_LABEL[item.type]}
                 </span>
               </td>
-              <td
-                className={`perm-summary-td-name${isClickable ? " clickable" : ""}`}
-                onClick={handleClick}
-                title={title}
-              >
-                {item.friendlyName !== item.id ? item.friendlyName : <span className="state-GREY">-</span>}
+              <td className="perm-summary-td-name">
+                <div className="perm-summary-name-wrap">
+                  {item.type === "entity" && onOpenMesa && (
+                    <MesaProfileLink
+                      entityId={item.id}
+                      exists={!!mesaProfileEntities?.has(item.id)}
+                      onOpen={onOpenMesa}
+                    />
+                  )}
+                  <span
+                    className={`perm-summary-name-text${isClickable ? " clickable" : ""}`}
+                    onClick={handleClick}
+                    title={title}
+                  >
+                    {item.friendlyName !== item.id ? item.friendlyName : <span className="state-GREY">-</span>}
+                  </span>
+                </div>
               </td>
               <td
                 className={`perm-summary-td-id${isClickable ? " clickable" : ""}`}

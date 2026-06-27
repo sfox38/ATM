@@ -1,0 +1,26 @@
+# Test environment for the ATM integration tests (pytest).
+#
+# pytest-homeassistant-custom-component (PHACC) is the single source of truth for
+# the Home Assistant test stack: each PHACC version pins an exact homeassistant
+# version plus the matched pytest, pytest-asyncio, aiohttp, sqlalchemy, etc. So
+# pinning PHACC alone makes the whole stack reproducible.
+#
+#   PHACC 0.13.339  ->  homeassistant==2026.6.3
+#   Python: 3.14
+#
+# This is a TEST pin only. ATM's runtime floor is unchanged (manifest
+# min_ha_version = 2024.5.0); the integration is version-adaptive and runs on
+# older HA too. Keep this tracking the live HA version and re-run the suite on
+# every HA upgrade (the ws_dispatch module leans on HA internals).
+#
+# Set up / upgrade:
+#   python3.14 -m venv venv
+#   venv/bin/python -m pip install -r requirements_test.txt
+#   # to bump: edit the pins below (or pip install --upgrade the packages,
+#   # then pip freeze the two lines back into this file)
+#   venv/bin/python -m pytest
+
+pytest-homeassistant-custom-component==0.13.339
+
+# Standalone lint tool used by the dev workflow (not pulled in by PHACC).
+pyflakes==3.4.0

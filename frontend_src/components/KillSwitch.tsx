@@ -19,7 +19,7 @@ export function KillSwitch({ settings, onToggle, saving }: Props) {
           </span>
           <small>
             {active
-              ? "Open SSE connections have been terminated. Re-enabling will re-register all ATM routes immediately, without an HA restart."
+              ? "All ATM client requests are now refused. Re-enabling will re-register all ATM routes immediately, without an HA restart."
               : "When enabled, all ATM proxy and MCP endpoints are immediately disabled. The admin panel remains accessible."}
           </small>
         </div>

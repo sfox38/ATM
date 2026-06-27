@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <script>(function(){try{var t=localStorage.getItem("atm-docs-theme");if(t==="light"||t==="dark")document.documentElement.setAttribute("data-theme",t);}catch(e){}})();</script>
+  <title>Installation &middot; ATM docs</title>
+  <meta name="description" content="Install Advanced Token Management through HACS or by hand, then add the integration in Home Assistant." />
+  <link rel="icon" href="assets/atm-logo.png" type="image/png" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400..800&family=Hanken+Grotesk:wght@400..700&family=Roboto+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="assets/atm-docs.css" />
+</head>
+<body data-page="install" data-toc>
+  <a class="skip-link" href="#main">Skip to content</a>
+  <header class="site-header" id="site-header"></header>
+  <div class="sidebar-backdrop" data-close-nav></div>
+
+  <div class="layout" id="layout">
+    <aside class="sidebar" id="sidebar"></aside>
+    <main class="main" id="main">
+      <div class="content prose">
+
+        <header class="page-head">
+          <p class="breadcrumb"><a href="index.html">Docs</a> / Getting started / Installation</p>
+          <h1>Installation</h1>
+          <p class="lede">ATM runs entirely inside Home Assistant. There is no extra process and no cloud dependency, so installation is the same as any other custom integration: add the files, restart, add the integration.</p>
+        </header>
+
+        <h2>Requirements</h2>
+        <dl class="kv">
+          <div class="kv-row"><dt>Home Assistant</dt><dd>2024.5.0 or later.</dd></div>
+          <div class="kv-row"><dt>Instances</dt><dd>One ATM instance per Home Assistant. The config flow will not let you add a second.</dd></div>
+          <div class="kv-row"><dt>Dependencies</dt><dd>None beyond what Home Assistant already ships. No Python packages to install.</dd></div>
+        </dl>
+
+        <h2>Install through HACS</h2>
+        <p>HACS is the recommended path because it handles updates for you.</p>
+        <div class="steps">
+          <div class="step"><div class="step-body">
+            <h3>Open custom repositories</h3>
+            <p>In HACS, go to <strong>Integrations</strong> and open the menu in the top-right corner. Choose <strong>Custom repositories</strong>.</p>
+          </div></div>
+          <div class="step"><div class="step-body">
+            <h3>Add the repository</h3>
+            <p>Enter the repository URL and select <strong>Integration</strong> as the category, then click <strong>Add</strong>.</p>
+            <pre class="code" data-lang="text" data-label="Repository"><code>https://github.com/sfox38/ATM</code></pre>
+            <figure class="screenshot">
+              <img src="assets/custom%20repositories.png" alt="HACS custom repositories dialog with the ATM repository URL entered and Integration selected" loading="lazy" />
+              <figcaption>Adding the repository in HACS.</figcaption>
+            </figure>
+          </div></div>
+          <div class="step"><div class="step-body">
+            <h3>Install and restart</h3>
+            <p>Find ATM in the HACS integration list, install it, then restart Home Assistant.</p>
+          </div></div>
+        </div>
+
+        <h2>Install manually</h2>
+        <p>If you prefer not to use HACS, copy the integration into your config directory.</p>
+        <div class="steps">
+          <div class="step"><div class="step-body">
+            <h3>Copy the integration folder</h3>
+            <p>Place the <code>custom_components/atm</code> folder into your Home Assistant config directory.</p>
+            <pre class="code" data-lang="text" data-label="Path"><code>&lt;config&gt;/custom_components/atm/</code></pre>
+          </div></div>
+          <div class="step"><div class="step-body">
+            <h3>Restart Home Assistant</h3>
+            <p>Restart so Home Assistant discovers the new integration.</p>
+          </div></div>
+        </div>
+
+        <h2>Set up the integration</h2>
+        <div class="steps">
+          <div class="step"><div class="step-body">
+            <h3>Add the integration</h3>
+            <p>Go to <strong>Settings &rarr; Devices &amp; services &rarr; Add integration</strong> and search for <strong>Advanced Token Management</strong>.</p>
+            <figure class="screenshot">
+              <img src="assets/select%20brand.png" alt="Home Assistant Add Integration dialog showing the Advanced Token Management result" loading="lazy" />
+              <figcaption>Searching for Advanced Token Management.</figcaption>
+            </figure>
+          </div></div>
+          <div class="step"><div class="step-body">
+            <h3>Complete the config flow</h3>
+            <p>Click through the single-step config flow. There is nothing to configure here; all management happens in the panel.</p>
+          </div></div>
+          <div class="step"><div class="step-body">
+            <h3>Open the ATM panel</h3>
+            <p>Open the <strong>ATM</strong> entry in your Home Assistant sidebar. This is where you create tokens, scope permissions, and read the audit log.</p>
+          </div></div>
+        </div>
+
+        <div class="callout note">
+          <svg class="callout-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9.2"/><path d="M12 11v5"/><circle cx="12" cy="7.6" r="0.4" fill="currentColor"/></svg>
+          <div class="callout-body">
+            <p class="callout-title">Everything lives in the panel</p>
+            <p>ATM has no YAML configuration and no options flow. Once the integration is added, the sidebar panel is the only place you manage it.</p>
+          </div>
+        </div>
+
+        <div class="callout tip">
+          <svg class="callout-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18h6M10 21h4M12 3a6 6 0 0 0-3.5 10.9c.5.4.9 1 1 1.6h5c.1-.6.5-1.2 1-1.6A6 6 0 0 0 12 3z"/></svg>
+          <div class="callout-body">
+            <p class="callout-title">Migrating from the native HA MCP server?</p>
+            <p>ATM replaces it entirely. Once you have created a token and pointed your AI client at <code>/api/atm/mcp</code>, you can disable or remove the native MCP integration from <strong>Settings &rarr; Devices &amp; services</strong>. The client configuration needs only a URL change; the tool names and parameters are identical.</p>
+          </div>
+        </div>
+
+        <nav class="pager" id="pager" aria-label="Page navigation"></nav>
+      </div>
+    </main>
+    <aside class="toc" id="toc"></aside>
+  </div>
+
+  <footer class="site-footer" id="site-footer"></footer>
+  <script src="assets/site.js"></script>
+</body>
+</html>
