@@ -1159,8 +1159,7 @@ async def test_turn_on_confirm_without_physical_fires_immediately():
 
 @pytest.mark.asyncio
 async def test_execute_turn_on_includes_physical_under_confirm():
-    """Post-approval re-run: the executor must actuate the physical lock (via
-    lock.lock) when the cap is confirm (only reached after admin approval)."""
+    """Approved executors must actuate physical locks through lock.lock."""
     from custom_components.atm.mcp_view import _execute_hass_turn_on
 
     token = _make_physical_token("confirm")
@@ -1177,8 +1176,7 @@ async def test_execute_turn_on_includes_physical_under_confirm():
 
 
 def test_turn_service_groups_routes_lock_and_cover():
-    """The bug fix: homeassistant.turn_on/off cannot operate lock/cover on current
-    HA, so they must route to the domain service. turn_off a lock -> lock.unlock."""
+    """Lock and cover turn actions route through domain services."""
     from custom_components.atm.mcp_view import _turn_service_groups
 
     on = {(d, s): e for d, s, e in _turn_service_groups("turn_on", ["light.k", "lock.f", "cover.g"])}

@@ -1,9 +1,4 @@
-"""Tests for the MESA storage backend, runtime construction, and settings.
-
-Covers Phase 2 of the mesa-core integration: the dict-backed StorageBackend,
-HA Store persistence round-trip, inheritance resolution through the host area
-callback, orphan detection, and the mesa_mode setting.
-"""
+"""Tests for MESA storage, runtime construction, and settings."""
 
 from __future__ import annotations
 

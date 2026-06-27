@@ -163,8 +163,7 @@ class TestDeleteScene:
         assert any(s["id"] == sid for s in _read_scenes_yaml(hass.config.path("scenes.yaml")))
 
     async def test_delete_removes_registry_orphan(self, hass, scene_env):
-        # Finding #9: delete must purge the scene's entity-registry entry so it
-        # does not linger as an "unavailable" orphan.
+        # Deleting a scene must remove its entity-registry entry.
         created = _json((await _call(
             "create_scene", {"config": {"name": "Movie", "entities": {"light.kitchen": "on"}}}, _token(), hass))[0])
         sid = created["id"]

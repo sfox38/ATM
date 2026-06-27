@@ -1,4 +1,4 @@
-"""Integration tests for configuration version capture (SPEC Section 16).
+"""Integration tests for configuration version capture.
 
 Exercises the executor capture sites end-to-end with a real VersionStore for the
 YAML-backed resources (automation, script, scene): create -> edit -> delete must
@@ -207,8 +207,7 @@ class TestAutomationRestore:
         result, outcome, _r = await restore_version(delete_ver, "admin-1", hass, data)
         assert outcome == "allowed"
 
-        # F4: a deleted automation is recreated under its ORIGINAL id, so the
-        # rollback lands on the same timeline (not a new one).
+        # Deleted automations are restored under their original ID.
         assert _text(result)["id"] == aid
         items = _read_automations_yaml(os.path.join(hass.config.config_dir, "automations.yaml"))
         assert sum(1 for a in items if a.get("id") == aid) == 1  # exactly one, in place
@@ -218,8 +217,7 @@ class TestAutomationRestore:
         assert latest.approved_by_user_id == "admin-1"
 
     async def test_restore_deleted_is_idempotent(self, hass, env):
-        # F4: restoring a delete twice must not duplicate the automation. The
-        # first restore recreates it in place; the second sees it exists and edits.
+        # Repeated restores must update the original automation, not duplicate it.
         data, versions = _data()
         token = _token(cap_automation_write="allow")
         created = _text((await _call_tool("create_automation", {"config": self._cfg("A")}, token, hass, data))[0])

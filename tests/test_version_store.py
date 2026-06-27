@@ -1,4 +1,4 @@
-"""Tests for version_store.py (configuration version history, SPEC Section 16)."""
+"""Tests for version_store.py."""
 
 from __future__ import annotations
 

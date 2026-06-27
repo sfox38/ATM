@@ -41,8 +41,7 @@ def _patch_ws(return_value):
 
 
 def _patch_ws_map(mapping, default=None):
-    """Patch async_ws_command to return per-command values (list_backups/create_backup
-    now make multiple WS calls: backup/info, backup/agents/info, backup/generate)."""
+    """Patch async_ws_command to return per-command values."""
     async def _fn(_hass, command, payload=None, **_kw):
         return mapping.get(command, default)
     return patch.object(mcp_view, "async_ws_command", new=AsyncMock(side_effect=_fn))
@@ -65,7 +64,7 @@ class TestBackup:
         assert outcome == "denied"
 
     async def test_list_projects_and_sorts(self, hass):
-        # Finding #11: compact projection (no dataclass repr), newest first.
+        # Backup lists use compact dicts, newest first.
         mapping = {
             "backup/info": {"backups": [
                 {"backup_id": "b1", "name": "Old", "date": "2025-01-01T00:00:00+00:00",
@@ -89,7 +88,7 @@ class TestBackup:
         assert body["available_agents"] == ["hassio.local"]
 
     async def test_list_limit(self, hass):
-        # Finding #11: a large backup count is capped, not dumped wholesale.
+        # Large backup lists are capped.
         backs = [{"backup_id": f"b{i}", "name": str(i), "date": f"2026-01-{i:02d}T00:00:00+00:00", "agents": {}}
                  for i in range(1, 6)]
         mapping = {"backup/info": {"backups": backs}, "backup/agents/info": {"agents": []}}
@@ -101,7 +100,7 @@ class TestBackup:
         assert len(body["backups"]) == 2
 
     async def test_create_default_agent_autodetected(self, hass):
-        # Finding #12: default agent comes from backup/agents/info, not hardcoded backup.local.
+        # Default backup agent comes from backup/agents/info.
         mapping = {
             "backup/agents/info": {"agents": [{"agent_id": "hassio.local"}]},
             "backup/generate": {"backup_job_id": "abc"},

@@ -1,4 +1,4 @@
-"""Tests for the admin version-history HTTP endpoints (SPEC Section 16)."""
+"""Tests for the admin version-history HTTP endpoints."""
 
 from __future__ import annotations
 

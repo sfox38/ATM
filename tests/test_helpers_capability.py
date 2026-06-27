@@ -94,9 +94,7 @@ class TestExemptCap:
 
 
 class TestConfirmHonoredUnderPassThrough:
-    """The plan's key design rule: confirm is honored even for non-exempt caps
-    when pass_through is True. The admin's intent to gate is preserved.
-    """
+    """Confirm mode is preserved for non-exempt caps under pass_through."""
 
     def test_non_exempt_confirm_routes_through_gate(self):
         # cap_config_read is non-exempt and the test asserts confirm survives

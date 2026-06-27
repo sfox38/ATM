@@ -1,8 +1,7 @@
 """Regression tests for the token template sandbox.
 
 These verify that render_template_for_token() exposes only permission-filtered
-entity state, and that the historical bypass (calling HA state helpers as Jinja2
-filters, which render variables cannot shadow) no longer leaks data.
+entity state, including state helpers called as Jinja2 filters.
 """
 
 from __future__ import annotations
@@ -64,10 +63,7 @@ def test_out_of_scope_state_function_returns_unknown(two_states):
     ],
 )
 def test_state_helpers_as_filters_do_not_leak(two_states, template):
-    """The historic bypass: state helpers used as filters. They must not exist
-    in the sandbox environment, so they raise rather than return real state.
-    A raised error surfaces to the caller as invalid_request, never the value.
-    """
+    """State helpers used as filters must not expose real state."""
     token = _scoped_token()
     with pytest.raises(Exception) as exc:
         render_template_for_token(template, token, two_states)

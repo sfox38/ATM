@@ -113,9 +113,7 @@ class TestEditDeleteHelper:
         assert outcome == "not_found"
 
     async def test_edit_cap_only_not_entity_scoped(self, hass, helper_env, hass_admin_user):
-        # F2: helper authoring is cap-gated, not entity-scoped. A token with
-        # cap_helper_write but an empty permission tree may edit any existing
-        # helper, exactly like scripts/automations.
+        # Helper authoring is cap-gated, not entity-scoped.
         created = _json((await _call(
             "create_helper", {"helper_type": "input_boolean", "config": {"name": "Owned"}}, _token(), hass))[0])
         hid = created["helper"]["id"]
@@ -132,8 +130,7 @@ class TestEditDeleteHelper:
         assert _json(content)["helper"]["name"] == "Renamed"
 
     async def test_delete_cap_only_not_entity_scoped(self, hass, helper_env, hass_admin_user):
-        # F2: a cap_helper_write token with no permission-tree scope may delete an
-        # existing helper.
+        # Helper deletion is cap-gated, not entity-scoped.
         created = _json((await _call(
             "create_helper", {"helper_type": "input_boolean", "config": {"name": "Owned"}}, _token(), hass))[0])
         hid = created["helper"]["id"]
@@ -149,7 +146,7 @@ class TestEditDeleteHelper:
 
 
 class TestVersionCapture:
-    """create/edit/delete_helper record version history (SPEC Section 16).
+    """create/edit/delete_helper record version history.
 
     The other helper tests pass a MagicMock for data, so capture is a no-op there;
     here a real VersionStore is supplied so the helper read-before path that
@@ -191,7 +188,7 @@ class TestVersionCapture:
         assert create_rec.before is None
         assert create_rec.after == {"name": "A"}
         assert create_rec.token_name == token.name
-        # edit_helper read the prior config into `before` (previously empty)
+        # edit_helper reads the prior config into `before`.
         assert edit_rec.before is not None and edit_rec.before.get("name") == "A"
         assert edit_rec.after == {"name": "B"}
         # delete_helper read the prior config; no `after`

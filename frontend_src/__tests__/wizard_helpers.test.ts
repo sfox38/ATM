@@ -184,7 +184,7 @@ describe("buildSkillInstall", () => {
   });
   it("names the agent's own context file for Gemini and Codex", () => {
     expect(buildSkillInstall(url, "gemini")[0].hint).toContain("GEMINI.md");
-    expect(buildSkillInstall(url, "codex")[0].hint).toContain("AGENTS.md");
+    expect(buildSkillInstall(url, "codex")[0].hint).toContain("Codex project instructions");
   });
 });
 

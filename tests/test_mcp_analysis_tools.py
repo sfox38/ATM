@@ -1,9 +1,4 @@
-"""Tests for Phase 2 analysis + introspection MCP tools.
-
-get_capability_summary / get_audit_summary (no cap, own-token only), whatif,
-compare_state, recent_activity, dry_run_service (cap_search), validate_config
-(cap_diagnostics).
-"""
+"""Tests for analysis and introspection MCP tools."""
 
 from __future__ import annotations
 

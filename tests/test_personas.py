@@ -195,8 +195,7 @@ class TestDetectPersona:
             assert detect_persona(caps) == name, f"{name} did not round-trip"
 
     def test_new_user_is_detected_not_custom(self):
-        # Regression: new_user is now offered in the normal picker, so it must be
-        # in detect_persona's list (previously it fell through to custom).
+        # new_user must round-trip through persona detection.
         assert detect_persona(get_persona_caps(PERSONA_NEW_USER)) == PERSONA_NEW_USER
 
     def test_returns_custom_for_unmatched(self):
