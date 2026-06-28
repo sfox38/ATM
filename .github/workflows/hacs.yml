@@ -19,7 +19,3 @@ jobs:
         uses: hacs/action@main
         with:
           category: integration
-          # "brands" requires the domain to be registered in home-assistant/brands,
-          # which only applies to HACS-default inclusion. ATM ships as a custom
-          # repository, so skip it; the rest (structure, hacs.json, manifest) runs.
-          ignore: brands
