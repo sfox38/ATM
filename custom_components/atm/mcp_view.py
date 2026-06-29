@@ -845,7 +845,9 @@ _SYSTEM_TOOL_DEFS: list[dict] = [
         "description": (
             "Search the entities this token can access by name, domain, area, device_class, or state. "
             "For semantic/profile-based discovery (tags, classification, control mode) use mesa_query_profiles instead. "
-            "Filters combine with AND. Returns a compact list (entity_id, state, friendly_name, domain, area); each "
+            "A multi-word query matches entities containing all the words (in entity_id or friendly_name), and "
+            "results are ranked by relevance so the best matches lead. Filters combine with AND. Returns a compact "
+            "list (entity_id, state, friendly_name, domain, area); each "
             "result also carries control_mode when its MESA nature is non-default (read_only, confirm, prohibited), "
             "so you can spot restricted entities without a follow-up describe_entity call."
         ),
@@ -4227,6 +4229,42 @@ def _area_name_for_entity(eid: str, registry: Any, dev_reg: Any, area_reg: Any) 
     return area.name if area is not None else area_id
 
 
+def _rank_search_matches(matches: list[dict], query: str) -> list[dict]:
+    """Token-AND filter + relevance rank for a search_entities query.
+
+    Keeps only rows whose entity_id/friendly_name contains every query token (so
+    multi-word queries work, unlike a single substring test), and orders by an
+    IDF-weighted score so the most relevant rows lead and survive truncation.
+    Rarer query terms weigh more; exact and prefix/word-start matches get a bonus.
+    """
+    tokens = [t for t in query.split() if t]
+    if not tokens:
+        return matches
+    docs = [f"{m['entity_id']} {(m.get('friendly_name') or '')}".lower() for m in matches]
+    n = len(docs) or 1
+    df = {t: sum(1 for d in docs if t in d) for t in set(tokens)}
+    full = " ".join(tokens)
+    scored: list[tuple[float, str, dict]] = []
+    for m, doc in zip(matches, docs):
+        if any(t not in doc for t in tokens):
+            continue
+        eid = m["entity_id"].lower()
+        obj = eid.split(".")[-1]
+        fname = (m.get("friendly_name") or "").lower()
+        score = 0.0
+        for t in tokens:
+            score += math.log(1 + n / (1 + df.get(t, 0)))
+            if t == eid or t == fname:
+                score += 5.0
+            elif obj.startswith(t) or any(w.startswith(t) for w in fname.split()):
+                score += 2.0
+        if full in (eid, fname, obj):
+            score += 10.0
+        scored.append((score, m["entity_id"], m))
+    scored.sort(key=lambda s: (-s[0], s[1]))
+    return [m for _, _, m in scored]
+
+
 async def _tool_search_entities(
     args: dict, token: TokenRecord, hass: Any, data: ATMData
 ) -> tuple[dict, str, str]:
@@ -4269,8 +4307,6 @@ async def _tool_search_entities(
             continue
         attrs = e.get("attributes", {})
         fname = attrs.get("friendly_name") or ""
-        if query and query not in eid.lower() and query not in fname.lower():
-            continue
         if device_class is not None and attrs.get("device_class") != device_class:
             continue
         state_val = e.get("state")
@@ -4297,6 +4333,9 @@ async def _tool_search_entities(
             "area": area_name,
             "device_class": attrs.get("device_class"),
         })
+
+    if query:
+        matches = _rank_search_matches(matches, query)
 
     truncated = len(matches) > limit
     results = matches[:limit]

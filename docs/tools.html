@@ -158,7 +158,7 @@
 
           <article class="tool" data-cap="discovery" data-search="search_entities filter find">
             <div class="tool-head"><span class="tool-name">search_entities</span><span class="badge badge-cap">Search &amp; discovery</span></div>
-            <p class="tool-desc">Filter accessible entities by query, domain, area, device class, state, and staleness. Each row carries <code>control_mode</code> when its MESA nature is non-default, so restricted entities are visible without a follow-up call.</p>
+            <p class="tool-desc">Filter accessible entities by query, domain, area, device class, state, and staleness. A multi-word <code>query</code> matches entities containing all the words and results are ranked by relevance, so the best matches lead. Each row carries <code>control_mode</code> when its MESA nature is non-default, so restricted entities are visible without a follow-up call.</p>
             <dl><dt>params</dt><dd><code>query</code>, <code>domain</code>, <code>area</code>, <code>device_class</code>, <code>state</code>, <code>unavailable</code>, <code>stale_hours</code>, <code>limit</code> (all optional)</dd></dl>
           </article>
 
