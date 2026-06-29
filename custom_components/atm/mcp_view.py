@@ -439,6 +439,28 @@ _ENTITY_TOOL_DEFS: list[dict] = [
         },
     },
     {
+        "name": "get_calendar_events",
+        "description": (
+            "List events from an accessible calendar entity within a time window (defaults to the next 7 "
+            "days). Requires READ access to the calendar entity, scoped like get_state."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "calendar_id": {"type": "string", "description": "A calendar.* entity id."},
+                "start_time": {
+                    "type": "string",
+                    "description": "ISO timestamp or relative string (24h, 7d). Defaults to now.",
+                },
+                "end_time": {
+                    "type": "string",
+                    "description": "ISO timestamp or relative string. Defaults to 7 days after start.",
+                },
+            },
+            "required": ["calendar_id"],
+        },
+    },
+    {
         "name": "call_service",
         "description": (
             "Call a Home Assistant service on one or more entities. Targets (entity_id, area_id, "
@@ -711,6 +733,41 @@ _SYSTEM_TOOL_DEFS: list[dict] = [
                     "maximum": 100,
                     "default": 50,
                     "description": "Maximum number of entries to return (1-100, default 50).",
+                },
+            },
+        },
+    },
+    {
+        "name": "get_logbook",
+        "description": (
+            "Read the human-readable Home Assistant logbook (state changes, automations and scripts "
+            "triggered, and other events), most recent within the window. Omit entity_id for a "
+            "home-wide view scoped to entities you can access, or pass one to focus on a single entity. "
+            "This is the narrative event history; get_logs is the system error log, and get_history is "
+            "raw state samples."
+        ),
+        "cap": "cap_log_read",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "start_time": {
+                    "type": "string",
+                    "description": "ISO timestamp or relative string (24h, 7d, 2w). Defaults to 24h.",
+                },
+                "end_time": {
+                    "type": "string",
+                    "description": "ISO timestamp or relative string. Defaults to now.",
+                },
+                "entity_id": {
+                    "type": "string",
+                    "description": "Optional: limit to one accessible entity.",
+                },
+                "limit": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 1000,
+                    "default": 100,
+                    "description": "Maximum entries to return (most recent kept).",
                 },
             },
         },
@@ -2035,6 +2092,57 @@ async def _tool_get_statistics(
     return _tool_success(json.dumps(result, default=str)), "allowed", entity_id
 
 
+async def _tool_get_calendar_events(
+    args: dict, token: TokenRecord, hass: Any
+) -> tuple[dict, str, str]:
+    """MCP tool: list events from one accessible calendar entity (entity-scoped)."""
+    calendar_id = str(args.get("calendar_id") or args.get("entity_id") or "").strip()
+    if not calendar_id:
+        return _tool_error("Missing required argument: calendar_id"), "invalid_request", "get_calendar_events"
+
+    perm = resolve(calendar_id, token, hass)
+    if perm == Permission.NOT_FOUND:
+        return _tool_error("Calendar not found."), "not_found", calendar_id
+    if perm in (Permission.NO_ACCESS, Permission.DENY):
+        return _tool_error("Calendar not found."), "denied", calendar_id
+    if not calendar_id.startswith("calendar."):
+        return _tool_error("Not a calendar entity."), "invalid_request", calendar_id
+
+    start_time = utcnow()
+    if args.get("start_time"):
+        try:
+            start_time = _parse_time_param(args["start_time"])
+        except ValueError:
+            return _tool_error("Invalid start_time format."), "invalid_request", calendar_id
+    if args.get("end_time"):
+        try:
+            end_time = _parse_time_param(args["end_time"])
+        except ValueError:
+            return _tool_error("Invalid end_time format."), "invalid_request", calendar_id
+    else:
+        end_time = start_time + timedelta(days=7)
+    if end_time <= start_time:
+        return _tool_error("end_time must be after start_time."), "invalid_request", calendar_id
+
+    try:
+        # calendar.get_events is SupportsResponse.ONLY, so return_response=True is
+        # required here (the usual ATM rule against it is for response-less services).
+        resp = await hass.services.async_call(
+            "calendar", "get_events",
+            {"entity_id": calendar_id,
+             "start_date_time": start_time.isoformat(),
+             "end_date_time": end_time.isoformat()},
+            blocking=True, return_response=True,
+        )
+    except Exception:
+        _LOGGER.debug("calendar get_events failed for %s", calendar_id, exc_info=True)
+        return _tool_error("Failed to read calendar events."), "invalid_request", calendar_id
+
+    entry = resp.get(calendar_id, {}) if isinstance(resp, dict) else {}
+    events = entry.get("events", []) if isinstance(entry, dict) else []
+    return _tool_success(json.dumps({"calendar_id": calendar_id, "events": events}, default=str)), "allowed", calendar_id
+
+
 async def _tool_call_service(
     args: dict,
     token: TokenRecord,
@@ -2282,6 +2390,64 @@ async def _tool_get_logs(
     entries = _collect_log_entries(hass, raw_level, integration, limit)
     return _tool_success(json.dumps({"count": len(entries), "entries": entries}, default=str)), "allowed", "get_logs"
 
+
+def _logbook_entry_visible(entry: dict, token: TokenRecord, hass: Any) -> bool:
+    """A logbook entry is visible only if its entity is accessible to the token.
+
+    Entries without an entity_id cannot be scope-checked, so they are dropped
+    (conservative: never reveal activity the token has no entity-level access to).
+    """
+    eid = entry.get("entity_id")
+    if not isinstance(eid, str) or not eid:
+        return False
+    return resolve(eid, token, hass) in (Permission.READ, Permission.WRITE)
+
+
+async def _tool_get_logbook(
+    args: dict, token: TokenRecord, hass: Any
+) -> tuple[dict, str, str]:
+    """MCP tool: read the human-readable logbook (requires cap_log_read)."""
+    if effective_cap(token, "cap_log_read") == CAP_DENY:
+        return _tool_error("Forbidden."), "denied", "get_logbook"
+
+    try:
+        start_time = _parse_time_param(str(args.get("start_time") or "24h"))
+    except ValueError:
+        return _tool_error("Invalid start_time format."), "invalid_request", "get_logbook"
+    payload: dict[str, Any] = {"start_time": start_time.isoformat()}
+    if args.get("end_time"):
+        try:
+            payload["end_time"] = _parse_time_param(args["end_time"]).isoformat()
+        except ValueError:
+            return _tool_error("Invalid end_time format."), "invalid_request", "get_logbook"
+
+    entity_id = str(args.get("entity_id") or "").strip()
+    if entity_id:
+        perm = resolve(entity_id, token, hass)
+        if perm == Permission.NOT_FOUND:
+            return _tool_error("Entity not found."), "not_found", entity_id
+        if perm in (Permission.NO_ACCESS, Permission.DENY):
+            return _tool_error("Entity not found."), "denied", entity_id
+        payload["entity_ids"] = [entity_id]
+
+    try:
+        result = await async_ws_command(hass, "logbook/get_events", payload)
+    except WsDispatchError as exc:
+        return _tool_error(f"Failed to read logbook: {exc}"), "invalid_request", "get_logbook"
+
+    entries = result if isinstance(result, list) else []
+    # Scope: keep only entries for entities this token can read, then redact any
+    # remaining out-of-scope ids (e.g. a context_entity_id) defensively.
+    scoped = [e for e in entries if isinstance(e, dict) and _logbook_entry_visible(e, token, hass)]
+    scoped = filter_service_response(scoped, token, hass)
+
+    try:
+        limit = int(args.get("limit") or 100)
+    except (TypeError, ValueError):
+        limit = 100
+    limit = max(1, min(limit, 1000))
+    scoped = scoped[-limit:]  # logbook is chronological; keep the most recent
+    return _tool_success(json.dumps({"count": len(scoped), "entries": scoped}, default=str)), "allowed", "get_logbook"
 
 
 async def _tool_render_template(
@@ -5914,6 +6080,8 @@ async def _call_tool(
         return await _tool_get_history(arguments, token, hass)
     if tool_name == "get_statistics":
         return await _tool_get_statistics(arguments, token, hass)
+    if tool_name == "get_calendar_events":
+        return await _tool_get_calendar_events(arguments, token, hass)
     if tool_name == "call_service":
         return await _tool_call_service(arguments, token, hass, data, request_id, client_ip)
     if tool_name == "get_config":
@@ -5980,6 +6148,8 @@ async def _call_tool(
         return await _tool_hass_broadcast(arguments, token, hass)
     if tool_name == "get_logs":
         return await _tool_get_logs(arguments, token, hass)
+    if tool_name == "get_logbook":
+        return await _tool_get_logbook(arguments, token, hass)
     if tool_name == "create_script":
         return await _tool_create_script(arguments, token, hass, data, request_id, client_ip)
     if tool_name == "edit_script":

@@ -50,6 +50,7 @@ ALLOWED_WS_COMMANDS: frozenset[str] = frozenset(
         "backup/agents/info", "backup/info", "backup/generate",
         "lovelace/dashboards/list", "lovelace/dashboards/create",
         "lovelace/dashboards/update", "lovelace/dashboards/delete",
+        "logbook/get_events",
     ]
 )
 

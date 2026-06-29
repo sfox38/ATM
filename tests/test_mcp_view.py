@@ -40,6 +40,7 @@ def _make_token(
     cap_template_render: str = "deny",
     cap_automation_write: str = "deny",
     cap_script_write: str = "deny",
+    cap_log_read: str = "deny",
     rate_limit_requests: int = 60,
     rate_limit_burst: int = 10,
     revoked: bool = False,
@@ -61,6 +62,7 @@ def _make_token(
         cap_template_render=cap_template_render,
         cap_automation_write=cap_automation_write,
         cap_script_write=cap_script_write,
+        cap_log_read=cap_log_read,
         rate_limit_requests=rate_limit_requests,
         rate_limit_burst=rate_limit_burst,
         revoked=revoked,
@@ -764,6 +766,101 @@ async def test_tools_call_get_state_lean_default_and_detailed():
     full_out = json.loads(res_full["result"]["content"][0]["text"])
     assert full_out["attributes"]["icon"] == "mdi:x"
     assert "context" in full_out
+
+
+# --- get_logbook / get_calendar_events (v2.1) ---
+
+@pytest.mark.asyncio
+async def test_get_logbook_forbidden_without_cap():
+    token, _ = _make_token(cap_log_read="deny")
+    data = _make_data(token)
+    hass = _make_hass(data)
+    res, _m, _r, outcome = await _dispatch_mcp(
+        "tools/call", 3, {"name": "get_logbook", "arguments": {}},
+        token, hass, data, "127.0.0.1", base_url="http://h",
+    )
+    assert outcome == "denied"
+    assert res["result"].get("isError") is True
+
+
+@pytest.mark.asyncio
+async def test_get_logbook_scopes_to_accessible_entities():
+    token, _ = _make_token(cap_log_read="allow")
+    data = _make_data(token)
+    hass = _make_hass(data)
+    from custom_components.atm.policy_engine import Permission
+
+    def _res(eid, tok, h):
+        return Permission.READ if eid == "light.ok" else Permission.NO_ACCESS
+
+    entries = [
+        {"entity_id": "light.ok", "message": "turned on"},
+        {"entity_id": "light.secret", "message": "turned off"},
+        {"name": "Some event", "message": "no entity id"},
+    ]
+    # _logbook_entry_visible (mcp_view.resolve) does the scoping under test; the
+    # extra filter_service_response redaction pass has its own coverage, so stub it
+    # to identity here (it would otherwise hit a real entity registry on the mock).
+    with patch("custom_components.atm.mcp_view.resolve", side_effect=_res), \
+         patch("custom_components.atm.mcp_view.filter_service_response", side_effect=lambda d, t, h: d), \
+         patch("custom_components.atm.mcp_view.async_ws_command", new=AsyncMock(return_value=entries)):
+        res, _m, _r, outcome = await _dispatch_mcp(
+            "tools/call", 3, {"name": "get_logbook", "arguments": {}},
+            token, hass, data, "127.0.0.1", base_url="http://h",
+        )
+    assert outcome == "allowed"
+    payload = json.loads(res["result"]["content"][0]["text"])
+    assert payload["count"] == 1
+    assert payload["entries"][0]["entity_id"] == "light.ok"
+
+
+@pytest.mark.asyncio
+async def test_get_calendar_events_returns_events_for_accessible_calendar():
+    token, _ = _make_token()
+    data = _make_data(token)
+    hass = _make_hass(data)
+    hass.services.async_call = AsyncMock(return_value={"calendar.fam": {"events": [{"summary": "Dentist"}]}})
+    from custom_components.atm.policy_engine import Permission
+    with patch("custom_components.atm.mcp_view.resolve", return_value=Permission.READ):
+        res, _m, _r, outcome = await _dispatch_mcp(
+            "tools/call", 3,
+            {"name": "get_calendar_events", "arguments": {"calendar_id": "calendar.fam"}},
+            token, hass, data, "127.0.0.1", base_url="http://h",
+        )
+    assert outcome == "allowed"
+    payload = json.loads(res["result"]["content"][0]["text"])
+    assert payload["calendar_id"] == "calendar.fam"
+    assert payload["events"][0]["summary"] == "Dentist"
+
+
+@pytest.mark.asyncio
+async def test_get_calendar_events_rejects_non_calendar_entity():
+    token, _ = _make_token()
+    data = _make_data(token)
+    hass = _make_hass(data)
+    from custom_components.atm.policy_engine import Permission
+    with patch("custom_components.atm.mcp_view.resolve", return_value=Permission.READ):
+        res, _m, _r, outcome = await _dispatch_mcp(
+            "tools/call", 3,
+            {"name": "get_calendar_events", "arguments": {"calendar_id": "light.kitchen"}},
+            token, hass, data, "127.0.0.1", base_url="http://h",
+        )
+    assert outcome == "invalid_request"
+
+
+@pytest.mark.asyncio
+async def test_get_calendar_events_not_found_when_inaccessible():
+    token, _ = _make_token()
+    data = _make_data(token)
+    hass = _make_hass(data)
+    from custom_components.atm.policy_engine import Permission
+    with patch("custom_components.atm.mcp_view.resolve", return_value=Permission.NO_ACCESS):
+        res, _m, _r, outcome = await _dispatch_mcp(
+            "tools/call", 3,
+            {"name": "get_calendar_events", "arguments": {"calendar_id": "calendar.fam"}},
+            token, hass, data, "127.0.0.1", base_url="http://h",
+        )
+    assert outcome == "denied"
 
 
 # --- tools/call: restart_ha dual-gate ---

@@ -78,6 +78,12 @@
             <dl><dt>params</dt><dd><code>limit</code> (default 50, max 100), <code>level</code> (<code>INFO</code> / <code>WARNING</code> / <code>ERROR</code>)</dd></dl>
           </article>
 
+          <article class="tool" data-cap="read" data-search="get_logbook human readable event history logbook">
+            <div class="tool-head"><span class="tool-name">get_logbook</span><span class="badge badge-cap">Log read</span></div>
+            <p class="tool-desc">The human-readable logbook (state changes, automations and scripts triggered). Scoped to entities the token can access; entries for out-of-scope entities are dropped. This is the narrative event history, distinct from <code>get_logs</code> (error log) and <code>get_history</code> (raw samples).</p>
+            <dl><dt>params</dt><dd><code>start_time</code> (default 24h), <code>end_time</code>, <code>entity_id</code> (optional, focus on one entity), <code>limit</code> (default 100, max 1000)</dd></dl>
+          </article>
+
           <article class="tool" data-cap="read" data-search="render_template jinja2">
             <div class="tool-head"><span class="tool-name">render_template</span><span class="badge badge-cap">Template render</span></div>
             <p class="tool-desc">Render a Jinja2 template in a permission-scoped environment; templates can only reach entities the token can read.</p>
@@ -310,6 +316,12 @@
             <div class="tool-head"><span class="tool-name">get_statistics</span><span class="badge badge-neutral">tree-scoped</span></div>
             <p class="tool-desc">Long-term statistics for numeric entities, aggregated by 5-minute, hour, day, week, or month.</p>
             <dl><dt>params</dt><dd><code>entity_id</code> (required), <code>start_time</code>, <code>end_time</code>, <code>period</code></dd><dt>returns</dt><dd><code>min</code>, <code>max</code>, <code>mean</code>, <code>sum</code>, <code>state</code> per period</dd></dl>
+          </article>
+
+          <article class="tool" data-cap="read" data-search="get_calendar_events calendar appointments">
+            <div class="tool-head"><span class="tool-name">get_calendar_events</span><span class="badge badge-neutral">tree-scoped</span></div>
+            <p class="tool-desc">Events from an accessible <code>calendar.*</code> entity within a time window (defaults to the next 7 days). Requires READ access to the calendar entity.</p>
+            <dl><dt>params</dt><dd><code>calendar_id</code> (required), <code>start_time</code> (default now), <code>end_time</code> (default start + 7 days)</dd></dl>
           </article>
 
           <article class="tool" data-cap="read" data-search="GetDateTime date time timezone">
