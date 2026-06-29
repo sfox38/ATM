@@ -19,6 +19,7 @@ from homeassistant.helpers import entity_registry as er
 from homeassistant.util.dt import utcnow
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
+from custom_components.atm.const import MAX_DIFF_INLINE_BYTES
 from custom_components.atm.data import ATMData
 from custom_components.atm.mcp_view import _call_tool, _read_automations_yaml, restore_version
 from custom_components.atm.token_store import PermissionNode, PermissionTree, TokenRecord
@@ -288,3 +289,87 @@ class TestRestoreEndpoint:
         items = _read_automations_yaml(os.path.join(hass.config.config_dir, "automations.yaml"))
         assert next(a for a in items if a.get("id") == aid)["alias"] == "A"
         assert versions.list_for("automation", aid)[0].approved_by_user_id == "admin-7"
+
+
+class TestRawWriteCapture:
+    async def test_yaml_config_records_create_then_edit(self, hass):
+        data, versions = _data()
+        token = _token(cap_yaml_edit="allow")
+        await _call_tool("set_yaml_config", {"content": "default_config:\n"}, token, hass, data)
+        await _call_tool("set_yaml_config", {"content": "default_config:\nfoo: bar\n"}, token, hass, data)
+
+        # The test env may or may not ship a configuration.yaml, so assert on the
+        # before/after content chain rather than on create-vs-edit of the first write.
+        history = versions.list_for("yaml_config", "configuration.yaml")
+        assert len(history) == 2
+        second, first = history  # newest first
+        assert first.after["content"] == "default_config:\n"
+        assert second.before["content"] == "default_config:\n"
+        assert second.after["content"] == "default_config:\nfoo: bar\n"
+
+    async def test_write_file_records_create_then_edit(self, hass):
+        data, versions = _data()
+        token = _token(cap_filesystem="allow")
+        rel = "www/atm_cap_test.js"
+        target = os.path.join(hass.config.config_dir, "www", "atm_cap_test.js")
+        if os.path.exists(target):  # the test config dir can persist across runs
+            os.remove(target)
+        await _call_tool("write_file", {"path": rel, "content": "v1"}, token, hass, data)
+        await _call_tool("write_file", {"path": rel, "content": "v2"}, token, hass, data)
+
+        history = versions.list_for("file", rel)
+        assert [v.action for v in history] == ["edit", "create"]
+        edit_rec, create_rec = history
+        assert create_rec.before is None and create_rec.after["content"] == "v1"
+        assert edit_rec.before["content"] == "v1" and edit_rec.after["content"] == "v2"
+
+    async def test_oversized_content_stored_as_truncated_marker(self, hass):
+        data, versions = _data()
+        token = _token(cap_yaml_edit="allow")
+        big = "x" * (MAX_DIFF_INLINE_BYTES + 50)
+        await _call_tool("set_yaml_config", {"content": big}, token, hass, data)
+        rec = versions.list_for("yaml_config", "configuration.yaml")[0]
+        assert rec.after["content"] is None
+        assert rec.after["truncated"] is True
+        assert rec.after["bytes"] == len(big.encode("utf-8"))
+
+
+class TestRawWriteRestore:
+    async def test_restore_yaml_reapplies_and_records_rollback(self, hass):
+        data, versions = _data()
+        token = _token(cap_yaml_edit="allow")
+        await _call_tool("set_yaml_config", {"content": "A\n"}, token, hass, data)
+        await _call_tool("set_yaml_config", {"content": "B\n"}, token, hass, data)
+        create_ver = versions.list_for("yaml_config", "configuration.yaml")[-1]  # after == "A\n"
+
+        result, _outcome, _res = await restore_version(create_ver, "admin-1", hass, data)
+        assert result.get("isError") is not True
+
+        with open(hass.config.path("configuration.yaml"), encoding="utf-8") as f:
+            assert f.read() == "A\n"
+        newest = versions.list_for("yaml_config", "configuration.yaml")[0]
+        assert newest.action == "rollback"
+        assert newest.approved_by_user_id == "admin-1"
+
+    async def test_restore_file_reapplies(self, hass):
+        data, versions = _data()
+        token = _token(cap_filesystem="allow")
+        rel = "www/atm_restore_test.js"
+        await _call_tool("write_file", {"path": rel, "content": "first"}, token, hass, data)
+        await _call_tool("write_file", {"path": rel, "content": "second"}, token, hass, data)
+        create_ver = versions.list_for("file", rel)[-1]  # after == "first"
+
+        await restore_version(create_ver, "admin-2", hass, data)
+        with open(os.path.join(hass.config.config_dir, "www", "atm_restore_test.js"), encoding="utf-8") as f:
+            assert f.read() == "first"
+        assert versions.list_for("file", rel)[0].action == "rollback"
+
+    async def test_restore_truncated_version_refused(self, hass):
+        data, versions = _data()
+        token = _token(cap_yaml_edit="allow")
+        big = "y" * (MAX_DIFF_INLINE_BYTES + 50)
+        await _call_tool("set_yaml_config", {"content": big}, token, hass, data)
+        rec = versions.list_for("yaml_config", "configuration.yaml")[0]
+        result, outcome, _res = await restore_version(rec, "admin-3", hass, data)
+        assert outcome == "invalid_request"
+        assert "too large" in result["content"][0]["text"].lower()

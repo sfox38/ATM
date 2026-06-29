@@ -44,7 +44,9 @@ VERSION_STORAGE_VERSION = 1
 # resource_id) are kept; older ones are evicted on write.
 MAX_VERSIONS_PER_RESOURCE = 20
 # Resource types eligible for version history.
-VERSIONED_RESOURCE_TYPES = frozenset({"automation", "script", "scene", "helper", "dashboard"})
+VERSIONED_RESOURCE_TYPES = frozenset(
+    {"automation", "script", "scene", "helper", "dashboard", "yaml_config", "file"}
+)
 
 # MESA (semantic safety layer) integration. Profiles persist in a separate
 # Store from tokens so the two storage versions evolve independently.

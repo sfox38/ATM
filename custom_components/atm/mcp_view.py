@@ -49,6 +49,7 @@ from .const import (
     LEAN_ALWAYS_ATTRS,
     FILESYSTEM_ALLOWED_DIRS,
     HIGH_RISK_DOMAINS,
+    MAX_DIFF_INLINE_BYTES,
     MAX_FILE_BYTES,
     MAX_BATCH_ITEMS,
     MAX_HISTORY_RANGE_DAYS,
@@ -2379,6 +2380,27 @@ async def _record_version(
         )
 
 
+def _version_content_payload(content: str | None, **extra: Any) -> dict | None:
+    """Build a before/after payload for raw file / configuration.yaml version capture.
+
+    Stores the content verbatim when it is within MAX_DIFF_INLINE_BYTES so an admin
+    can restore it later; larger content is recorded as a non-restorable marker
+    (metadata only) to bound .storage growth. Returns None when there was no prior
+    content (a fresh create). Content is stored raw, like other version records, so
+    the restore is byte-faithful; the version store is admin-only and lives in
+    .storage alongside the rest of ATM's at-rest data.
+    """
+    if content is None:
+        return None
+    payload: dict = {**extra}
+    size = len(content.encode("utf-8"))
+    if size > MAX_DIFF_INLINE_BYTES:
+        payload.update({"content": None, "truncated": True, "bytes": size})
+    else:
+        payload["content"] = content
+    return payload
+
+
 async def _execute_create_automation(
     args: dict, token: TokenRecord, hass: Any, data: ATMData
 ) -> tuple[dict, str, str]:
@@ -2974,6 +2996,14 @@ async def restore_version(
                 {"url_path": None if resource_id == "lovelace" else resource_id, "config": target},
                 token, hass, data,
             )
+        if resource_type in ("yaml_config", "file"):
+            restorable = target.get("content")
+            if not isinstance(restorable, str):
+                # Oversized snapshots are stored as a non-restorable marker.
+                return _tool_error("This version is too large to restore inline."), "invalid_request", "restore_version"
+            if resource_type == "yaml_config":
+                return await _execute_set_yaml_config({"content": restorable}, token, hass, data)
+            return await _execute_write_file({"path": resource_id, "content": restorable}, token, hass, data)
         return _tool_error(f"Cannot restore resource type '{resource_type}'."), "invalid_request", "restore_version"
     finally:
         _restore_ctx.reset(ctx)
@@ -5404,11 +5434,26 @@ async def _execute_write_file(
         return _tool_error("content must be a string."), "invalid_request", "write_file"
     if len(content.encode("utf-8")) > MAX_FILE_BYTES:
         return _tool_error("Content exceeds the maximum file size."), "invalid_request", "write_file"
+    existed = await hass.async_add_executor_job(os.path.isfile, target)
+    before_content: str | None = None
+    if existed:
+        try:
+            before_content = await hass.async_add_executor_job(_read_text_capped, target)
+        except (OSError, ValueError):
+            before_content = None  # unreadable/too large: capture as no prior content
     try:
         await hass.async_add_executor_job(_write_text_atomic, target, content)
     except OSError as exc:
         _LOGGER.error("write_file failed: %s", exc)
         return _tool_error("Failed to write file."), "denied", "write_file"
+    rel = os.path.relpath(target, os.path.realpath(hass.config.config_dir))
+    await _record_version(
+        data, token, resource_type="file", resource_id=rel,
+        action="edit" if existed else "create",
+        before=_version_content_payload(before_content, path=rel),
+        after=_version_content_payload(content, path=rel),
+        alias=rel,
+    )
     return _tool_success(json.dumps({"path": path, "bytes_written": len(content.encode("utf-8"))})), "allowed", f"file:{path}"
 
 
@@ -5459,11 +5504,25 @@ async def _execute_set_yaml_config(
     if len(content.encode("utf-8")) > MAX_FILE_BYTES:
         return _tool_error("Content exceeds the maximum file size."), "invalid_request", "set_yaml_config"
     path = hass.config.path(_CONFIG_YAML)
+    existed = await hass.async_add_executor_job(os.path.isfile, path)
+    before_content: str | None = None
+    if existed:
+        try:
+            before_content = await hass.async_add_executor_job(_read_text_capped, path)
+        except (OSError, ValueError):
+            before_content = None  # unreadable/too large: capture as no prior content
     try:
         await hass.async_add_executor_job(_write_utf8_file_atomic, path, content)
     except OSError as exc:
         _LOGGER.error("set_yaml_config failed: %s", exc)
         return _tool_error("Failed to write configuration.yaml."), "denied", "set_yaml_config"
+    await _record_version(
+        data, token, resource_type="yaml_config", resource_id=_CONFIG_YAML,
+        action="edit" if existed else "create",
+        before=_version_content_payload(before_content),
+        after=_version_content_payload(content),
+        alias=_CONFIG_YAML,
+    )
     return (
         _tool_success(json.dumps({
             "path": _CONFIG_YAML,
