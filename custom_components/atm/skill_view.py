@@ -14,7 +14,8 @@ description: >-
   (Advanced Token Management) MCP connection. Covers ATM's scoped permission
   model, the human-approval ("confirm") gate, the MESA per-entity safety layer,
   and the recommended discover, preview, act, verify workflow for reads, service
-  calls, and authoring automations, scripts, scenes, helpers, and dashboards.
+  calls, and authoring automations, scripts, scenes, helpers, and dashboards,
+  with domain recipes for triggers, cards, conditional visibility, and climate.
 ---
 
 # Using Home Assistant through ATM
@@ -146,7 +147,7 @@ capability instead. A `forbidden` result means the same thing.
 
 ## Home Assistant authoring best practices
 
-When you author automations, scripts, or scenes:
+General, for automations, scripts, and scenes:
 
 - Prefer native Home Assistant constructs (helpers such as `input_boolean`,
   `input_number`, `timer`, `counter`; native triggers and conditions) over
@@ -154,9 +155,77 @@ When you author automations, scripts, or scenes:
   harder to debug and easier to break across upgrades.
 - Validate first (`validate_config`), then write, then verify with a trace.
 - Reference only entities you can actually access; a config that points at
-  out-of-scope entities will not behave as written.
-- After editing automations or scripts they are reloaded automatically; you do
-  not need to restart Home Assistant for those changes.
+  out-of-scope entities will not behave as written. In a dashboard read, an
+  entity id returned as `<redacted>` is outside your scope; do not write it back.
+- After editing automations, scripts, or scenes they are reloaded automatically;
+  you do not need to restart Home Assistant for those changes.
+
+### Automations
+
+- Structure: one or more `trigger`s, optional `condition`s (all must pass), then
+  an `action` sequence. Set `mode` deliberately: `single` (ignore re-triggers
+  while running), `restart` (cancel and start over, the pattern for "reset the
+  timeout" behaviour), `queued`, or `parallel`.
+- Debounce with `for:` on a state or numeric_state trigger ("on for 5 minutes")
+  instead of chaining delays. Use `numeric_state` with `above`/`below` for
+  thresholds and `sun`/`time` triggers for schedules.
+- Branch inside one automation with `choose` (or `if`/`then`) rather than creating
+  several near-duplicate automations.
+- Avoid trigger loops: an automation whose action changes the same entity it
+  triggers on will re-fire itself.
+
+Minimal skeleton:
+
+```yaml
+alias: Porch light at dusk
+trigger:
+  - platform: sun
+    event: sunset
+    offset: "-00:15:00"
+condition: []
+action:
+  - service: light.turn_on
+    target:
+      entity_id: light.porch
+mode: single
+```
+
+### Scripts and scenes
+
+- A script runs a `sequence` of steps (service calls, `delay`, `wait_template`,
+  `wait_for_trigger`, `choose`). Use `fields` to make it callable with parameters
+  and `variables` for values reused across steps; `mode` works as in automations.
+- A scene is a snapshot of entity states. Every entity it sets must be writable by
+  this token. Keep a scene to the entities you actually want to pin, not the whole
+  room.
+
+### Dashboards and cards
+
+- Read the current layout with `get_dashboard_config`, modify it, then write it
+  back with `set_dashboard_config` (storage-mode dashboards only; YAML-mode is
+  rejected). Omit `url_path` for the default dashboard.
+- A dashboard holds `views`, and each view holds `cards`. Pick the card that fits:
+  `tile` and `entities` for control, `thermostat` for climate, `light` for a
+  dimmer, `history-graph` or `sensor` for trends, `gauge` for a single value,
+  `markdown` for notes, and the `area` card for an at-a-glance area.
+- Group related entities into one card instead of scattering single-entity cards.
+
+### Conditional and visibility
+
+- To show a card only in some states, prefer the per-card `visibility` conditions
+  (current Home Assistant), or wrap the card in a `conditional` card.
+- Do not assume custom cards (`type: custom:...`) are installed. Prefer built-in
+  card types unless you have confirmed the custom resource exists.
+
+### Climate
+
+- Read the device first (`describe_entity`). Set only an `hvac_mode` the device
+  reports as supported, and use `temperature` for a single setpoint or
+  `target_temp_low`/`target_temp_high` for a range, matching its current mode.
+- Set or confirm the `hvac_mode` before or together with the temperature; setting
+  a temperature while the unit is off often has no visible effect.
+- Read current state before overriding; do not fight an active schedule or away
+  preset without telling the user.
 
 ## Further reading
 

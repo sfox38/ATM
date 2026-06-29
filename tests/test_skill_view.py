@@ -52,3 +52,16 @@ async def test_503_when_shutting_down():
 async def test_503_when_data_missing():
     resp = await _make_view(has_data=False).get(MagicMock())
     assert resp.status == 503
+
+
+def test_skill_includes_domain_authoring_recipes():
+    # The modular domain-authoring recipes (v2.1) are the skill's authoring value;
+    # guard their headers against accidental removal.
+    for header in (
+        "### Automations",
+        "### Scripts and scenes",
+        "### Dashboards and cards",
+        "### Conditional and visibility",
+        "### Climate",
+    ):
+        assert header in ATM_SKILL_MARKDOWN
