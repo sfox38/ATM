@@ -92,6 +92,36 @@ SENSITIVE_KEY_SUBSTRINGS = frozenset({
     "token", "session",
 })
 
+# Domain-aware "lean" view for get_state / get_states. When a caller passes no
+# explicit `fields` and does not set `detailed`, the state is narrowed to the base
+# fields (entity_id, state) plus LEAN_ALWAYS_ATTRS plus the domain's important
+# attributes below, to cut token cost on the common read path. Field selection
+# always runs AFTER sensitive-attribute scrubbing, so it can never reveal a
+# scrubbed value. Domains with no entry fall back to base + LEAN_ALWAYS_ATTRS only;
+# describe_entity remains the full-detail single-entity tool.
+LEAN_ALWAYS_ATTRS = ("friendly_name",)
+
+DOMAIN_IMPORTANT_ATTRIBUTES: dict[str, tuple[str, ...]] = {
+    "light": ("brightness", "color_temp_kelvin", "rgb_color", "effect", "supported_color_modes"),
+    "climate": ("current_temperature", "temperature", "target_temp_high", "target_temp_low",
+                "hvac_action", "hvac_mode", "preset_mode", "fan_mode"),
+    "media_player": ("media_title", "media_artist", "source", "volume_level", "media_content_type"),
+    "cover": ("current_position", "current_tilt_position"),
+    "fan": ("percentage", "preset_mode", "oscillating", "direction"),
+    "sensor": ("device_class", "unit_of_measurement", "state_class"),
+    "binary_sensor": ("device_class",),
+    "lock": ("changed_by",),
+    "alarm_control_panel": ("changed_by",),
+    "vacuum": ("battery_level", "fan_speed", "status"),
+    "humidifier": ("current_humidity", "humidity", "mode"),
+    "water_heater": ("current_temperature", "temperature", "operation_mode"),
+    "weather": ("temperature", "humidity", "wind_speed"),
+    "device_tracker": ("source_type",),
+    "number": ("min", "max", "step", "unit_of_measurement"),
+    "select": ("options",),
+    "switch": ("device_class",),
+}
+
 BLOCKED_DOMAINS = frozenset({"atm"})
 
 HIGH_RISK_DOMAINS = frozenset({

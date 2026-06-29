@@ -44,7 +44,9 @@ from .const import (
     CAP_CONFIRM,
     CAP_DENY,
     DOMAIN,
+    DOMAIN_IMPORTANT_ATTRIBUTES,
     DUAL_GATE_SERVICES,
+    LEAN_ALWAYS_ATTRS,
     FILESYSTEM_ALLOWED_DIRS,
     HIGH_RISK_DOMAINS,
     MAX_FILE_BYTES,
@@ -319,11 +321,32 @@ _SCRIPT_ID_RE = re.compile(r"^[a-z0-9_]+$")
 _ENTITY_TOOL_DEFS: list[dict] = [
     {
         "name": "get_state",
-        "description": "Get the current state of a Home Assistant entity.",
+        "description": (
+            "Get the current state of a Home Assistant entity. Returns a compact, domain-aware view by "
+            "default (state plus that domain's key attributes); pass detailed=true for the full state, or "
+            "fields=[...] to select exact fields (e.g. \"state\", \"attr.brightness\"). For everything "
+            "about one entity, use describe_entity."
+        ),
         "inputSchema": {
             "type": "object",
             "properties": {
                 "entity_id": {"type": "string", "description": "Entity ID, e.g. light.living_room."},
+                "fields": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": (
+                        "Optional: return only these fields. Use top-level keys (state, last_changed, "
+                        "last_updated) and 'attr.<name>' for a single attribute, or 'attributes' for all. "
+                        "Overrides the default lean view."
+                    ),
+                },
+                "detailed": {
+                    "type": "boolean",
+                    "description": (
+                        "Return the full state with all attributes. Default false returns a compact, "
+                        "domain-aware view (key attributes only)."
+                    ),
+                },
             },
             "required": ["entity_id"],
         },
@@ -333,9 +356,30 @@ _ENTITY_TOOL_DEFS: list[dict] = [
         "description": (
             "Get the current state of every entity this token can access (may be a large response). "
             "To find specific entities or filter by domain, area, or state use search_entities; "
-            "for a counts-only orientation use get_overview."
+            "for a counts-only orientation use get_overview. Returns a compact, domain-aware view per "
+            "entity by default; pass detailed=true for full states, or fields=[...] to select exact fields."
         ),
-        "inputSchema": {"type": "object", "properties": {}},
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "fields": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": (
+                        "Optional: return only these fields per entity. Use top-level keys (state, "
+                        "last_changed) and 'attr.<name>' for a single attribute, or 'attributes' for all. "
+                        "Overrides the default lean view."
+                    ),
+                },
+                "detailed": {
+                    "type": "boolean",
+                    "description": (
+                        "Return full states with all attributes. Default false returns a compact, "
+                        "domain-aware view per entity."
+                    ),
+                },
+            },
+        },
     },
     {
         "name": "get_history",
@@ -1739,6 +1783,71 @@ async def _gate(
     return None
 
 
+def _normalize_fields(fields: Any) -> list[str]:
+    """Coerce the get_state/get_states `fields` arg to a list of field names.
+
+    Accepts a list of strings or a single comma-separated string (a common agent
+    mistake); anything else yields an empty list, which selects the lean default.
+    """
+    if isinstance(fields, str):
+        return [f for f in (p.strip() for p in fields.split(",")) if f]
+    if isinstance(fields, list):
+        return [str(f).strip() for f in fields if str(f).strip()]
+    return []
+
+
+def _select_state_fields(scrubbed: dict, fields: list[str]) -> dict:
+    """Return only the requested fields from an already-scrubbed state dict.
+
+    Top-level keys (state, last_changed, last_updated, ...) are taken as-is;
+    'attr.<name>' selects one attribute; 'attributes' selects all (scrubbed)
+    attributes. entity_id is always included. Unknown fields are ignored. Runs
+    AFTER scrubbing, so a scrubbed attribute can never be selected back in.
+    """
+    attrs = scrubbed.get("attributes", {})
+    out: dict = {"entity_id": scrubbed.get("entity_id")}
+    picked_attrs: dict = {}
+    for f in fields:
+        if f == "attributes":
+            picked_attrs.update(attrs)
+        elif f.startswith("attr."):
+            name = f[len("attr."):]
+            if name in attrs:
+                picked_attrs[name] = attrs[name]
+        elif f in scrubbed and f != "attributes":
+            out[f] = scrubbed[f]
+    if picked_attrs:
+        out["attributes"] = picked_attrs
+    return out
+
+
+def _lean_state(scrubbed: dict) -> dict:
+    """Return the domain-aware lean view of an already-scrubbed state dict."""
+    eid = scrubbed.get("entity_id", "") or ""
+    domain = eid.split(".")[0] if "." in eid else ""
+    attrs = scrubbed.get("attributes", {})
+    keep = set(LEAN_ALWAYS_ATTRS) | set(DOMAIN_IMPORTANT_ATTRIBUTES.get(domain, ()))
+    lean_attrs = {k: v for k, v in attrs.items() if k in keep}
+    out: dict = {"entity_id": eid, "state": scrubbed.get("state")}
+    if lean_attrs:
+        out["attributes"] = lean_attrs
+    return out
+
+
+def _project_state(scrubbed: dict, fields: Any, detailed: bool) -> dict:
+    """Apply presentation-only field projection to a scrubbed state dict.
+
+    detailed -> full dict; explicit fields -> requested subset; otherwise the
+    domain-aware lean view. Never bypasses scrubbing (the input is already scrubbed).
+    """
+    if detailed:
+        return scrubbed
+    norm = _normalize_fields(fields)
+    if norm:
+        return _select_state_fields(scrubbed, norm)
+    return _lean_state(scrubbed)
+
+
 async def _tool_get_state(
     args: dict, token: TokenRecord, hass: Any
 ) -> tuple[dict, str, str]:
@@ -1757,7 +1866,9 @@ async def _tool_get_state(
     if state is None:
         return _tool_error("Entity not found."), "not_found", entity_id
 
-    return _tool_success(json.dumps(scrub_sensitive_attributes(state), default=str)), "allowed", entity_id
+    scrubbed = scrub_sensitive_attributes(state)
+    result = _project_state(scrubbed, args.get("fields"), bool(args.get("detailed")))
+    return _tool_success(json.dumps(result, default=str)), "allowed", entity_id
 
 
 async def _tool_get_states(
@@ -1766,7 +1877,10 @@ async def _tool_get_states(
     """MCP tool: return all entities accessible to the token."""
     states = hass.states.async_all()
     filtered = filter_entities_for_token(states, token, hass)
-    return _tool_success(json.dumps(filtered, default=str)), "allowed", "get_states"
+    fields = args.get("fields")
+    detailed = bool(args.get("detailed"))
+    projected = [_project_state(d, fields, detailed) for d in filtered]
+    return _tool_success(json.dumps(projected, default=str)), "allowed", "get_states"
 
 
 async def _tool_get_history(

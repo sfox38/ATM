@@ -297,13 +297,13 @@
 
           <article class="tool" data-cap="read" data-search="get_state single entity">
             <div class="tool-head"><span class="tool-name">get_state</span><span class="badge badge-neutral">tree-scoped</span></div>
-            <p class="tool-desc">Current state of a single entity. Requires READ or WRITE on the entity. Sensitive attributes are always scrubbed.</p>
-            <dl><dt>params</dt><dd><code>entity_id</code> (string, required)</dd><dt>returns</dt><dd><code>state</code>, <code>attributes</code>, and <code>last_changed</code></dd></dl>
+            <p class="tool-desc">Current state of a single entity. Returns a compact, domain-aware view by default (key attributes only); pass <code>detailed=true</code> for the full state, or <code>fields=[...]</code> to select exact fields. Requires READ or WRITE on the entity. Sensitive attributes are always scrubbed.</p>
+            <dl><dt>params</dt><dd><code>entity_id</code> (string, required), <code>fields</code> (array, optional), <code>detailed</code> (boolean, optional)</dd><dt>returns</dt><dd>by default <code>entity_id</code>, <code>state</code>, and key <code>attributes</code>; the full state with <code>detailed=true</code></dd></dl>
           </article>
 
           <article class="tool" data-cap="read" data-search="get_states all entities">
             <div class="tool-head"><span class="tool-name">get_states</span><span class="badge badge-neutral">tree-scoped</span></div>
-            <p class="tool-desc">All entity states the token can read. Pass-through tokens receive every non-ATM entity.</p>
+            <p class="tool-desc">All entity states the token can read, as a compact domain-aware view per entity by default (<code>detailed=true</code> or <code>fields=[...]</code> to change). Pass-through tokens receive every non-ATM entity.</p>
           </article>
 
           <article class="tool" data-cap="read" data-search="get_statistics long term numeric">

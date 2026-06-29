@@ -642,6 +642,130 @@ async def test_tools_call_get_state_not_found_entity_same_response_as_denied():
     assert nf_text == denied_text
 
 
+# --- get_state / get_states field projection (v2.1) ---
+
+from custom_components.atm.mcp_view import (  # noqa: E402
+    _normalize_fields,
+    _select_state_fields,
+    _lean_state,
+    _project_state,
+)
+
+
+def _full_light_dict():
+    return {
+        "entity_id": "light.kitchen",
+        "state": "on",
+        "attributes": {
+            "friendly_name": "Kitchen",
+            "brightness": 200,
+            "color_temp_kelvin": 3000,
+            "supported_features": 44,   # not domain-important -> dropped in lean
+            "icon": "mdi:lamp",         # not domain-important -> dropped in lean
+        },
+        "last_changed": "2026-06-29T00:00:00+00:00",
+        "last_updated": "2026-06-29T00:00:00+00:00",
+        "context": {"id": "abc", "user_id": None, "parent_id": None},
+    }
+
+
+def test_normalize_fields_accepts_list_csv_and_rejects_garbage():
+    assert _normalize_fields(["state", " attr.brightness "]) == ["state", "attr.brightness"]
+    assert _normalize_fields("state, attr.brightness") == ["state", "attr.brightness"]
+    assert _normalize_fields(None) == []
+    assert _normalize_fields(123) == []
+    assert _normalize_fields([]) == []
+
+
+def test_lean_state_keeps_base_plus_domain_attrs_only():
+    lean = _lean_state(_full_light_dict())
+    assert lean["entity_id"] == "light.kitchen"
+    assert lean["state"] == "on"
+    assert lean["attributes"]["friendly_name"] == "Kitchen"
+    assert lean["attributes"]["brightness"] == 200
+    assert lean["attributes"]["color_temp_kelvin"] == 3000
+    assert "supported_features" not in lean["attributes"]
+    assert "icon" not in lean["attributes"]
+    # heavy top-level fields dropped in lean
+    assert "context" not in lean
+    assert "last_updated" not in lean
+
+
+def test_lean_state_unknown_domain_base_only():
+    d = {"entity_id": "weird.thing", "state": "x", "attributes": {"friendly_name": "W", "foo": 1}}
+    lean = _lean_state(d)
+    assert lean["attributes"] == {"friendly_name": "W"}
+    assert "foo" not in lean["attributes"]
+
+
+def test_select_state_fields_topmost_attr_and_all():
+    d = _full_light_dict()
+    sel = _select_state_fields(d, ["state", "attr.brightness", "last_changed"])
+    assert sel == {
+        "entity_id": "light.kitchen",
+        "state": "on",
+        "last_changed": "2026-06-29T00:00:00+00:00",
+        "attributes": {"brightness": 200},
+    }
+    sel_all = _select_state_fields(d, ["attributes"])
+    assert sel_all["attributes"] == d["attributes"]
+    sel_unknown = _select_state_fields(d, ["nope", "attr.nope"])
+    assert sel_unknown == {"entity_id": "light.kitchen"}
+
+
+def test_select_state_fields_cannot_resurrect_scrubbed_attr():
+    # access_token is already scrubbed out before projection; requesting it returns nothing.
+    d = {"entity_id": "camera.front", "state": "idle", "attributes": {"friendly_name": "Front"}}
+    sel = _select_state_fields(d, ["attr.access_token"])
+    assert sel == {"entity_id": "camera.front"}
+    assert "attributes" not in sel
+
+
+def test_project_state_modes():
+    d = _full_light_dict()
+    assert _project_state(d, None, True) is d  # detailed -> full as-is
+    assert _project_state(d, ["state"], False) == {"entity_id": "light.kitchen", "state": "on"}
+    lean = _project_state(d, None, False)
+    assert "supported_features" not in lean["attributes"]
+
+
+@pytest.mark.asyncio
+async def test_tools_call_get_state_lean_default_and_detailed():
+    token, _ = _make_token()
+    data = _make_data(token)
+    hass = _make_hass(data)
+    hass.states.get.return_value = MagicMock()
+    full = {
+        "entity_id": "light.kitchen",
+        "state": "on",
+        "attributes": {"friendly_name": "K", "brightness": 5, "icon": "mdi:x"},
+        "last_updated": "t",
+        "context": {"id": "c"},
+    }
+    with patch("custom_components.atm.mcp_view.resolve") as mock_resolve:
+        from custom_components.atm.policy_engine import Permission
+        mock_resolve.return_value = Permission.WRITE
+        with patch("custom_components.atm.mcp_view.scrub_sensitive_attributes", return_value=full):
+            res_lean, _m, _r, out_lean = await _dispatch_mcp(
+                "tools/call", 3,
+                {"name": "get_state", "arguments": {"entity_id": "light.kitchen"}},
+                token, hass, data, "127.0.0.1", base_url="http://h",
+            )
+            res_full, _m2, _r2, out_full = await _dispatch_mcp(
+                "tools/call", 4,
+                {"name": "get_state", "arguments": {"entity_id": "light.kitchen", "detailed": True}},
+                token, hass, data, "127.0.0.1", base_url="http://h",
+            )
+    assert out_lean == "allowed" and out_full == "allowed"
+    lean = json.loads(res_lean["result"]["content"][0]["text"])
+    assert lean["attributes"]["brightness"] == 5
+    assert "icon" not in lean["attributes"]
+    assert "context" not in lean
+    full_out = json.loads(res_full["result"]["content"][0]["text"])
+    assert full_out["attributes"]["icon"] == "mdi:x"
+    assert "context" in full_out
+
+
 # --- tools/call: restart_ha dual-gate ---
 
 @pytest.mark.asyncio
