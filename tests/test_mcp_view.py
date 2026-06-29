@@ -863,6 +863,46 @@ async def test_get_calendar_events_not_found_when_inaccessible():
     assert outcome == "denied"
 
 
+# --- list_blueprints (v2.1) ---
+
+@pytest.mark.asyncio
+async def test_list_blueprints_forbidden_without_cap():
+    token, _ = _make_token(cap_config_read="deny")
+    data = _make_data(token)
+    hass = _make_hass(data)
+    res, _m, _r, outcome = await _dispatch_mcp(
+        "tools/call", 3, {"name": "list_blueprints", "arguments": {}},
+        token, hass, data, "127.0.0.1", base_url="http://h",
+    )
+    assert outcome == "denied"
+    assert res["result"].get("isError") is True
+
+
+@pytest.mark.asyncio
+async def test_list_blueprints_lists_with_inputs():
+    token, _ = _make_token(cap_config_read="allow")
+    data = _make_data(token)
+    hass = _make_hass(data)
+    bp = MagicMock()
+    bp.metadata = {"name": "Motion Light", "description": "d", "input": {"motion": {}}, "source_url": "u"}
+    dom_bp = MagicMock()
+    dom_bp.async_get_blueprints = AsyncMock(return_value={"author/motion.yaml": bp})
+    with patch("homeassistant.components.automation.async_get_blueprints", return_value=dom_bp), \
+         patch("homeassistant.components.script.async_get_blueprints", return_value=dom_bp):
+        res, _m, _r, outcome = await _dispatch_mcp(
+            "tools/call", 3, {"name": "list_blueprints", "arguments": {"domain": "automation"}},
+            token, hass, data, "127.0.0.1", base_url="http://h",
+        )
+    assert outcome == "allowed"
+    payload = json.loads(res["result"]["content"][0]["text"])
+    assert payload["count"] == 1
+    row = payload["blueprints"][0]
+    assert row["name"] == "Motion Light"
+    assert row["domain"] == "automation"
+    assert row["path"] == "author/motion.yaml"
+    assert row["input"] == {"motion": {}}
+
+
 # --- tools/call: restart_ha dual-gate ---
 
 @pytest.mark.asyncio

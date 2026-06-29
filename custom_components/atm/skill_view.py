@@ -173,6 +173,10 @@ General, for automations, scripts, and scenes:
   several near-duplicate automations.
 - Avoid trigger loops: an automation whose action changes the same entity it
   triggers on will re-fire itself.
+- To build from a blueprint, call list_blueprints to see the installed blueprints
+  and their inputs, then create the automation (or script) with a use_blueprint
+  config, {"use_blueprint": {"path": "<path>", "input": {<name>: <value>}}}, and no
+  top-level trigger/action.
 
 Minimal skeleton:
 

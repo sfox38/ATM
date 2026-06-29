@@ -72,6 +72,12 @@
             <p class="tool-desc">Read HA configuration data, including integrations, packages, and automation settings.</p>
           </article>
 
+          <article class="tool" data-cap="read" data-search="list_blueprints blueprint automation script">
+            <div class="tool-head"><span class="tool-name">list_blueprints</span><span class="badge badge-cap">Config read</span></div>
+            <p class="tool-desc">List installed automation and script blueprints with their inputs. To instantiate one, create an automation or script with a <code>use_blueprint</code> config (the existing authoring tools accept it); there is no separate create-from-blueprint tool.</p>
+            <dl><dt>params</dt><dd><code>domain</code> (optional, <code>automation</code> or <code>script</code>)</dd></dl>
+          </article>
+
           <article class="tool" data-cap="read" data-search="get_logs system log entries">
             <div class="tool-head"><span class="tool-name">get_logs</span><span class="badge badge-cap">Log read</span></div>
             <p class="tool-desc">Recent HA system log entries. ATM's own entries are excluded and token values are scrubbed from messages and tracebacks.</p>

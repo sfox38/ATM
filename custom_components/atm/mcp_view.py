@@ -600,7 +600,9 @@ _SYSTEM_TOOL_DEFS: list[dict] = [
             "'trigger' (list of trigger objects, each with a 'platform' field, required), "
             "'action' (list of action objects - service calls, delays, conditions, etc., required), "
             "'condition' (list of condition objects, optional), "
-            "'mode' ('single'|'restart'|'queued'|'parallel', default 'single', optional)."
+            "'mode' ('single'|'restart'|'queued'|'parallel', default 'single', optional). "
+            "To build from a blueprint instead, pass 'use_blueprint' ({'path': ..., 'input': {...}}) "
+            "with no trigger/action; see list_blueprints for available blueprints and their inputs."
         ),
         "cap": "cap_automation_write",
         "inputSchema": {
@@ -659,7 +661,9 @@ _SYSTEM_TOOL_DEFS: list[dict] = [
             "'sequence' (list of action objects - service calls, delays, conditions, etc., required), "
             "'mode' ('single'|'restart'|'queued'|'parallel', default 'single', optional), "
             "'variables' (dict of script-level variables, optional), "
-            "'fields' (dict of input field definitions for callable scripts, optional)."
+            "'fields' (dict of input field definitions for callable scripts, optional). "
+            "To build from a blueprint instead, pass 'use_blueprint' ({'path': ..., 'input': {...}}) "
+            "in place of 'sequence'; see list_blueprints for available blueprints and their inputs."
         ),
         "cap": "cap_script_write",
         "inputSchema": {
@@ -768,6 +772,27 @@ _SYSTEM_TOOL_DEFS: list[dict] = [
                     "maximum": 1000,
                     "default": 100,
                     "description": "Maximum entries to return (most recent kept).",
+                },
+            },
+        },
+    },
+    {
+        "name": "list_blueprints",
+        "description": (
+            "List the installed automation and script blueprints with their inputs, so you can author "
+            "from a blueprint. To instantiate one, create the automation or script with a use_blueprint "
+            "config, {\"use_blueprint\": {\"path\": \"<path>\", \"input\": {<name>: <value>}}}, and no "
+            "top-level trigger/action; the path and input names come from this list. Optional domain "
+            "filter ('automation' or 'script')."
+        ),
+        "cap": "cap_config_read",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "domain": {
+                    "type": "string",
+                    "enum": ["automation", "script"],
+                    "description": "Optional: limit to one domain. Defaults to both.",
                 },
             },
         },
@@ -2450,6 +2475,40 @@ async def _tool_get_logbook(
     limit = max(1, min(limit, 1000))
     scoped = scoped[-limit:]  # logbook is chronological; keep the most recent
     return _tool_success(json.dumps({"count": len(scoped), "entries": scoped}, default=str)), "allowed", "get_logbook"
+
+
+async def _tool_list_blueprints(
+    args: dict, token: TokenRecord, hass: Any
+) -> tuple[dict, str, str]:
+    """MCP tool: list automation/script blueprints and their inputs (cap_config_read)."""
+    if effective_cap(token, "cap_config_read") == CAP_DENY:
+        return _tool_error("Forbidden."), "denied", "list_blueprints"
+    domain_arg = str(args.get("domain") or "").strip().lower()
+    domains = [domain_arg] if domain_arg in ("automation", "script") else ["automation", "script"]
+    out: list[dict] = []
+    for dom in domains:
+        try:
+            if dom == "automation":
+                from homeassistant.components.automation import async_get_blueprints as _get_bp  # noqa: PLC0415
+            else:
+                from homeassistant.components.script import async_get_blueprints as _get_bp  # noqa: PLC0415
+            blueprints = await _get_bp(hass).async_get_blueprints()
+        except Exception:  # noqa: BLE001 - a missing/again-failing domain just yields no blueprints
+            _LOGGER.debug("list_blueprints failed for domain %s", dom, exc_info=True)
+            continue
+        for path, bp in sorted(blueprints.items()):
+            if isinstance(bp, Exception):
+                continue  # a blueprint that failed to load is stored as its exception
+            meta = bp.metadata or {}
+            out.append({
+                "domain": dom,
+                "path": path,
+                "name": meta.get("name") or path,
+                "description": meta.get("description"),
+                "input": meta.get("input"),
+                "source_url": meta.get("source_url"),
+            })
+    return _tool_success(json.dumps({"count": len(out), "blueprints": out}, default=str)), "allowed", "list_blueprints"
 
 
 async def _tool_render_template(
@@ -6189,6 +6248,8 @@ async def _call_tool(
         return await _tool_get_logs(arguments, token, hass)
     if tool_name == "get_logbook":
         return await _tool_get_logbook(arguments, token, hass)
+    if tool_name == "list_blueprints":
+        return await _tool_list_blueprints(arguments, token, hass)
     if tool_name == "create_script":
         return await _tool_create_script(arguments, token, hass, data, request_id, client_ip)
     if tool_name == "edit_script":
