@@ -6,9 +6,6 @@ and the import-level wiring of evaluate_capability.
 
 from __future__ import annotations
 
-from datetime import datetime
-
-import pytest
 from homeassistant.util.dt import utcnow
 
 from custom_components.atm.const import (

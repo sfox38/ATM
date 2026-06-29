@@ -6,8 +6,6 @@ entity state, including state helpers called as Jinja2 filters.
 
 from __future__ import annotations
 
-from datetime import datetime
-
 import pytest
 from homeassistant.util.dt import utcnow
 

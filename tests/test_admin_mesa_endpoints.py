@@ -149,7 +149,7 @@ async def test_delete_profile(hass: HomeAssistant):
 
 @pytest.mark.asyncio
 async def test_list_profiles(hass: HomeAssistant):
-    data = await _setup(hass)
+    await _setup(hass)
     view_one = ATMAdminMesaProfileView()
     view_one.hass = hass
     for eid in ("light.a", "light.b"):
@@ -232,7 +232,7 @@ async def test_defaults_round_trip(hass: HomeAssistant):
 
 @pytest.mark.asyncio
 async def test_issues_endpoint_refresh(hass: HomeAssistant):
-    data = await _setup(hass)
+    await _setup(hass)
     # Profile declares triggers_automations: none, but an automation references it.
     view = ATMAdminMesaProfileView()
     view.hass = hass

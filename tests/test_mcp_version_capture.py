@@ -416,6 +416,22 @@ class TestEntityRegistryWrite:
         _, outcome, _ = await _call_tool("set_entity", {"entity_id": eid, "name": "X"}, token, hass, data)
         assert outcome == "denied"
 
+    async def test_deny_token_is_not_a_scope_oracle(self, hass, env):
+        # A cap-denied token must get the byte-identical Forbidden body regardless
+        # of whether the named entity is writable, out of scope, or nonexistent.
+        eid, _area = env  # WRITE-accessible light entity
+        hass.states.async_set("lock.front_door", "locked", {})  # exists, out of scope
+        data, _ = _data()
+        tree = PermissionTree(domains={"light": PermissionNode(state="GREEN")})
+        token = _token(tree=tree, cap_registry_write="deny")
+        bodies = []
+        for target in (eid, "lock.front_door", "light.ghost_nonexistent"):
+            content, outcome, _ = await _call_tool(
+                "set_entity", {"entity_id": target, "name": "X"}, token, hass, data)
+            assert outcome == "denied"
+            bodies.append(content["content"][0]["text"])
+        assert len(set(bodies)) == 1
+
     async def test_set_entity_read_only_denied(self, hass, env):
         eid, _area = env
         data, _ = _data()

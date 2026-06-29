@@ -6,7 +6,6 @@ import asyncio
 import hashlib
 import json
 import secrets
-import uuid
 from datetime import timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -20,7 +19,6 @@ from custom_components.atm.admin_view import (
     ATMAdminApprovalsView,
 )
 from custom_components.atm.approvals import (
-    PendingApproval,
     STATUS_APPROVED,
     STATUS_CANCELLED,
     STATUS_PENDING,

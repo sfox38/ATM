@@ -10,8 +10,6 @@ import asyncio
 import json
 import uuid
 
-import pytest
-from homeassistant.core import HomeAssistant
 from homeassistant.util.dt import utcnow
 
 from custom_components.atm.mcp_view import _call_tool

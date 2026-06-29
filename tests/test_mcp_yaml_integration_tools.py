@@ -3,13 +3,10 @@
 from __future__ import annotations
 
 import json
-import os
 import uuid
 from unittest.mock import AsyncMock, MagicMock
 
-import pytest
 from homeassistant.config_entries import ConfigEntryDisabler
-from homeassistant.core import HomeAssistant
 from homeassistant.util.dt import utcnow
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 

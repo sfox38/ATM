@@ -7,7 +7,7 @@ import hashlib
 import secrets
 import uuid
 from datetime import timedelta
-from unittest.mock import AsyncMock, MagicMock, call, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -316,7 +316,6 @@ async def test_create_token_sensors_noop_when_no_callback():
 
 @pytest.mark.asyncio
 async def test_remove_token_sensors_calls_async_remove_on_each():
-    token = _make_token(name="gone-tok")
     data = _make_data()
     hass = _make_hass(data)
 
@@ -349,7 +348,6 @@ async def test_remove_token_sensors_unknown_slug_is_noop():
 
 @pytest.mark.asyncio
 async def test_remove_token_sensors_pops_from_platform_entities():
-    token = _make_token(name="gone-tok")
     data = _make_data()
     hass = _make_hass(data)
 
