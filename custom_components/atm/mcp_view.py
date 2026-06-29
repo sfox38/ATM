@@ -330,7 +330,11 @@ _ENTITY_TOOL_DEFS: list[dict] = [
     },
     {
         "name": "get_states",
-        "description": "Get the current state of all accessible Home Assistant entities.",
+        "description": (
+            "Get the current state of every entity this token can access (may be a large response). "
+            "To find specific entities or filter by domain, area, or state use search_entities; "
+            "for a counts-only orientation use get_overview."
+        ),
         "inputSchema": {"type": "object", "properties": {}},
     },
     {
@@ -364,7 +368,11 @@ _ENTITY_TOOL_DEFS: list[dict] = [
     },
     {
         "name": "get_statistics",
-        "description": "Get long-term statistics for a Home Assistant entity.",
+        "description": (
+            "Get long-term statistics (hourly and daily aggregates such as mean, min, max, sum) for a "
+            "Home Assistant entity, for trends over days or months. For recent individual state changes "
+            "use get_history instead."
+        ),
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -491,13 +499,20 @@ _ENTITY_TOOL_DEFS: list[dict] = [
 _SYSTEM_TOOL_DEFS: list[dict] = [
     {
         "name": "get_config",
-        "description": "Get the Home Assistant configuration.",
+        "description": (
+            "Get Home Assistant core configuration: version, location, unit system, time zone, and "
+            "loaded components. For an entity-level summary of the home use get_overview."
+        ),
         "cap": "cap_config_read",
         "inputSchema": {"type": "object", "properties": {}},
     },
     {
         "name": "render_template",
-        "description": "Render a Jinja2 template in Home Assistant.",
+        "description": (
+            "Render a Jinja2 template in Home Assistant. Templates are scoped to this token: states() of "
+            "an out-of-scope entity returns 'unknown', and enumeration helpers like area_entities() return "
+            "empty. Discover entities with search_entities, not template enumeration."
+        ),
         "cap": "cap_template_render",
         "inputSchema": {
             "type": "object",
@@ -1107,7 +1122,10 @@ _SYSTEM_TOOL_DEFS: list[dict] = [
         "name": "write_file",
         "description": (
             "Write a UTF-8 text file under www/, themes/, or custom_templates/ (creates parent dirs). "
-            "May require admin approval. Paths outside the allowed directories are refused."
+            "These directories hold static assets (dashboard resources, themes, Jinja template files), "
+            "not Home Assistant config; to author automations, scripts, scenes, helpers, or dashboards "
+            "use their dedicated tools. May require admin approval. Paths outside the allowed directories "
+            "are refused."
         ),
         "cap": "cap_filesystem",
         "inputSchema": {
@@ -1132,9 +1150,12 @@ _SYSTEM_TOOL_DEFS: list[dict] = [
     {
         "name": "set_yaml_config",
         "description": (
-            "Replace the entire contents of configuration.yaml. May require admin approval. "
-            "High blast radius: a broken file prevents Home Assistant from starting. Run check_config and "
-            "restart HA afterwards to apply."
+            "Replace the entire contents of configuration.yaml (a full-file replace). Use this only for "
+            "raw configuration.yaml settings; to author automations, scripts, scenes, helpers, or "
+            "dashboards use their dedicated tools instead. Preserve any existing content you are not "
+            "changing, including !include and !secret lines. May require admin approval. High blast "
+            "radius: a broken file prevents Home Assistant from starting. Run check_config and restart "
+            "HA afterwards to apply."
         ),
         "cap": "cap_yaml_edit",
         "inputSchema": {
