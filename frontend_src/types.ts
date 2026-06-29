@@ -351,7 +351,14 @@ export interface ApprovalListParams {
 }
 
 export type VersionAction = "create" | "edit" | "delete" | "rollback";
-export type VersionResourceType = "automation" | "script" | "scene" | "helper" | "dashboard";
+export type VersionResourceType =
+  | "automation"
+  | "script"
+  | "scene"
+  | "helper"
+  | "dashboard"
+  | "yaml_config"
+  | "file";
 
 export interface VersionSummary {
   id: string;

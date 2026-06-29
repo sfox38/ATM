@@ -1242,6 +1242,12 @@ select.input {
 }
 .approval-diff-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .approval-diff-col { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+
+/* Raw-text line diff (configuration.yaml / scoped file version snapshots). */
+.raw-diff { white-space: pre; }
+.raw-diff .diff-line { display: block; padding: 0 4px; min-height: 1.4em; }
+.raw-diff .diff-remove { background: rgba(229, 57, 53, 0.18); }
+.raw-diff .diff-add { background: rgba(67, 160, 71, 0.20); }
 .approval-diff-label { font-size: 12px; font-weight: 600; color: var(--atm-text-2); }
 
 /* Configuration changes (version history) tab */

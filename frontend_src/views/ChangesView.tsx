@@ -3,8 +3,23 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import type { VersionRecord, VersionSummary } from "../types";
 import { api } from "../api";
 import { YamlView, toYaml } from "../components/YamlView";
+import { diffLines, RawDiffPane } from "../components/DiffView";
 import { Loading, ErrorMsg, RefreshIcon } from "../index";
 import { formatDateTime } from "../utils";
+
+// Resource types whose before/after payload is a raw text blob ({content, ...})
+// rather than a structured config; these render as a line diff, not YAML.
+const RAW_CONTENT_TYPES = new Set(["yaml_config", "file"]);
+
+/** Extract the raw-text snapshot from a version side, or null. content is null
+ * when the snapshot was too large to store (a non-restorable marker). */
+function rawSide(value: Record<string, unknown> | null): { content: string | null; bytes?: number } | null {
+  if (value == null) return null;
+  return {
+    content: typeof value.content === "string" ? (value.content as string) : null,
+    bytes: typeof value.bytes === "number" ? (value.bytes as number) : undefined,
+  };
+}
 
 const ACTION_BADGE: Record<string, string> = {
   create: "badge-green",
@@ -232,8 +247,15 @@ function ChangeDetail(
   // The newest version's "after" is the resource's current config, so restoring
   // it is a no-op; hide that button (the Before stays useful as an undo).
   const isLatest = history.length > 0 && history[0].id === versionId;
-  const showBefore = !!record && record.before != null;
-  const showAfter = !!record && record.after != null && !isLatest;
+  const isRaw = !!record && RAW_CONTENT_TYPES.has(record.resource_type);
+  const beforeRaw = isRaw && record ? rawSide(record.before) : null;
+  const afterRaw = isRaw && record ? rawSide(record.after) : null;
+  // A raw snapshot stored as a too-large marker (content null) is not restorable.
+  const beforeRestorable = isRaw ? beforeRaw?.content != null : !!record && record.before != null;
+  const afterRestorable = isRaw ? afterRaw?.content != null : !!record && record.after != null;
+  const showBefore = beforeRestorable;
+  const showAfter = afterRestorable && !isLatest;
+  const rawDiff = isRaw ? diffLines(beforeRaw?.content ?? "", afterRaw?.content ?? "") : null;
 
   return (
     <div className="view-root change-detail">
@@ -309,7 +331,11 @@ function ChangeDetail(
                       </button>
                     )}
                   </div>
-                  <YamlView value={toYaml(record.before)} />
+                  {isRaw
+                    ? (beforeRaw?.content != null
+                        ? <RawDiffPane rows={rawDiff!.beforeRows} tone="remove" />
+                        : <pre className="yaml-pre yaml-pre-empty">{beforeRaw ? `(snapshot too large to display${beforeRaw.bytes ? `, ${beforeRaw.bytes} bytes` : ""})` : "(none)"}</pre>)
+                    : <YamlView value={toYaml(record.before)} />}
                 </div>
                 <div className="yaml-diff-col">
                   <div className="yaml-pane-head">
@@ -320,7 +346,11 @@ function ChangeDetail(
                       </button>
                     )}
                   </div>
-                  <YamlView value={toYaml(record.after)} />
+                  {isRaw
+                    ? (afterRaw?.content != null
+                        ? <RawDiffPane rows={rawDiff!.afterRows} tone="add" />
+                        : <pre className="yaml-pre yaml-pre-empty">{afterRaw ? `(snapshot too large to display${afterRaw.bytes ? `, ${afterRaw.bytes} bytes` : ""})` : "(none)"}</pre>)
+                    : <YamlView value={toYaml(record.after)} />}
                 </div>
               </div>
             </div>
