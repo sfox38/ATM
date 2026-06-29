@@ -341,3 +341,16 @@ describe("api version history", () => {
     expect(opts.method).toBe("POST");
   });
 });
+
+describe("api.clearMesaOrphans", () => {
+  it("POSTs to the orphans clear endpoint", async () => {
+    const body = { deleted: { entities: ["light.gone"], areas: [], integrations: [] }, count: 1 };
+    globalThis.fetch = mockFetchResponse(200, body);
+
+    const result = await api.clearMesaOrphans();
+    expect(result).toEqual(body);
+    const [url, opts] = (fetch as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(url).toBe("/api/atm/admin/mesa/orphans/clear");
+    expect(opts.method).toBe("POST");
+  });
+});

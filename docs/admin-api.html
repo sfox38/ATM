@@ -155,7 +155,9 @@ GET     /api/atm/admin/mesa/areas                  List area profiles
 GET/PUT/DELETE  /api/atm/admin/mesa/areas/{area_id}    One area profile
 GET/PUT /api/atm/admin/mesa/defaults               Deployment-default profile (the fallback level)
 GET     /api/atm/admin/mesa/vocabulary             Canonical tags and roots
-GET     /api/atm/admin/mesa/issues                 Validation issues + orphans (?refresh=1)</code></pre>
+GET     /api/atm/admin/mesa/issues                 Validation issues + orphans (?refresh=1)
+POST    /api/atm/admin/mesa/orphans/clear          Delete every orphaned entity, area, and integration profile in one call</code></pre>
+        <p>The <code>orphans/clear</code> action recomputes the orphan lists against the live registries, then deletes exactly those profiles (the per-profile DELETE endpoints remain for one-off removals). It returns the deleted ids grouped by kind and a total <code>count</code>. Profiles are never deleted automatically; this is an explicit admin action.</p>
         <pre class="code" data-lang="json" data-label="MESA profile document (PUT)"><code>{
   "semantic_profile": { },        // mesa-core schema; see the mesa-core repo
   "privacy_classification": { }

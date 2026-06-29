@@ -18,6 +18,7 @@ from custom_components.atm.admin_view import (
     ATMAdminMesaIntegrationView,
     ATMAdminMesaIntegrationOptionsView,
     ATMAdminMesaIssuesView,
+    ATMAdminMesaOrphansClearView,
     ATMAdminMesaProfilesView,
     ATMAdminMesaProfileView,
     ATMAdminMesaVocabularyView,
@@ -390,3 +391,67 @@ async def test_domain_delete_changes_entity_provenance(hass: HomeAssistant):
     after = data.mesa.store.get_effective("light.somewhere")
     # Falls back to the built-in light baseline (autonomous).
     assert after.operational_boundaries.control_mode.value == "autonomous"
+
+
+@pytest.mark.asyncio
+async def test_orphans_clear_deletes_all_orphan_profiles(hass: HomeAssistant):
+    data = await _setup(hass)
+    runtime = data.mesa
+    body = json.dumps(
+        {"semantic_profile": {"operational_boundaries": {"control_mode": "confirm"}}}
+    ).encode()
+
+    # Seed one orphan of each kind: a stored profile whose target does not exist.
+    ev = ATMAdminMesaProfileView()
+    ev.hass = hass
+    av = ATMAdminMesaAreaView()
+    av.hass = hass
+    iv = ATMAdminMesaIntegrationView()
+    iv.hass = hass
+    await ev.put(_admin_request(body=body), entity_id="input_boolean.ghost_clear")
+    await av.put(_admin_request(body=body), area_id="ghost_area_clear")
+    await iv.put(_admin_request(body=body), integration="ghost_integration_clear")
+
+    assert runtime.store.get("input_boolean.ghost_clear") is not None
+    assert runtime.store.get_area_profile("ghost_area_clear") is not None
+    assert runtime.store.get_integration_profile("ghost_integration_clear") is not None
+
+    clear = ATMAdminMesaOrphansClearView()
+    clear.hass = hass
+    resp = await clear.post(_admin_request())
+    assert resp.status == 200
+    out = _body(resp)
+    assert out["count"] == 3
+    assert "input_boolean.ghost_clear" in out["deleted"]["entities"]
+    assert "ghost_area_clear" in out["deleted"]["areas"]
+    assert "ghost_integration_clear" in out["deleted"]["integrations"]
+
+    # Profiles are gone and the orphan lists are now empty.
+    assert runtime.store.get("input_boolean.ghost_clear") is None
+    assert runtime.store.get_area_profile("ghost_area_clear") is None
+    assert runtime.store.get_integration_profile("ghost_integration_clear") is None
+    assert list(runtime.orphans) == []
+    assert list(runtime.orphan_areas) == []
+    assert list(runtime.orphan_integrations) == []
+
+
+@pytest.mark.asyncio
+async def test_orphans_clear_no_orphans_returns_zero(hass: HomeAssistant):
+    await _setup(hass)
+    clear = ATMAdminMesaOrphansClearView()
+    clear.hass = hass
+    resp = await clear.post(_admin_request())
+    assert resp.status == 200
+    out = _body(resp)
+    assert out["count"] == 0
+    assert out["deleted"] == {"entities": [], "areas": [], "integrations": []}
+
+
+@pytest.mark.asyncio
+async def test_orphans_clear_503_when_mesa_unavailable(hass: HomeAssistant):
+    data = await _setup(hass)
+    data.mesa = None
+    clear = ATMAdminMesaOrphansClearView()
+    clear.hass = hass
+    resp = await clear.post(_admin_request())
+    assert resp.status == 503

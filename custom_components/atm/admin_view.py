@@ -2271,6 +2271,53 @@ class ATMAdminVersionRestoreView(HomeAssistantView):
         }, request_id=rid)
 
 
+class ATMAdminMesaOrphansClearView(HomeAssistantView):
+    """POST /api/atm/admin/mesa/orphans/clear - delete all orphaned MESA profiles.
+
+    Recomputes the orphan lists, then deletes every orphaned entity, area, and
+    integration profile in one pass (the one-by-one alternative is the per-profile
+    DELETE endpoints). Profiles are never auto-deleted; this is an explicit admin
+    action surfaced from the MESA tab orphan banner.
+    """
+
+    url = "/api/atm/admin/mesa/orphans/clear"
+    name = "api:atm:admin:mesa:orphans:clear"
+    requires_auth = True
+
+    @require_admin
+    async def post(self, request: web.Request) -> web.Response:
+        rid = request["atm_rid"]
+        runtime, err = _mesa_runtime(self.hass, rid)
+        if err is not None:
+            return err
+        from .mesa import refresh_orphans  # noqa: PLC0415
+
+        async with runtime.lock:
+            # Recompute against the live registries so we delete exactly what is
+            # orphaned now, never a stale client-supplied list.
+            refresh_orphans(self.hass, runtime)
+            entities = list(runtime.orphans)
+            areas = list(runtime.orphan_areas)
+            integrations = list(runtime.orphan_integrations)
+            for eid in entities:
+                runtime.store.delete(eid)
+            for area_id in areas:
+                runtime.store.delete_area_profile(area_id)
+            for integration in integrations:
+                runtime.store.delete_integration_profile(integration)
+            if entities or areas or integrations:
+                await runtime.async_save()
+            refresh_orphans(self.hass, runtime)
+        _audit_admin(self.hass, request, rid, request.path)
+        return _ok(
+            {
+                "deleted": {"entities": entities, "areas": areas, "integrations": integrations},
+                "count": len(entities) + len(areas) + len(integrations),
+            },
+            request_id=rid,
+        )
+
+
 ALL_ADMIN_VIEWS: list[type[HomeAssistantView]] = [
     ATMAdminInfoView,
     ATMAdminArchivedTokensView,
@@ -2312,4 +2359,5 @@ ALL_ADMIN_VIEWS: list[type[HomeAssistantView]] = [
     ATMAdminMesaVocabularyView,
     ATMAdminMesaDefaultsView,
     ATMAdminMesaIssuesView,
+    ATMAdminMesaOrphansClearView,
 ]

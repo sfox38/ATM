@@ -734,6 +734,8 @@ export function MesaView() {
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState("");  // "" = all; a control_mode value; or "enforced"
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  const [confirmClearOrphans, setConfirmClearOrphans] = useState(false);
+  const [clearingOrphans, setClearingOrphans] = useState(false);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -757,6 +759,20 @@ export function MesaView() {
       setLoading(false);
     }
   }, []);
+
+  const clearOrphans = useCallback(async () => {
+    setClearingOrphans(true);
+    setError(null);
+    try {
+      await api.clearMesaOrphans();
+      setConfirmClearOrphans(false);
+      await refresh();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to clear orphaned profiles.");
+    } finally {
+      setClearingOrphans(false);
+    }
+  }, [refresh]);
 
   useEffect(() => { refresh(); }, [refresh]);
   // Load the registry once for the editor's fuzzy key search + validation, and
@@ -905,6 +921,21 @@ export function MesaView() {
           {issues.orphan_integrations.length > 0 && (
             <div>
               <strong>{issues.orphan_integrations.length} orphaned integration profile(s)</strong> (integration not loaded): {issues.orphan_integrations.join(", ")}
+            </div>
+          )}
+          {(issues.orphans.length > 0 || issues.orphan_areas.length > 0 || issues.orphan_integrations.length > 0) && (
+            <div style={{ display: "flex", gap: "8px", alignItems: "center", marginTop: "10px" }}>
+              {confirmClearOrphans ? (
+                <>
+                  <span>Delete all {issues.orphans.length + issues.orphan_areas.length + issues.orphan_integrations.length} orphaned profile(s)?</span>
+                  <button className="btn btn-danger btn-sm" onClick={clearOrphans} disabled={clearingOrphans}>
+                    {clearingOrphans ? "Clearing..." : "Yes, delete"}
+                  </button>
+                  <button className="btn btn-ghost btn-sm" onClick={() => setConfirmClearOrphans(false)} disabled={clearingOrphans}>Cancel</button>
+                </>
+              ) : (
+                <button className="btn btn-sm" onClick={() => setConfirmClearOrphans(true)}>Clear all orphaned profiles</button>
+              )}
             </div>
           )}
         </div>

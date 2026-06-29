@@ -220,6 +220,11 @@ export const api = {
 
   getMesaIssues: (refresh = false) =>
     req<MesaIssuesResponse>("GET", `/mesa/issues${refresh ? "?refresh=1" : ""}`),
+  clearMesaOrphans: () =>
+    req<{ deleted: { entities: string[]; areas: string[]; integrations: string[] }; count: number }>(
+      "POST",
+      "/mesa/orphans/clear",
+    ),
 
   getApproval: (id: string) => req<ApprovalRecord>("GET", `/approvals/${encodeURIComponent(id)}`),
   approveApproval: (id: string, body: { note?: string } = {}) =>
