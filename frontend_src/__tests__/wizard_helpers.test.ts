@@ -196,7 +196,7 @@ describe("PERSONA_CAP_DEFAULTS drift guard", () => {
     "cap_broadcast", "cap_service_response",
     "cap_automation_write", "cap_script_write", "cap_scene_write", "cap_helper_write",
     "cap_physical_control", "cap_restart",
-    "cap_integration_write", "cap_lovelace_write",
+    "cap_integration_write", "cap_lovelace_write", "cap_registry_write",
     "cap_backup", "cap_filesystem", "cap_yaml_edit",
   ];
   it("custom has no preset", () => {

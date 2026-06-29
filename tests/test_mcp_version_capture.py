@@ -15,6 +15,7 @@ from unittest.mock import MagicMock
 
 import pytest
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import area_registry as ar
 from homeassistant.helpers import entity_registry as er
 from homeassistant.util.dt import utcnow
 from pytest_homeassistant_custom_component.common import MockConfigEntry
@@ -373,3 +374,70 @@ class TestRawWriteRestore:
         result, outcome, _res = await restore_version(rec, "admin-3", hass, data)
         assert outcome == "invalid_request"
         assert "too large" in result["content"][0]["text"].lower()
+
+
+class TestEntityRegistryWrite:
+    @pytest.fixture
+    def env(self, hass: HomeAssistant):
+        entry = MockConfigEntry(domain="test_integration", entry_id="e_reg")
+        entry.add_to_hass(hass)
+        e = er.async_get(hass).async_get_or_create(
+            "light", "test_integration", "uid_lamp", config_entry=entry, suggested_object_id="lamp")
+        hass.states.async_set(e.entity_id, "on", {})
+        area = ar.async_get(hass).async_create("Office")
+        return e.entity_id, area.id
+
+    @staticmethod
+    def _token_rw():
+        tree = PermissionTree(domains={"light": PermissionNode(state="GREEN")})
+        return _token(tree=tree, cap_registry_write="allow", cap_registry_read="allow")
+
+    async def test_set_entity_updates_and_versions(self, hass, env):
+        eid, area_id = env
+        data, versions = _data()
+        res = _text((await _call_tool(
+            "set_entity", {"entity_id": eid, "name": "Desk Lamp", "area_id": area_id},
+            self._token_rw(), hass, data))[0])
+        assert res["updated"]["name"] == "Desk Lamp"
+        assert res["updated"]["area_id"] == area_id
+
+        entry = er.async_get(hass).async_get(eid)
+        assert entry.name == "Desk Lamp" and entry.area_id == area_id
+        hist = versions.list_for("entity", eid)
+        assert hist[0].action == "edit"
+        assert hist[0].after["name"] == "Desk Lamp"
+        assert hist[0].before["name"] != "Desk Lamp"
+
+    async def test_set_entity_forbidden_without_cap(self, hass, env):
+        eid, _area = env
+        data, _ = _data()
+        tree = PermissionTree(domains={"light": PermissionNode(state="GREEN")})
+        token = _token(tree=tree, cap_registry_write="deny")
+        _, outcome, _ = await _call_tool("set_entity", {"entity_id": eid, "name": "X"}, token, hass, data)
+        assert outcome == "denied"
+
+    async def test_set_entity_read_only_denied(self, hass, env):
+        eid, _area = env
+        data, _ = _data()
+        # YELLOW => READ only; registry edits require WRITE.
+        tree = PermissionTree(domains={"light": PermissionNode(state="YELLOW")})
+        token = _token(tree=tree, cap_registry_write="allow")
+        _, outcome, _ = await _call_tool("set_entity", {"entity_id": eid, "name": "X"}, token, hass, data)
+        assert outcome == "denied"
+
+    async def test_set_entity_unknown_area_rejected(self, hass, env):
+        eid, _area = env
+        data, _ = _data()
+        _, outcome, _ = await _call_tool(
+            "set_entity", {"entity_id": eid, "area_id": "no_such_area"}, self._token_rw(), hass, data)
+        assert outcome == "invalid_request"
+
+    async def test_delete_entity_removes_and_versions(self, hass, env):
+        eid, _area = env
+        data, versions = _data()
+        res = _text((await _call_tool("delete_entity", {"entity_id": eid}, self._token_rw(), hass, data))[0])
+        assert res["deleted"] is True
+        assert er.async_get(hass).async_get(eid) is None
+        hist = versions.list_for("entity", eid)
+        assert hist[0].action == "delete"
+        assert hist[0].after is None and hist[0].before is not None

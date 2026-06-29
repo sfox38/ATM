@@ -798,6 +798,41 @@ _SYSTEM_TOOL_DEFS: list[dict] = [
         },
     },
     {
+        "name": "set_entity",
+        "description": (
+            "Update an entity's registry metadata: its friendly name, icon, and/or area. Requires WRITE "
+            "access to the entity and cap_registry_write (often admin-confirmed). Provide entity_id plus at "
+            "least one of name, icon, area_id. Does not rename the entity_id. Captured in version history."
+        ),
+        "cap": "cap_registry_write",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "entity_id": {"type": "string"},
+                "name": {"type": "string", "description": "New friendly-name override (registry name)."},
+                "icon": {"type": "string", "description": "New icon, e.g. mdi:lightbulb."},
+                "area_id": {"type": "string", "description": "Assign to this area_id (must already exist)."},
+            },
+            "required": ["entity_id"],
+        },
+    },
+    {
+        "name": "delete_entity",
+        "description": (
+            "Delete an entity's registry entry, the common use is removing a stale or duplicate entry left "
+            "after a device re-pair. Requires WRITE access to the entity and cap_registry_write (often "
+            "admin-confirmed). A live entity whose integration still provides it will be re-created by that "
+            "integration; an orphaned entry stays gone. Captured in version history, but a deleted entry "
+            "cannot be re-created through ATM."
+        ),
+        "cap": "cap_registry_write",
+        "inputSchema": {
+            "type": "object",
+            "properties": {"entity_id": {"type": "string"}},
+            "required": ["entity_id"],
+        },
+    },
+    {
         "name": "restart_ha",
         "description": "Restart Home Assistant.",
         "cap": "cap_restart",
@@ -2511,6 +2546,152 @@ async def _tool_list_blueprints(
     return _tool_success(json.dumps({"count": len(out), "blueprints": out}, default=str)), "allowed", "list_blueprints"
 
 
+def _entity_meta_snapshot(entry: Any) -> dict:
+    """The registry metadata fields set_entity can change (for version capture)."""
+    return {"name": entry.name, "icon": entry.icon, "area_id": entry.area_id}
+
+
+def _registry_write_perm_error(perm: Any, entity_id: str) -> tuple[dict, str, str] | None:
+    """Shared scope check for registry writes; None means WRITE-accessible.
+
+    READ-only access returns a specific forbidden (the token can already see the
+    entity, so no existence oracle); anything else returns the not_found body.
+    """
+    if perm == Permission.WRITE:
+        return None
+    if perm == Permission.READ:
+        return _tool_error("Read-only access to this entity; registry edits need write access."), "denied", entity_id
+    if perm == Permission.NOT_FOUND:
+        return _tool_error("Entity not found."), "not_found", entity_id
+    return _tool_error("Entity not found."), "denied", entity_id
+
+
+async def _build_diff_set_entity(args: dict, token: TokenRecord, hass: Any) -> dict:
+    entity_id = str(args.get("entity_id") or "")
+    entry = er.async_get(hass).async_get(entity_id)
+    before = _entity_meta_snapshot(entry) if entry else {}
+    fields = [f for f in ("name", "icon", "area_id") if f in args]
+    preview = {f: {"before": before.get(f), "after": args.get(f)} for f in fields}
+    return {
+        "kind": "system_action",
+        "summary": f"Update registry metadata ({', '.join(fields) or 'nothing'}) for {entity_id}",
+        "target": {"type": "entity", "id": entity_id, "label": before.get("name") or entity_id},
+        "preview": preview,
+    }
+
+
+async def _build_diff_delete_entity(args: dict, token: TokenRecord, hass: Any) -> dict:
+    entity_id = str(args.get("entity_id") or "")
+    entry = er.async_get(hass).async_get(entity_id)
+    snap = _entity_meta_snapshot(entry) if entry else {}
+    return {
+        "kind": "system_action",
+        "summary": f"Delete the registry entry for {entity_id}",
+        "target": {"type": "entity", "id": entity_id, "label": snap.get("name") or entity_id},
+        "preview": {
+            "name": snap.get("name"),
+            "area_id": snap.get("area_id"),
+            "warning": "Removes the entity's registry entry. A live entity's integration may re-create it; an orphan stays gone. Not re-creatable through ATM.",
+        },
+    }
+
+
+async def _tool_set_entity(
+    args: dict, token: TokenRecord, hass: Any, data: ATMData,
+    request_id: str = "", client_ip: str | None = None,
+) -> tuple[dict, str, str]:
+    """MCP tool: edit an entity's registry metadata (Confirm-eligible)."""
+    blocked = await _gate(
+        "cap_registry_write", token, hass, data,
+        tool_name="set_entity", args=args, request_id=request_id,
+        client_ip=client_ip, diff=await _build_diff_set_entity(args, token, hass),
+    )
+    if blocked is not None:
+        return blocked
+    return await _execute_set_entity(args, token, hass, data)
+
+
+async def _execute_set_entity(
+    args: dict, token: TokenRecord, hass: Any, data: ATMData
+) -> tuple[dict, str, str]:
+    entity_id = str(args.get("entity_id") or "").strip()
+    if not entity_id:
+        return _tool_error("entity_id is required."), "invalid_request", "set_entity"
+    err = _registry_write_perm_error(resolve(entity_id, token, hass), entity_id)
+    if err is not None:
+        return err
+    reg = er.async_get(hass)
+    if reg.async_get(entity_id) is None:
+        return _tool_error("Entity has no registry entry to edit."), "invalid_request", entity_id
+
+    updates: dict = {}
+    if "name" in args:
+        updates["name"] = args["name"] or None
+    if "icon" in args:
+        updates["icon"] = args["icon"] or None
+    if "area_id" in args:
+        area_id = args["area_id"]
+        if area_id and ar.async_get(hass).async_get_area(area_id) is None:
+            return _tool_error("Unknown area_id."), "invalid_request", entity_id
+        updates["area_id"] = area_id or None
+    if not updates:
+        return _tool_error("Provide at least one of name, icon, area_id."), "invalid_request", entity_id
+
+    before = _entity_meta_snapshot(reg.async_get(entity_id))
+    try:
+        reg.async_update_entity(entity_id, **updates)
+    except Exception as exc:  # noqa: BLE001 - surface a clean tool error
+        _LOGGER.error("set_entity failed for %s: %s", entity_id, exc)
+        return _tool_error("Failed to update entity."), "denied", entity_id
+    after = _entity_meta_snapshot(reg.async_get(entity_id))
+    await _record_version(
+        data, token, resource_type="entity", resource_id=entity_id,
+        action="edit", before=before, after=after, alias=after.get("name") or entity_id,
+    )
+    return _tool_success(json.dumps({"entity_id": entity_id, "updated": after}, default=str)), "allowed", entity_id
+
+
+async def _tool_delete_entity(
+    args: dict, token: TokenRecord, hass: Any, data: ATMData,
+    request_id: str = "", client_ip: str | None = None,
+) -> tuple[dict, str, str]:
+    """MCP tool: delete an entity's registry entry (Confirm-eligible)."""
+    blocked = await _gate(
+        "cap_registry_write", token, hass, data,
+        tool_name="delete_entity", args=args, request_id=request_id,
+        client_ip=client_ip, diff=await _build_diff_delete_entity(args, token, hass),
+    )
+    if blocked is not None:
+        return blocked
+    return await _execute_delete_entity(args, token, hass, data)
+
+
+async def _execute_delete_entity(
+    args: dict, token: TokenRecord, hass: Any, data: ATMData
+) -> tuple[dict, str, str]:
+    entity_id = str(args.get("entity_id") or "").strip()
+    if not entity_id:
+        return _tool_error("entity_id is required."), "invalid_request", "delete_entity"
+    err = _registry_write_perm_error(resolve(entity_id, token, hass), entity_id)
+    if err is not None:
+        return err
+    reg = er.async_get(hass)
+    entry = reg.async_get(entity_id)
+    if entry is None:
+        return _tool_error("Entity has no registry entry to delete."), "invalid_request", entity_id
+    before = _entity_meta_snapshot(entry)
+    try:
+        reg.async_remove(entity_id)
+    except Exception as exc:  # noqa: BLE001 - surface a clean tool error
+        _LOGGER.error("delete_entity failed for %s: %s", entity_id, exc)
+        return _tool_error("Failed to delete entity."), "denied", entity_id
+    await _record_version(
+        data, token, resource_type="entity", resource_id=entity_id,
+        action="delete", before=before, after=None, alias=before.get("name") or entity_id,
+    )
+    return _tool_success(json.dumps({"entity_id": entity_id, "deleted": True})), "allowed", entity_id
+
+
 async def _tool_render_template(
     args: dict, token: TokenRecord, hass: Any
 ) -> tuple[dict, str, str]:
@@ -3231,6 +3412,14 @@ async def restore_version(
             if resource_type == "yaml_config":
                 return await _execute_set_yaml_config({"content": restorable}, token, hass, data)
             return await _execute_write_file({"path": resource_id, "content": restorable}, token, hass, data)
+        if resource_type == "entity":
+            # Re-apply the registry metadata (name/icon/area). Restoring a deleted
+            # entry's snapshot lands here too and fails cleanly in set_entity if the
+            # entity no longer exists (a deleted registry entry cannot be recreated).
+            fields = {k: target[k] for k in ("name", "icon", "area_id") if k in target}
+            if not fields:
+                return _tool_error("This version has no entity metadata to restore."), "invalid_request", "restore_version"
+            return await _execute_set_entity({"entity_id": resource_id, **fields}, token, hass, data)
         return _tool_error(f"Cannot restore resource type '{resource_type}'."), "invalid_request", "restore_version"
     finally:
         _restore_ctx.reset(ctx)
@@ -6250,6 +6439,10 @@ async def _call_tool(
         return await _tool_get_logbook(arguments, token, hass)
     if tool_name == "list_blueprints":
         return await _tool_list_blueprints(arguments, token, hass)
+    if tool_name == "set_entity":
+        return await _tool_set_entity(arguments, token, hass, data, request_id, client_ip)
+    if tool_name == "delete_entity":
+        return await _tool_delete_entity(arguments, token, hass, data, request_id, client_ip)
     if tool_name == "create_script":
         return await _tool_create_script(arguments, token, hass, data, request_id, client_ip)
     if tool_name == "edit_script":
@@ -7392,6 +7585,8 @@ _register_executor("create_dashboard", _execute_create_dashboard)
 _register_executor("edit_dashboard", _execute_edit_dashboard)
 _register_executor("delete_dashboard", _execute_delete_dashboard)
 _register_executor("set_dashboard_config", _execute_set_dashboard_config)
+_register_executor("set_entity", _execute_set_entity)
+_register_executor("delete_entity", _execute_delete_entity)
 _register_executor("HassSetPosition", _execute_hass_set_position)
 _register_executor("HassStopMoving", _execute_hass_stop_moving)
 _register_executor("HassTurnOn", _execute_hass_turn_on)

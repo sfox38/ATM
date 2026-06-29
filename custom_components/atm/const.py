@@ -45,7 +45,7 @@ VERSION_STORAGE_VERSION = 1
 MAX_VERSIONS_PER_RESOURCE = 20
 # Resource types eligible for version history.
 VERSIONED_RESOURCE_TYPES = frozenset(
-    {"automation", "script", "scene", "helper", "dashboard", "yaml_config", "file"}
+    {"automation", "script", "scene", "helper", "dashboard", "yaml_config", "file", "entity"}
 )
 
 # MESA (semantic safety layer) integration. Profiles persist in a separate
@@ -188,6 +188,7 @@ CAPABILITY_NAMES = (
     "cap_restart",
     "cap_integration_write",
     "cap_lovelace_write",
+    "cap_registry_write",
     "cap_backup",
     "cap_filesystem",
     "cap_yaml_edit",
@@ -213,6 +214,7 @@ CAPABILITY_TIERS: dict[str, str] = {
     "cap_restart": "system",
     "cap_integration_write": "system",
     "cap_lovelace_write": "system",
+    "cap_registry_write": "system",
     "cap_backup": "irreversible",
     "cap_filesystem": "irreversible",
     "cap_yaml_edit": "irreversible",
@@ -231,6 +233,7 @@ CONFIRM_AVAILABLE_CAPS = frozenset({
     "cap_restart",
     "cap_integration_write",
     "cap_lovelace_write",
+    "cap_registry_write",
     "cap_backup",
     "cap_filesystem",
     "cap_yaml_edit",
@@ -250,6 +253,7 @@ PASS_THROUGH_EXEMPT_CAPS = frozenset({
     "cap_helper_write",
     "cap_integration_write",
     "cap_lovelace_write",
+    "cap_registry_write",
     "cap_backup",
     "cap_filesystem",
     "cap_yaml_edit",

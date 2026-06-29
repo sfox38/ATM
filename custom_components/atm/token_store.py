@@ -137,6 +137,7 @@ class TokenRecord:
     cap_helper_write: str = CAP_DENY
     cap_integration_write: str = CAP_DENY
     cap_lovelace_write: str = CAP_DENY
+    cap_registry_write: str = CAP_DENY
     cap_backup: str = CAP_DENY
     cap_filesystem: str = CAP_DENY
     cap_yaml_edit: str = CAP_DENY

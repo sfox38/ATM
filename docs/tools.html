@@ -198,6 +198,12 @@
             <p class="tool-desc">List integrations and enable or disable them. Confirm-eligible.</p>
           </article>
 
+          <article class="tool" data-cap="system" data-search="set_entity delete_entity registry rename area icon orphan">
+            <div class="tool-head"><span class="tool-name">set_entity</span><span class="tool-name">delete_entity</span><span class="badge badge-cap">Registry write</span></div>
+            <p class="tool-desc">Edit an entity's registry metadata (friendly name, icon, area) or delete a stale/duplicate registry entry. Requires write access to the entity and <code>cap_registry_write</code>; Confirm-eligible and version-captured. Renaming the entity_id is not exposed; a deleted entry cannot be re-created through ATM.</p>
+            <dl><dt>params</dt><dd><code>set_entity</code>: <code>entity_id</code> + one of <code>name</code> / <code>icon</code> / <code>area_id</code>; <code>delete_entity</code>: <code>entity_id</code></dd></dl>
+          </article>
+
           <article class="tool" data-cap="system" data-search="restart_ha restart home assistant">
             <div class="tool-head"><span class="tool-name">restart_ha</span><span class="badge badge-cap">HA restart / stop</span></div>
             <p class="tool-desc">Restart Home Assistant. Pass-through-exempt: even pass-through tokens must have this flag enabled.</p>

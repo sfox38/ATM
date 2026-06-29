@@ -136,6 +136,13 @@ const CAPS: CapDef[] = [
     confirmAvailable: true,
   },
   {
+    key: "cap_registry_write",
+    label: "Registry write",
+    description: "Edit an entity's registry metadata (name, icon, area) and delete stale registry entries. Does not rename entity_ids.",
+    tier: "system",
+    confirmAvailable: true,
+  },
+  {
     key: "cap_backup",
     label: "Backup",
     description: "Create and list Home Assistant backups. Restoring is not exposed through ATM; restore from the Home Assistant UI.",
