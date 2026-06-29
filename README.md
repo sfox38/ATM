@@ -45,6 +45,27 @@ Prefer to install by hand? Copy the `custom_components/atm` folder into your Hom
 
 Go to **Settings > Devices & services > Add integration** and search for **Advanced Token Management**. Click through the single-step config flow, then open the **ATM** panel in your sidebar. The [Quick start](https://sfox38.github.io/ATM/quickstart.html) takes it from there.
 
+## Changelog
+
+The complete release history is on the [GitHub releases page](https://github.com/sfox38/ATM/releases). Recent changes:
+
+### 2.1.0 (unreleased)
+
+- Refined MCP tool descriptions so agents pick the right tool on the first try. The raw `set_yaml_config` and `write_file` tools now steer toward the dedicated automation, script, scene, helper, and dashboard tools, and `get_states`, `get_statistics`, `get_config`, and `render_template` clarify how they differ from neighboring tools and how token scoping affects them.
+- `get_state` and `get_states` now return a compact, domain-aware view by default (key attributes only) to cut token cost, with `detailed: true` for the full state and `fields: [...]` to select exact fields. `describe_entity` remains the full single-entity tool, and sensitive attributes are always scrubbed first.
+- Raw `configuration.yaml` and file writes (`set_yaml_config`, `write_file`) are now captured in the configuration version history with admin rollback, the same before/after snapshots and Restore the structured authoring tools already had. Oversized snapshots (over 100 KB) are kept as a non-restorable marker to bound storage.
+- Orphaned MESA profiles can be cleared in bulk: a **Clear all orphaned profiles** button on the MESA tab (backed by `POST /api/atm/admin/mesa/orphans/clear`) removes every profile whose entity, area, or integration no longer exists in one step, instead of deleting them one at a time. It recomputes orphans against the live registries first; profiles are still never deleted automatically.
+- The agent skill guide (`/api/atm/skill`) now includes modular domain-authoring recipes (automations, scripts and scenes, dashboards and cards, conditional/visibility, and climate), so connected agents produce better Home Assistant configuration. Guidance only, no new tools.
+- Two new read tools: `get_logbook` (the human-readable event history, gated on `cap_log_read`, scoped to your entities) and `get_calendar_events` (events from an accessible calendar entity within a time window). Both are read-only and scoped to what the token can access.
+- The Changes tab now renders raw `configuration.yaml` and file-write history as a line-highlighted text diff (added/removed lines), instead of YAML-quoting the file contents; oversized snapshots show a clear "too large" notice and are marked non-restorable.
+- `search_entities` now ranks results by relevance and supports multi-word queries (every word must match), so the best matches lead instead of being cut off by the result limit. Previously it was an unranked substring filter.
+- New `list_blueprints` tool lists installed automation and script blueprints with their inputs (gated on `cap_config_read`). To build from a blueprint, create the automation or script with a `use_blueprint` config, which the existing authoring tools already accept, so there is no extra tool to learn.
+- New entity-registry tools `set_entity` (friendly name / icon / area) and `delete_entity` (remove a stale or duplicate registry entry), behind a new `cap_registry_write` capability. It defaults to admin-confirmation for the power-user, home-admin, and maintenance personas and is off elsewhere. Both require write access to the entity and are captured in version history; renaming an `entity_id` is intentionally not exposed. The admin approval review shows the before/after of the change.
+
+### 2.0.0
+
+See the [v2.0.0 release notes](https://github.com/sfox38/ATM/releases/tag/v2.0.0).
+
 ## Issues and feedback
 
 Report issues at [github.com/sfox38/ATM/issues](https://github.com/sfox38/ATM/issues).
