@@ -1870,6 +1870,16 @@ def _approval_resource(approval: Any) -> str:
 _mesa_advisory_ctx: ContextVar[bool] = ContextVar("atm_mesa_advisory", default=False)
 
 
+# Uniform message for a capability-denied tool call. A denied call must look the
+# same regardless of any entity it names, so it can never be used as a scope or
+# existence oracle. Shared by _gate and any pre-gate deny short-circuit.
+_CAP_FORBIDDEN_MESSAGE = (
+    "Forbidden: this capability is not enabled for this token. It may have changed "
+    "since you connected; call get_capability_summary for the current state, or ask "
+    "the operator to grant it."
+)
+
+
 async def _gate(
     cap_name: str,
     token: TokenRecord,
@@ -1894,11 +1904,7 @@ async def _gate(
         client_ip=client_ip, diff=diff,
     )
     if result.is_deny:
-        return _tool_error(
-            "Forbidden: this capability is not enabled for this token. It may have changed "
-            "since you connected; call get_capability_summary for the current state, or ask "
-            "the operator to grant it."
-        ), "denied", tool_name
+        return _tool_error(_CAP_FORBIDDEN_MESSAGE), "denied", tool_name
     if result.is_pending:
         return _tool_pending(result.approval), "pending_approval", _approval_resource(result.approval)
     return None
@@ -2616,9 +2622,13 @@ async def _tool_set_entity(
     request_id: str = "", client_ip: str | None = None,
 ) -> tuple[dict, str, str]:
     """MCP tool: edit an entity's registry metadata (Confirm-eligible)."""
-    # Validate entity scope before gating so an out-of-scope or typo'd target is
-    # rejected up front instead of creating a pending approval that can only fail
-    # after the admin approves it. The executor re-validates at approval time.
+    # Capability gate first: a denied token gets a uniform Forbidden with no entity
+    # work, so the tool can never be a scope/existence oracle when the cap is off.
+    if effective_cap(token, "cap_registry_write") == CAP_DENY:
+        return _tool_error(_CAP_FORBIDDEN_MESSAGE), "denied", "set_entity"
+    # Then validate entity scope before gating so an out-of-scope or typo'd target
+    # is rejected up front instead of creating a pending approval that can only
+    # fail after the admin approves it. The executor re-validates at approval time.
     pre = _registry_write_precheck(args, token, hass, "set_entity")
     if pre is not None:
         return pre
@@ -2677,6 +2687,10 @@ async def _tool_delete_entity(
     request_id: str = "", client_ip: str | None = None,
 ) -> tuple[dict, str, str]:
     """MCP tool: delete an entity's registry entry (Confirm-eligible)."""
+    # Capability gate first: a denied token gets a uniform Forbidden with no entity
+    # work, so the tool can never be a scope/existence oracle when the cap is off.
+    if effective_cap(token, "cap_registry_write") == CAP_DENY:
+        return _tool_error(_CAP_FORBIDDEN_MESSAGE), "denied", "delete_entity"
     pre = _registry_write_precheck(args, token, hass, "delete_entity")
     if pre is not None:
         return pre
