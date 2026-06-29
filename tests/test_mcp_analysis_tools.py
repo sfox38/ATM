@@ -348,6 +348,21 @@ class TestValidateConfig:
         assert ref["light.kitchen"]["exists"] is True
         assert ref["light.kitchen"]["accessible"] is True
 
+    async def test_out_of_scope_entity_is_not_an_existence_oracle(self, hass):
+        # A real entity outside the token's scope must look identical to a typo:
+        # exists is collapsed to the accessible flag so existence never leaks.
+        hass.states.async_set("lock.front_door", "locked", {})
+        config = {
+            "alias": "x",
+            "trigger": [{"platform": "state", "entity_id": "light.kitchen"}],
+            "action": [{"service": "lock.lock", "target": {"entity_id": "lock.front_door"}}],
+        }
+        content, outcome, _ = await _call("validate_config", {"type": "automation", "config": config}, _token(), hass)
+        assert outcome == "allowed"
+        ref = {r["entity_id"]: r for r in _json(content)["referenced_entities"]}
+        assert ref["lock.front_door"]["accessible"] is False
+        assert ref["lock.front_door"]["exists"] is False
+
     async def test_invalid_automation(self, hass):
         content, _, _ = await _call("validate_config", {"type": "automation", "config": {"alias": "x"}}, _token(), hass)
         body = _json(content)

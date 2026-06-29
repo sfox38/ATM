@@ -1115,7 +1115,8 @@ _SYSTEM_TOOL_DEFS: list[dict] = [
         "name": "validate_config",
         "description": (
             "Validate an automation or script config without saving it. Returns structural validity plus, "
-            "for each referenced entity, whether it exists and is accessible to this token. Decouples the "
+            "for each referenced entity, whether it is accessible to this token (entities outside the "
+            "token's scope are reported as inaccessible and not visible). Decouples the "
             "schema check from committing the write."
         ),
         "cap": "cap_diagnostics",
@@ -2566,6 +2567,20 @@ def _registry_write_perm_error(perm: Any, entity_id: str) -> tuple[dict, str, st
     return _tool_error("Entity not found."), "denied", entity_id
 
 
+def _registry_write_precheck(
+    args: dict, token: TokenRecord, hass: Any, tool_name: str
+) -> tuple[dict, str, str] | None:
+    """Pre-gate validation for registry writes; None means OK to proceed.
+
+    Checks entity_id presence and write scope so a doomed request is rejected
+    before a pending approval is created. The executor re-validates at apply time.
+    """
+    entity_id = str(args.get("entity_id") or "").strip()
+    if not entity_id:
+        return _tool_error("entity_id is required."), "invalid_request", tool_name
+    return _registry_write_perm_error(resolve(entity_id, token, hass), entity_id)
+
+
 async def _build_diff_set_entity(args: dict, token: TokenRecord, hass: Any) -> dict:
     entity_id = str(args.get("entity_id") or "")
     entry = er.async_get(hass).async_get(entity_id)
@@ -2601,6 +2616,12 @@ async def _tool_set_entity(
     request_id: str = "", client_ip: str | None = None,
 ) -> tuple[dict, str, str]:
     """MCP tool: edit an entity's registry metadata (Confirm-eligible)."""
+    # Validate entity scope before gating so an out-of-scope or typo'd target is
+    # rejected up front instead of creating a pending approval that can only fail
+    # after the admin approves it. The executor re-validates at approval time.
+    pre = _registry_write_precheck(args, token, hass, "set_entity")
+    if pre is not None:
+        return pre
     blocked = await _gate(
         "cap_registry_write", token, hass, data,
         tool_name="set_entity", args=args, request_id=request_id,
@@ -2656,6 +2677,9 @@ async def _tool_delete_entity(
     request_id: str = "", client_ip: str | None = None,
 ) -> tuple[dict, str, str]:
     """MCP tool: delete an entity's registry entry (Confirm-eligible)."""
+    pre = _registry_write_precheck(args, token, hass, "delete_entity")
+    if pre is not None:
+        return pre
     blocked = await _gate(
         "cap_registry_write", token, hass, data,
         tool_name="delete_entity", args=args, request_id=request_id,
@@ -5324,15 +5348,14 @@ async def _tool_validate_config(
         valid = False
         errors.append(str(exc))
 
-    registry = er.async_get(hass)
-    refs = [
-        {
-            "entity_id": eid,
-            "exists": hass.states.get(eid) is not None or registry.async_get(eid) is not None,
-            "accessible": resolve(eid, token, hass) in (Permission.READ, Permission.WRITE),
-        }
-        for eid in sorted(referenced)
-    ]
+    # Never reveal existence for entities the token cannot access: a hidden real
+    # entity must be indistinguishable from a typo (no existence oracle). Since
+    # resolve() ghost-checks, READ/WRITE already implies the entity exists, so
+    # exists is reported as the accessible flag and collapses for everything else.
+    refs = []
+    for eid in sorted(referenced):
+        accessible = resolve(eid, token, hass) in (Permission.READ, Permission.WRITE)
+        refs.append({"entity_id": eid, "exists": accessible, "accessible": accessible})
     body = {"type": cfg_type, "valid": valid, "errors": errors, "referenced_entities": refs}
     return _tool_success(json.dumps(body, default=str)), "allowed", "validate_config"
 
