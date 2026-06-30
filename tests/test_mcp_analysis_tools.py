@@ -189,12 +189,22 @@ class TestWaitForApproval:
         data = _data()
         rec = _approval_dict("appr_mine", token.id, "pending")
         data.store.get_pending_approvals.return_value = [rec]
+
         task = asyncio.ensure_future(
             _call("wait_for_approval", {"approval_id": "appr_mine", "timeout": 5}, token, hass, data))
-        await asyncio.sleep(0)  # let the tool subscribe before the event fires
+        # Deterministic readiness instead of sleep(0): poll the public listener
+        # registry until the tool has actually subscribed to the resolved event,
+        # then fire it. No fixed delay, no coupling to scheduler ordering.
+        for _ in range(200):
+            if hass.bus.async_listeners().get("atm_approval_resolved", 0) >= 1:
+                break
+            await asyncio.sleep(0)
+        else:
+            raise AssertionError("wait_for_approval never subscribed to atm_approval_resolved")
         rec["status"] = "approved"  # the resolved record the re-read will return
         hass.bus.async_fire("atm_approval_resolved", {"approval_id": "appr_mine"})
         content, outcome, _ = await task
+
         assert outcome == "allowed"
         body = _json(content)
         assert body["resolved"] is True

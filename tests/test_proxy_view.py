@@ -557,6 +557,13 @@ async def test_state_view_404_same_body_for_inaccessible_and_nonexistent(hass, t
         req.rel_url.path = f"/api/atm/states/{entity_id}"
         return req
 
+    # resolve() is mocked ON PURPOSE: this test isolates the response-formatting
+    # contract (rule #12, identical 404 body for NOT_FOUND vs DENY), not whether
+    # those verdicts are reached correctly. That verdict logic (ghost detection,
+    # RED two-pass, alias-to-canonical) is exercised against the real implementation
+    # in test_policy_engine.py (test_ghost_entity_returns_not_found,
+    # test_red_entity_under_green_domain_is_deny, test_resolves_to_canonical_entity_id,
+    # and ~90 others). Mocking here keeps the two concerns in separate unit layers.
     with patch("custom_components.atm.proxy_view.resolve") as mock_resolve:
         mock_resolve.return_value = Permission.NOT_FOUND
         resp_nonexistent = await view.get(make_req("light.does_not_exist"), "light.does_not_exist")
@@ -759,6 +766,11 @@ async def test_service_view_empty_permitted_returns_403(hass, token_store):
 
     request = _make_service_request(raw, b'{"entity_id": "light.kitchen"}')
 
+    # resolve_service_targets is mocked ON PURPOSE: this isolates the view's
+    # handling of an empty resolution (-> 403). The real flattening it stands in
+    # for (device/area/"all" expansion, RED-skip, ghost handling) is tested against
+    # the real implementation in test_policy_engine.py (test_all_expands_to_domain_entities,
+    # test_device_id_expands_to_service_domain_entities_only, test_area_id_red_entity_silently_skipped, etc.).
     with patch("custom_components.atm.proxy_view.resolve_service_targets", return_value=([], 1)):
         resp = await view.post(request, "light", "turn_on")
 
@@ -783,6 +795,11 @@ async def test_service_view_entity_creation_blocked(hass, token_store):
 
     request = _make_service_request(raw, b'{"entity_id": "light.new_entity"}')
 
+    # Mocked ON PURPOSE: isolates the view's translation of the creation-guard
+    # exception into a 403. The guard itself (a service-named entity absent from
+    # the registry raises EntityCreationNotPermitted) is tested against the real
+    # implementation in test_policy_engine.py (test_nonexistent_entity_raises_entity_creation_not_permitted,
+    # test_pass_through_entity_creation_still_blocked).
     with patch("custom_components.atm.proxy_view.resolve_service_targets", side_effect=EntityCreationNotPermitted("light.new_entity")):
         resp = await view.post(request, "light", "turn_on")
 

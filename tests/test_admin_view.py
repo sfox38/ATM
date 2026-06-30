@@ -354,6 +354,12 @@ async def test_patch_token_pass_through_already_enabled_no_confirm_needed():
     resp = await view.patch(request, token_id=token.id)
 
     assert resp.status == 200
+    # Assert the actual patch payload, not just the status: re-affirming pass_through
+    # on an already-enabled token must patch exactly {"pass_through": True} and must
+    # NOT smuggle in a confirm_pass_through escape hatch or any other field.
+    data.store.async_patch_token.assert_awaited_once()
+    assert data.store.async_patch_token.await_args.args[0] == token.id
+    assert data.store.async_patch_token.await_args.kwargs == {"pass_through": True}
 
 
 @pytest.mark.asyncio

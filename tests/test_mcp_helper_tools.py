@@ -65,9 +65,17 @@ class TestCreateHelper:
         assert outcome == "allowed"
         body = _json(content)
         assert body["helper"]["name"] == "Guest mode"
-        assert "id" in body["helper"]
+        helper_id = body["helper"]["id"]
         await hass.async_block_till_done()
-        assert any(s.entity_id.startswith("input_boolean.") for s in hass.states.async_all())
+        # The returned id must map to a real entity, not just "some input_boolean
+        # exists": resolve the registry entry by its unique_id and confirm the live
+        # entity_id is what got created.
+        from homeassistant.helpers import entity_registry as er
+        reg = er.async_get(hass)
+        entity_id = reg.async_get_entity_id("input_boolean", "input_boolean", helper_id)
+        assert entity_id is not None
+        assert hass.states.get(entity_id) is not None
+        assert hass.states.get(entity_id).attributes.get("friendly_name") == "Guest mode"
 
     async def test_bad_type(self, hass, helper_env, hass_admin_user):
         _, outcome, _ = await _call(
@@ -90,15 +98,29 @@ class TestEditDeleteHelper:
             "edit_helper", {"helper_type": "input_boolean", "helper_id": hid, "config": {"name": "B"}}, _token(), hass)
         assert outcome == "allowed"
         assert _json(content)["helper"]["name"] == "B"
+        await hass.async_block_till_done()
+        # Registry integrity: the same id still maps to a single live entity, whose
+        # state now reflects the edit (not a duplicate or orphaned entry).
+        from homeassistant.helpers import entity_registry as er
+        entity_id = er.async_get(hass).async_get_entity_id("input_boolean", "input_boolean", hid)
+        assert entity_id is not None
+        assert hass.states.get(entity_id).attributes.get("friendly_name") == "B"
 
     async def test_delete(self, hass, helper_env, hass_admin_user):
+        from homeassistant.helpers import entity_registry as er
         created = _json((await _call(
             "create_helper", {"helper_type": "input_boolean", "config": {"name": "Temp"}}, _token(), hass))[0])
         hid = created["helper"]["id"]
         await hass.async_block_till_done()  # let the helper entity register
+        entity_id = er.async_get(hass).async_get_entity_id("input_boolean", "input_boolean", hid)
+        assert entity_id is not None
         _, outcome, _ = await _call(
             "delete_helper", {"helper_type": "input_boolean", "helper_id": hid}, _token(), hass)
         assert outcome == "allowed"
+        await hass.async_block_till_done()
+        # Registry integrity: the entry and its live state are both gone.
+        assert er.async_get(hass).async_get_entity_id("input_boolean", "input_boolean", hid) is None
+        assert hass.states.get(entity_id) is None
 
     async def test_delete_unknown(self, hass, helper_env, hass_admin_user):
         _, outcome, _ = await _call(

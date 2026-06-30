@@ -1492,3 +1492,63 @@ async def test_turn_on_off_registered_as_executors():
 
     assert "HassTurnOn" in _EXECUTOR_REGISTRY
     assert "HassTurnOff" in _EXECUTOR_REGISTRY
+
+
+@pytest.mark.asyncio
+async def test_turn_on_confirm_creates_real_approval_then_executor_actuates(hass):
+    """End-to-end native confirm path with the REAL _gate (not mocked).
+
+    The sibling confirm tests above mock _gate to a canned pending tuple; this one
+    drives the real capability gate so we verify the parts those cannot: that a real
+    PendingApproval is created carrying the saved args and the right cap, that the
+    lock is held (not actuated) while pending, and that execute_approved_tool re-runs
+    from those saved args and actuates lock.lock through the real _tool_intent_action.
+    Intent resolution itself is stubbed (covered in test_policy_engine).
+    """
+    import asyncio as _asyncio
+    from custom_components.atm.mcp_view import _tool_hass_turn_on, execute_approved_tool
+    from custom_components.atm.data import ATMData
+
+    class _ApprStore:
+        def __init__(self) -> None:
+            self._p: list = []
+            self.async_lock = _asyncio.Lock()
+            self.async_save = AsyncMock()
+
+        def get_pending_approvals(self) -> list:
+            return self._p
+
+        def set_pending_approvals(self, v: list) -> None:
+            self._p = v
+
+    token = _make_physical_token("confirm")
+    store = _ApprStore()
+    # mesa=None and no hass.data[DOMAIN] entry -> the MESA gate degrades to allow-all.
+    data = ATMData(store=store, rate_limiter=MagicMock(), audit=MagicMock(), mesa=None)
+
+    hass.states.async_set("lock.front_door", "unlocked", {})
+    lock_calls: list = []
+
+    async def _lock_handler(call):
+        eid = call.data.get("entity_id")
+        lock_calls.append(eid if isinstance(eid, list) else [eid])
+
+    hass.services.async_register("lock", "lock", _lock_handler)
+
+    with patch("custom_components.atm.mcp_view.resolve_intent_entities", return_value=["lock.front_door"]):
+        result = await _tool_hass_turn_on({"area": "Hall"}, token, hass, data, "rid-1", "1.2.3.4")
+        # A real approval exists; the lock is held, not actuated.
+        assert result[1] == "pending_approval"
+        assert lock_calls == []
+        assert len(store._p) == 1
+        appr = store._p[0]
+        assert appr["tool_name"] == "HassTurnOn"
+        assert appr["cap_name"] == "cap_physical_control"
+        assert appr["args"] == {"area": "Hall"}
+
+        # Approving re-runs from the SAVED args and actuates lock.lock for real.
+        out = await execute_approved_tool("HassTurnOn", appr["args"], token, hass, data)
+        await hass.async_block_till_done()
+
+    assert out[1] == "allowed"
+    assert lock_calls and "lock.front_door" in lock_calls[0]
