@@ -96,6 +96,7 @@ from .helpers import (
     log_request as _log,
     parse_time_param as _parse_time_param,
     redact_secrets_in_text as _redact_secrets_in_text,
+    redact_structure as _redact_structure,
     render_template_for_token as _render_template_for_token,
     token_has_write_scope,
 )
@@ -996,7 +997,7 @@ _SYSTEM_TOOL_DEFS: list[dict] = [
     },
     {
         "name": "get_system_health",
-        "description": "Get Home Assistant system health: version and per-integration health info.",
+        "description": "Get Home Assistant system health: version and per-integration health info (secret-keyed values and embedded credentials are redacted).",
         "cap": "cap_diagnostics",
         "inputSchema": {"type": "object", "properties": {}},
     },
@@ -4882,7 +4883,15 @@ async def _tool_get_system_health(
     except Exception:  # noqa: BLE001 - system_health may be unavailable
         integrations = {}
 
-    body = {"home_assistant_version": ha_version, "integrations": integrations}
+    # Per-integration health values are arbitrary and can carry embedded tokens,
+    # credentials, or URL-embedded secrets. Scrub them before they enter the model
+    # context (the keys are integration-defined, so a build_safe_config-style
+    # allowlist does not apply; redact_structure scrubs secret-keyed and credential
+    # values while preserving the diagnostic shape).
+    body = {
+        "home_assistant_version": ha_version,
+        "integrations": _redact_structure(integrations),
+    }
     return _tool_success(json.dumps(body, default=str)), "allowed", "get_system_health"
 
 
