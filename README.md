@@ -49,8 +49,9 @@ Go to **Settings > Devices & services > Add integration** and search for **Advan
 
 The complete release history is on the [GitHub releases page](https://github.com/sfox38/ATM/releases). Recent changes:
 
-### 2.1.0 (unreleased)
+### 2.1.0
 
+- Hardening: the MCP batch endpoint now runs its items sequentially instead of concurrently, so a single batch can never execute many write tools at once and interleave them. The registry-write tools (`set_entity`/`delete_entity`) now reject a disabled capability with a uniform "forbidden" before doing any entity lookup, and validate the target's scope before creating an approval. The REST single-state endpoint resolves a registry id / alias consistently (no false "not found"), and the entity list endpoint clamps `limit` to 1..500. In the panel, the permission editor now shows an error if a change fails to save instead of silently doing nothing, and switching theme no longer errors when browser storage is unavailable.
 - Security fix: `validate_config` no longer reveals whether an out-of-scope entity exists. It previously reported `exists` from the registry independently of accessibility, which let a token with `cap_diagnostics` probe for hidden entities by referencing guessed IDs in a config. Inaccessible entities now report `exists: false` (collapsed to the accessible flag), so a hidden real entity is indistinguishable from a typo, consistent with the rest of ATM's no-existence-oracle rule.
 - Refined MCP tool descriptions so agents pick the right tool on the first try. The raw `set_yaml_config` and `write_file` tools now steer toward the dedicated automation, script, scene, helper, and dashboard tools, and `get_states`, `get_statistics`, `get_config`, and `render_template` clarify how they differ from neighboring tools and how token scoping affects them.
 - `get_state` and `get_states` now return a compact, domain-aware view by default (key attributes only) to cut token cost, with `detailed: true` for the full state and `fields: [...]` to select exact fields. `describe_entity` remains the full single-entity tool, and sensitive attributes are always scrubbed first.

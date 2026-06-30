@@ -685,6 +685,66 @@ async def test_states_view_returns_filtered_states(hass, token_store):
 
 
 @pytest.mark.asyncio
+async def test_states_view_negative_limit_clamped(hass, token_store):
+    from custom_components.atm.proxy_view import ATMStatesView
+
+    token, raw = _make_token()
+    data = _make_data(token)
+    hass.data[DOMAIN] = data
+    hass.states = MagicMock()
+    hass.states.async_all.return_value = []
+
+    view = ATMStatesView()
+    view.hass = hass
+
+    request = MagicMock()
+    request.method = "GET"
+    request.remote = "127.0.0.1"
+    request.headers = MagicMock()
+    request.headers.get = MagicMock(side_effect=lambda k, d="": {"Authorization": f"Bearer {raw}"}.get(k, d))
+    request.query = {"limit": "-1"}
+
+    three = [{"entity_id": f"light.l{i}"} for i in range(3)]
+    with patch("custom_components.atm.proxy_view.filter_entities_for_token", return_value=three):
+        resp = await view.get(request)
+
+    assert resp.status == 200
+    # Clamped to a minimum page of 1, not the old filtered[0:-1] (which returned 2).
+    assert len(json.loads(resp.text)) == 1
+
+
+@pytest.mark.asyncio
+async def test_state_view_uses_canonical_id_for_fetch(hass, token_store):
+    from custom_components.atm.proxy_view import ATMStateView
+
+    token, raw = _make_token()
+    data = _make_data(token)
+    hass.data[DOMAIN] = data
+    hass.states.async_set("light.real", "on", {})
+
+    view = ATMStateView()
+    view.hass = hass
+
+    request = MagicMock()
+    request.method = "GET"
+    request.remote = "127.0.0.1"
+    request.headers = MagicMock()
+    request.headers.get = MagicMock(side_effect=lambda k, d="": {"Authorization": f"Bearer {raw}"}.get(k, d))
+    request.query = {}
+    request.rel_url = MagicMock()
+    request.rel_url.path = "/api/atm/states/some_registry_id"
+
+    # A registry id / alias canonicalizes to light.real; the state fetch must use
+    # the canonical id, not the original arg (which would 404).
+    with patch("custom_components.atm.proxy_view.canonical_entity_id", return_value="light.real"), \
+         patch("custom_components.atm.proxy_view.resolve", return_value=Permission.WRITE):
+        resp = await view.get(request, "some_registry_id")
+
+    assert resp.status == 200
+    assert json.loads(resp.text)["entity_id"] == "light.real"
+
+
+@pytest.mark.asyncio
 async def test_service_view_empty_permitted_returns_403(hass, token_store):
     from custom_components.atm.proxy_view import ATMServiceView
 

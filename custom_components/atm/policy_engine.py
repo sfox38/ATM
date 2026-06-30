@@ -45,6 +45,17 @@ _RELATIVE_TIME_RE = re.compile(r"^(\d+)(h|d|w|m)$")
 _ENTITY_ID_RE = re.compile(r"^[a-z0-9_]+\.[a-z0-9_]+$")
 
 
+def canonical_entity_id(entity_id: str, hass: HomeAssistant) -> str:
+    """Resolve an entity_id (or registry id) to its canonical entity_id.
+
+    Mirrors the alias canonicalization resolve() does internally, so callers that
+    fetch state after a permission check use the same id resolve() granted on
+    (avoids a false 404 when a registry id or alias was supplied).
+    """
+    entry = er.async_get(hass).async_get(entity_id)
+    return entry.entity_id if entry else entity_id
+
+
 def resolve(entity_id: str, token: TokenRecord, hass: HomeAssistant) -> Permission:
     """Resolve effective permission for entity_id against a token.
 

@@ -93,6 +93,7 @@ function HintInput({ tokenId, entityId, currentHint, globalHint, currentState, o
   const [allTokens, setAllTokens] = useState(true);
   const [value, setValue] = useState("");
   const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   function openModal() {
     setAllTokens(true);
@@ -110,6 +111,7 @@ function HintInput({ tokenId, entityId, currentHint, globalHint, currentState, o
 
   async function save() {
     setSaving(true);
+    setSaveError(null);
     try {
       if (allTokens) {
         const r = await api.setEntityHint(entityId, value.trim() || null);
@@ -122,8 +124,8 @@ function HintInput({ tokenId, entityId, currentHint, globalHint, currentState, o
         onSaved(tree);
       }
       setOpen(false);
-    } catch {
-      // ignore
+    } catch (e: unknown) {
+      setSaveError(e instanceof Error ? e.message : "Failed to save hint.");
     } finally {
       setSaving(false);
     }
@@ -169,6 +171,7 @@ function HintInput({ tokenId, entityId, currentHint, globalHint, currentState, o
           ? "Saved globally: applies to every token that can see this entity."
           : "Saved for this token only. A token-level hint overrides the global one."}
       </p>
+      {saveError && <p className="hint-modal-error" role="alert">{saveError}</p>}
       <div className="modal-actions">
         <button className="btn btn-primary" onClick={save} disabled={saving}>
           {saving ? "Saving..." : "Save"}
@@ -207,6 +210,7 @@ function EntityRow({
   const state: NodeState = entityNode?.state ?? "GREY";
   const effective = effectivePermission(entityId, domainKey, deviceId, permissions);
   const rowRef = React.useRef<HTMLDivElement>(null);
+  const [permError, setPermError] = useState<string | null>(null);
   const isRevealed = (revealDepth ?? "entity") === "entity" && revealEntity === entityId;
 
   // When this row becomes the reveal target, scroll it into view and flash it.
@@ -223,6 +227,7 @@ function EntityRow({
   }
 
   async function setEntityState(newState: NodeState) {
+    setPermError(null);
     try {
       const tree = await api.patchEntityPermission(tokenId, entityId, {
         state: newState,
@@ -230,8 +235,8 @@ function EntityRow({
       });
       onPermChange(tree);
       onEntityClick?.(entityId, "entity");
-    } catch {
-      // ignore
+    } catch (e: unknown) {
+      setPermError(e instanceof Error ? e.message : "Failed to save permission.");
     }
   }
 
@@ -265,6 +270,7 @@ function EntityRow({
         />
       )}
       <PermissionSelector value={state} onChange={setEntityState} />
+      {permError && <span className="tree-perm-error" role="alert" title={permError}>Save failed</span>}
     </div>
   );
 }
@@ -296,6 +302,7 @@ function DeviceGroup({
   permissions, tokenId, filterText, allEntityIds, onPermChange, onEntityClick, collapseKey, revealEntity, revealDepth, revealNonce, mesaProfileEntities, onOpenMesa, globalHints, onGlobalHintsChange,
 }: DeviceGroupProps) {
   const [expanded, setExpanded] = useState(false);
+  const [permError, setPermError] = useState<string | null>(null);
   const deviceNode = permissions.devices[deviceId];
   const state: NodeState = deviceNode?.state ?? "GREY";
   const effective = effectiveForNode("device", deviceId, domainKey, permissions);
@@ -338,12 +345,13 @@ function DeviceGroup({
   }, [collapseKey]);
 
   async function setDeviceState(newState: NodeState) {
+    setPermError(null);
     try {
       const tree = await api.patchDevicePermission(tokenId, deviceId, { state: newState });
       onPermChange(tree);
       if (entityIds[0]) onEntityClick?.(entityIds[0], "device");
-    } catch {
-      // ignore
+    } catch (e: unknown) {
+      setPermError(e instanceof Error ? e.message : "Failed to save permission.");
     }
   }
 
@@ -372,6 +380,7 @@ function DeviceGroup({
         )}
         <span className="tree-effective" title={`Effective: ${effective}`}>({effective})</span>
         <PermissionSelector value={state} onChange={setDeviceState} />
+        {permError && <span className="tree-perm-error" role="alert" title={permError}>Save failed</span>}
       </div>
       {expanded && (
         <div className="tree-children-flat" role="group">
@@ -429,6 +438,7 @@ function DomainGroup({
   domainKey, domainData, permissions, tokenId, filterText, allEntityIds, onPermChange, onEntityClick, collapseKey, revealEntity, revealDepth, revealNonce, mesaProfileEntities, onOpenMesa, globalHints, onGlobalHintsChange,
 }: DomainGroupProps) {
   const [expanded, setExpanded] = useState(false);
+  const [permError, setPermError] = useState<string | null>(null);
   const domainNode = permissions.domains[domainKey];
   const state: NodeState = domainNode?.state ?? "GREY";
   const effective = effectiveForNode("domain", domainKey, domainKey, permissions);
@@ -462,14 +472,15 @@ function DomainGroup({
   }, [collapseKey]);
 
   async function setDomainState(newState: NodeState) {
+    setPermError(null);
     try {
       const tree = await api.patchDomainPermission(tokenId, domainKey, { state: newState });
       onPermChange(tree);
       const firstEntity = domainData.deviceless_entities[0]
         ?? Object.values(domainData.devices)[0]?.entities[0];
       if (firstEntity) onEntityClick?.(firstEntity, "domain");
-    } catch {
-      // ignore
+    } catch (e: unknown) {
+      setPermError(e instanceof Error ? e.message : "Failed to save permission.");
     }
   }
 
@@ -507,6 +518,7 @@ function DomainGroup({
         )}
         <span className="tree-effective" title={`Effective: ${effective}`}>({effective})</span>
         <PermissionSelector value={state} onChange={setDomainState} />
+        {permError && <span className="tree-perm-error" role="alert" title={permError}>Save failed</span>}
       </div>
       {expanded && (
         <div className="tree-children" role="group">

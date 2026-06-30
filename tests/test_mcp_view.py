@@ -154,6 +154,42 @@ def _make_context_view(data: ATMData, hass: MagicMock | None = None) -> ATMMcpCo
     return view
 
 
+@pytest.mark.asyncio
+async def test_streamable_batch_dispatches_sequentially_and_isolates_failures():
+    from custom_components.atm.mcp_view import _handle_streamable_batch
+
+    token, _ = _make_token()
+    data = _make_data(token)
+    hass = _make_hass(data)
+    rl = RateLimitResult(allowed=True, rate_limiting_enabled=True, limit=60, remaining=59, reset=9999999999)
+
+    call_order: list = []
+
+    async def fake_dispatch(method, msg_id, params, *a, **k):
+        call_order.append(msg_id)
+        if method == "boom":
+            raise RuntimeError("explode")
+        return ({"jsonrpc": "2.0", "id": msg_id, "result": {"m": method}}, None, None, None)
+
+    items = [
+        {"jsonrpc": "2.0", "id": 1, "method": "a"},
+        {"jsonrpc": "2.0", "id": 2, "method": "boom"},
+        {"jsonrpc": "2.0", "id": 3, "method": "c"},
+    ]
+    with patch("custom_components.atm.mcp_view._dispatch_mcp", side_effect=fake_dispatch):
+        resp = await _handle_streamable_batch(items, token, rl, hass, data, "rid", "127.0.0.1", "http://h")
+
+    assert resp.status == 200
+    body = json.loads(resp.text)
+    # Sequential, in-order dispatch (no asyncio.gather concurrency).
+    assert call_order == [1, 2, 3]
+    assert [r["id"] for r in body] == [1, 2, 3]
+    # One item's failure is isolated as a per-item internal error, not a batch failure.
+    assert body[1]["error"]["code"] == -32603
+    assert body[0]["result"]["m"] == "a"
+    assert body[2]["result"]["m"] == "c"
+
+
 # --- token validation on POST /api/atm/mcp (Streamable HTTP) ---
 
 @pytest.mark.asyncio

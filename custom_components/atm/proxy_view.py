@@ -44,6 +44,7 @@ from .helpers import (
 from .policy_engine import (
     EntityCreationNotPermitted,
     Permission,
+    canonical_entity_id,
     filter_entities_for_token,
     filter_service_response,
     resolve,
@@ -122,7 +123,7 @@ class ATMStatesView(HomeAssistantView):
         token, rl_result = result
 
         try:
-            limit = min(int(request.query.get("limit", 500)), 500)
+            limit = max(1, min(int(request.query.get("limit", 500)), 500))
             offset = max(int(request.query.get("offset", 0)), 0)
         except ValueError:
             return _error("invalid_request", "Invalid pagination parameters.", 400, request_id)
@@ -155,6 +156,10 @@ class ATMStateView(HomeAssistantView):
             return result
         token, rl_result = result
 
+        # Canonicalize first so the permission check and the state fetch below use
+        # the same id (a registry id or alias would otherwise pass resolve() but
+        # 404 on hass.states.get of the original value).
+        entity_id = canonical_entity_id(entity_id, hass)
         perm = resolve(entity_id, token, hass)
 
         if perm == Permission.NOT_FOUND:

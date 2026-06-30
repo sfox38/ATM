@@ -7013,6 +7013,9 @@ async def _handle_streamable_batch(
     # entire 60 req/min budget, making batching worse than sequential calls. The
     # MAX_BATCH_ITEMS cap bounds the multiplier to 50x, which is an acceptable
     # tradeoff for MCP batch usability. Reviewed and accepted in audit 2026-04-19.
+    # Items are dispatched sequentially (not via asyncio.gather) so a batch can never
+    # run up to MAX_BATCH_ITEMS side-effecting tools concurrently and interleave
+    # writes; order is preserved and one item's failure stays isolated.
     if len(items) > MAX_BATCH_ITEMS:
         return web.Response(
             status=400,
@@ -7035,16 +7038,15 @@ async def _handle_streamable_batch(
         )
         return response_msg
 
-    raw_results = await asyncio.gather(
-        *[_dispatch_one(item) for item in items],
-        return_exceptions=True,
-    )
-
     responses = []
-    for item, r in zip(items, raw_results):
-        if isinstance(r, Exception):
-            responses.append(_jsonrpc_error(_sanitize_jsonrpc_id(item.get("id")), -32603, "Internal error."))
-        elif r is not None:
+    for item in items:
+        try:
+            r = await _dispatch_one(item)
+        except Exception:  # noqa: BLE001 - isolate one item's failure from the batch
+            msg_id = _sanitize_jsonrpc_id(item.get("id")) if isinstance(item, dict) else None
+            responses.append(_jsonrpc_error(msg_id, -32603, "Internal error."))
+            continue
+        if r is not None:
             responses.append(r)
 
     if not responses:

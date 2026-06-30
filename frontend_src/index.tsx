@@ -368,7 +368,7 @@ class ATMPanelElement extends HTMLElement {
 
   private _setTheme(t: Theme) {
     this._theme = t;
-    localStorage.setItem("atm-theme", t);
+    try { localStorage.setItem("atm-theme", t); } catch { /* storage blocked: skip persistence */ }
     this._applyThemeClass();
     this._render();
   }

@@ -767,7 +767,9 @@ select.input {
 .tree-badge-risk    { background: var(--atm-error-bg);   color: var(--atm-error); }
 .tree-badge-ghost   { background: var(--atm-warning-bg); color: var(--atm-warning); }
 .tree-hint-link { font-size: 11px; color: var(--atm-accent); cursor: pointer; background: none; border: none; padding: 0; text-decoration: underline; white-space: nowrap; }
+.tree-perm-error { font-size: 11px; font-weight: 700; color: var(--atm-error); white-space: nowrap; flex-shrink: 0; cursor: help; }
 .hint-modal-entity { font-family: var(--atm-mono, monospace); font-size: 12px; color: var(--atm-text-2); margin: 0 0 12px; }
+.hint-modal-error { color: var(--atm-error); font-size: 12px; margin: 8px 0 0; text-align: center; }
 .hint-scope { display: flex; align-items: center; justify-content: center; gap: 10px; margin: 14px 0 6px; font-size: 13px; color: var(--atm-text-2); }
 .hint-scope-active { color: var(--atm-text); font-weight: 600; }
 .hint-scope-note { font-size: 12px; color: var(--atm-text-2); margin: 0 0 4px; text-align: center; }
