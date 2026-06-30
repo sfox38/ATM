@@ -595,17 +595,10 @@ _SYSTEM_TOOL_DEFS: list[dict] = [
     {
         "name": "create_automation",
         "description": (
-            "Create a new Home Assistant automation stored in automations.yaml. "
-            "Do not include an 'id' field - ATM assigns the ID automatically. "
-            "Returns the saved configuration including the generated automation_id. "
-            "The config is validated by HA before saving - invalid configs are rejected with an error. "
-            "config structure: 'alias' (string, required), "
-            "'trigger' (list of trigger objects, each with a 'platform' field, required), "
-            "'action' (list of action objects - service calls, delays, conditions, etc., required), "
-            "'condition' (list of condition objects, optional), "
-            "'mode' ('single'|'restart'|'queued'|'parallel', default 'single', optional). "
-            "To build from a blueprint instead, pass 'use_blueprint' ({'path': ..., 'input': {...}}) "
-            "with no trigger/action; see list_blueprints for available blueprints and their inputs."
+            "Create a new Home Assistant automation in automations.yaml. Do not include an 'id' (ATM "
+            "assigns and returns it). HA validates before saving; invalid configs are rejected with an "
+            "error. To build from a blueprint instead, pass 'use_blueprint' ({'path': ..., 'input': "
+            "{...}}) with no trigger/action; see list_blueprints."
         ),
         "cap": "cap_automation_write",
         "inputSchema": {
@@ -656,17 +649,10 @@ _SYSTEM_TOOL_DEFS: list[dict] = [
     {
         "name": "create_script",
         "description": (
-            "Create a new Home Assistant script stored in scripts.yaml. "
-            "Provide a unique script_id (slug, e.g. 'morning_routine') - this becomes the entity_id: script.<script_id>. "
-            "Returns the saved configuration. "
-            "The config is validated by HA before saving - invalid configs are rejected with an error. "
-            "config structure: 'alias' (string, required), "
-            "'sequence' (list of action objects - service calls, delays, conditions, etc., required), "
-            "'mode' ('single'|'restart'|'queued'|'parallel', default 'single', optional), "
-            "'variables' (dict of script-level variables, optional), "
-            "'fields' (dict of input field definitions for callable scripts, optional). "
-            "To build from a blueprint instead, pass 'use_blueprint' ({'path': ..., 'input': {...}}) "
-            "in place of 'sequence'; see list_blueprints for available blueprints and their inputs."
+            "Create a new Home Assistant script in scripts.yaml. Provide a unique script_id slug (e.g. "
+            "'morning_routine'); it becomes script.<script_id>. HA validates before saving; invalid "
+            "configs are rejected with an error. To build from a blueprint instead, pass 'use_blueprint' "
+            "({'path': ..., 'input': {...}}) in place of 'sequence'; see list_blueprints."
         ),
         "cap": "cap_script_write",
         "inputSchema": {
