@@ -95,8 +95,8 @@ from .helpers import (
     get_client_ip as _get_client_ip,
     log_request as _log,
     parse_time_param as _parse_time_param,
+    redact_diagnostics as _redact_diagnostics,
     redact_secrets_in_text as _redact_secrets_in_text,
-    redact_structure as _redact_structure,
     render_template_for_token as _render_template_for_token,
     token_has_write_scope,
 )
@@ -4870,13 +4870,15 @@ async def _tool_get_system_health(
         integrations = {}
 
     # Per-integration health values are arbitrary and can carry embedded tokens,
-    # credentials, or URL-embedded secrets. Scrub them before they enter the model
-    # context (the keys are integration-defined, so a build_safe_config-style
-    # allowlist does not apply; redact_structure scrubs secret-keyed and credential
-    # values while preserving the diagnostic shape).
+    # credentials, URL-embedded secrets, AND network topology (LAN IPs, hostnames in
+    # URLs, filesystem paths). The keys are integration-defined, so a
+    # build_safe_config-style allowlist does not apply; redact_diagnostics scrubs
+    # secret-keyed and credential values (redact_structure) and additionally the
+    # topology that ATM already withholds from agents elsewhere (get_config), while
+    # preserving the diagnostic shape.
     body = {
         "home_assistant_version": ha_version,
-        "integrations": _redact_structure(integrations),
+        "integrations": _redact_diagnostics(integrations),
     }
     return _tool_success(json.dumps(body, default=str)), "allowed", "get_system_health"
 

@@ -701,6 +701,72 @@ def redact_structure(obj: Any, _depth: int = 0) -> Any:
     return obj
 
 
+# Network-topology scrubbing for integration-defined diagnostics (get_system_health).
+# ATM already withholds network topology / host layout from agents elsewhere
+# (build_safe_config drops internal_url/external_url/config_dir/paths from get_config),
+# but system_health values are integration-defined free-form strings that can carry the
+# same infrastructure detail (LAN IPs, hostnames inside URLs, filesystem paths), which
+# redact_structure (secret-keyed values + embedded credentials only) does not catch.
+# These patterns are deliberately conservative. The IPv4 set is restricted to
+# PRIVATE/loopback/link-local ranges, so a public-IP-shaped version string like
+# "4.8.0.1" is NOT matched (it is outside these ranges); that avoids the main
+# false-positive while still scrubbing the LAN topology that is the actual concern.
+_PRIVATE_IPV4_RE = re.compile(
+    r"\b(?:"
+    r"10\.\d{1,3}\.\d{1,3}\.\d{1,3}"                  # 10.0.0.0/8
+    r"|127\.\d{1,3}\.\d{1,3}\.\d{1,3}"               # loopback 127.0.0.0/8
+    r"|169\.254\.\d{1,3}\.\d{1,3}"                   # link-local 169.254.0.0/16
+    r"|192\.168\.\d{1,3}\.\d{1,3}"                   # 192.168.0.0/16
+    r"|172\.(?:1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}"  # 172.16.0.0/12
+    r")\b"
+)
+# Link-local (fe80::/10) and unique-local (fc00::/7) IPv6.
+_PRIVATE_IPV6_RE = re.compile(
+    r"\b(?:fe80|f[cd][0-9a-f]{2})(?::[0-9a-f]{0,4}){2,7}\b", re.IGNORECASE
+)
+# Bare http(s) URL (host + optional port/path). URL-embedded credentials are already
+# scrubbed upstream; this removes the host/topology itself.
+_BARE_URL_RE = re.compile(r"https?://[^\s\"'<>]+", re.IGNORECASE)
+# Absolute filesystem paths: unix /a/b... (>=2 segments, so a lone "/" or a URL path
+# already handled above is not matched) and Windows drive paths C:\a\b\... .
+_UNIX_PATH_RE = re.compile(r"(?<![\w/])/(?:[\w.\-]+/)+[\w.\-]+")
+_WIN_PATH_RE = re.compile(r"\b[A-Za-z]:\\(?:[\w.\-]+\\?){2,}")
+
+
+def _scrub_network_topology(text: str) -> str:
+    """Replace LAN IPs, bare URLs, and absolute filesystem paths with placeholders."""
+    text = _BARE_URL_RE.sub("<redacted-url>", text)
+    text = _PRIVATE_IPV4_RE.sub("<redacted-ip>", text)
+    text = _PRIVATE_IPV6_RE.sub("<redacted-ip>", text)
+    text = _WIN_PATH_RE.sub("<redacted-path>", text)
+    text = _UNIX_PATH_RE.sub("<redacted-path>", text)
+    return text
+
+
+def redact_diagnostics(obj: Any, _depth: int = 0) -> Any:
+    """redact_structure plus a conservative network-topology scrub for diagnostics.
+
+    get_system_health values are integration-defined and can disclose LAN IPs,
+    hostnames-in-URLs, and filesystem paths that ATM already withholds elsewhere
+    (build_safe_config). Layered on redact_structure (secret-keyed values + embedded
+    credentials), each string is also scrubbed for private/loopback/link-local IPs,
+    bare URLs, and absolute paths. cap_diagnostics is an elevated read, so a little
+    over-redaction is acceptable; the diagnostic shape is preserved.
+    """
+    if _depth > 25:
+        return "<redacted>"
+    if isinstance(obj, dict):
+        return {
+            k: "<redacted>" if is_sensitive_key(k) else redact_diagnostics(v, _depth + 1)
+            for k, v in obj.items()
+        }
+    if isinstance(obj, list):
+        return [redact_diagnostics(item, _depth + 1) for item in obj]
+    if isinstance(obj, str):
+        return _scrub_network_topology(redact_secrets_in_text(obj) or "")
+    return obj
+
+
 # Config keys safe to disclose to a cap_config_read token. Allowlist, not denylist,
 # so a new HA config key defaults to excluded. Deliberately omits precise location
 # (latitude/longitude/elevation/radius), internal_url/external_url, and filesystem
