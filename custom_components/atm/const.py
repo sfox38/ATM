@@ -106,7 +106,8 @@ LEAN_ALWAYS_ATTRS = ("friendly_name",)
 DOMAIN_IMPORTANT_ATTRIBUTES: dict[str, tuple[str, ...]] = {
     "light": ("brightness", "color_temp_kelvin", "rgb_color", "effect", "supported_color_modes"),
     "climate": ("current_temperature", "temperature", "target_temp_high", "target_temp_low",
-                "hvac_action", "hvac_mode", "preset_mode", "fan_mode"),
+                "min_temp", "max_temp", "hvac_action", "hvac_mode", "hvac_modes",
+                "preset_mode", "fan_mode"),
     "media_player": ("media_title", "media_artist", "source", "volume_level", "media_content_type"),
     "cover": ("current_position", "current_tilt_position"),
     "fan": ("percentage", "preset_mode", "oscillating", "direction"),
