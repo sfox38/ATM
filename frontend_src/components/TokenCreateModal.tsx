@@ -188,9 +188,10 @@ export function TokenCreateModal({ existingNames, onCreated, onClose }: Props) {
         </div>
 
         <div className="field">
-          <label>Expiry</label>
+          <label htmlFor="token-expiry-unit">Expiry</label>
           <div className="token-create-expiry-row">
             <select
+              id="token-expiry-unit"
               className="input input-auto"
               value={ttlUnit}
               onChange={(e) => setTtlUnit(e.target.value as TtlUnit)}
@@ -203,6 +204,7 @@ export function TokenCreateModal({ existingNames, onCreated, onClose }: Props) {
             </select>
             {ttlUnit !== "none" && (
               <input
+                aria-label="Expiry amount"
                 className="input token-create-expiry-value"
                 type="number"
                 min={1}
@@ -221,6 +223,7 @@ export function TokenCreateModal({ existingNames, onCreated, onClose }: Props) {
           <label className="toggle-switch">
             <input
               type="checkbox"
+              aria-label="Pass-through mode"
               checked={passThrough}
               onChange={(e) => { setPassThrough(e.target.checked); setPtConfirmed(false); }}
             />
@@ -238,6 +241,7 @@ export function TokenCreateModal({ existingNames, onCreated, onClose }: Props) {
               <label className="toggle-switch">
                 <input
                   type="checkbox"
+                  aria-label="I understand this token has broad Home Assistant access"
                   checked={ptConfirmed}
                   onChange={(e) => setPtConfirmed(e.target.checked)}
                 />
@@ -249,8 +253,9 @@ export function TokenCreateModal({ existingNames, onCreated, onClose }: Props) {
           <div className="token-create-rate-section">
             <div className="token-create-rate-fields">
               <div className="field token-create-rate-field">
-                <label>Requests per minute (0 = disabled)</label>
+                <label htmlFor="create-rate-requests">Requests per minute (0 = disabled)</label>
                 <input
+                  id="create-rate-requests"
                   className="input"
                   type="number"
                   min={0}
@@ -259,8 +264,9 @@ export function TokenCreateModal({ existingNames, onCreated, onClose }: Props) {
                 />
               </div>
               <div className="field token-create-rate-field">
-                <label>Burst per second</label>
+                <label htmlFor="create-rate-burst">Burst per second</label>
                 <input
+                  id="create-rate-burst"
                   className="input"
                   type="number"
                   min={0}

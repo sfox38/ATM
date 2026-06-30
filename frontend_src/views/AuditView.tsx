@@ -70,6 +70,7 @@ export function AuditView({ tokens }: Props) {
       <div className="card">
         <div className="filter-row">
           <select
+            aria-label="Filter by outcome"
             className="input input-auto"
             value={outcomeFilter}
             onChange={(e) => { setOutcomeFilter(e.target.value as Outcome | ""); setPage(0); }}
@@ -82,6 +83,7 @@ export function AuditView({ tokens }: Props) {
             <option value="not_implemented">Not Implemented</option>
           </select>
           <select
+            aria-label="Filter by token"
             className="input input-auto"
             value={tokenFilter}
             onChange={(e) => { setTokenFilter(e.target.value); setPage(0); }}
@@ -92,6 +94,7 @@ export function AuditView({ tokens }: Props) {
             ))}
           </select>
           <select
+            aria-label="Filter by time window"
             className="input input-auto"
             value={timeWindow}
             onChange={(e) => { setTimeWindow(e.target.value as TimeWindow); setPage(0); }}
@@ -104,18 +107,21 @@ export function AuditView({ tokens }: Props) {
           </select>
           <input
             className="input"
+            aria-label="Filter by method"
             placeholder="Method..."
             value={methodFilter}
             onChange={(e) => { setMethodFilter(e.target.value); setPage(0); }}
           />
           <input
             className="input"
+            aria-label="Filter by resource"
             placeholder="Resource..."
             value={resourceFilter}
             onChange={(e) => { setResourceFilter(e.target.value); setPage(0); }}
           />
           <input
             className="input"
+            aria-label="Filter by IP address"
             placeholder="IP..."
             value={ipFilter}
             onChange={(e) => { setIpFilter(e.target.value); setPage(0); }}
@@ -125,6 +131,7 @@ export function AuditView({ tokens }: Props) {
               className="btn btn-ghost btn-sm btn-icon"
               onClick={load}
               title="Refresh"
+              aria-label="Refresh audit log"
             >
               <RefreshIcon />
             </button>

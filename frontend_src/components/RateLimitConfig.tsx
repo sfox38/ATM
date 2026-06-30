@@ -45,8 +45,9 @@ export function RateLimitConfig({ token, onUpdate }: Props) {
       {error && <div className="banner banner-error mb-8">{error}</div>}
       <div className="rate-limit-row">
         <div className="field">
-          <label>Requests per minute (0 = disabled)</label>
+          <label htmlFor="rate-limit-requests">Requests per minute (0 = disabled)</label>
           <input
+            id="rate-limit-requests"
             className="input"
             type="number"
             min={0}
@@ -56,8 +57,9 @@ export function RateLimitConfig({ token, onUpdate }: Props) {
           />
         </div>
         <div className="field">
-          <label>Burst per second</label>
+          <label htmlFor="rate-limit-burst">Burst per second</label>
           <input
+            id="rate-limit-burst"
             className="input"
             type="number"
             min={0}

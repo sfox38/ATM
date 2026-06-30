@@ -102,6 +102,7 @@ export function PermissionSimulator({ tokenId, externalEntityId, resolveDepth = 
     <div>
       <input
         className="input"
+        aria-label="Entity ID to simulate"
         placeholder="entity_id (e.g. light.kitchen)"
         value={entityInput}
         onChange={(e) => setEntityInput(e.target.value)}

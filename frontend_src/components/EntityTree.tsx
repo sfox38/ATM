@@ -144,9 +144,10 @@ function HintInput({ tokenId, entityId, currentHint, globalHint, currentState, o
     <Modal titleId="hint-modal-title" onClose={saving ? undefined : () => setOpen(false)}>
       <h3 className="modal-title" id="hint-modal-title">Entity hint</h3>
       <p className="hint-modal-entity">{entityId}</p>
-      <input
-        className="input"
-        value={value}
+        <input
+          className="input"
+          aria-label={`Hint for ${entityId}`}
+          value={value}
         onChange={(e) => setValue(e.target.value)}
         placeholder="Hint for the AI agent..."
         maxLength={200}
@@ -158,6 +159,7 @@ function HintInput({ tokenId, entityId, currentHint, globalHint, currentState, o
         <label className={`toggle-switch${saving ? " disabled" : ""}`}>
           <input
             type="checkbox"
+            aria-label="Apply hint to all tokens"
             checked={allTokens}
             disabled={saving}
             onChange={(e) => switchScope(e.target.checked)}
@@ -241,19 +243,27 @@ function EntityRow({
   }
 
   return (
-    <div ref={rowRef} className={`tree-node${isRevealed ? " tree-node-revealed" : ""}`} role="treeitem" aria-label={friendlyName ?? entityId}>
+    <div ref={rowRef} className={`tree-node${isRevealed ? " tree-node-revealed" : ""}`}>
       <span className="tree-spacer" />
       {onOpenMesa && !isGhost && (
         <MesaProfileLink entityId={entityId} exists={!!mesaProfileEntities?.has(entityId)} onOpen={onOpenMesa} />
       )}
-      <div
-        className={`tree-name${onEntityClick ? " tree-cursor-pointer" : ""}`}
-        onClick={() => onEntityClick?.(entityId, "entity")}
-        title={onEntityClick ? `Simulate permissions for ${entityId}` : undefined}
-      >
-        <div className="tree-friendly">{friendlyName ?? entityId}</div>
-        <div className="tree-entity-id">{entityId}</div>
-      </div>
+      {onEntityClick ? (
+        <button
+          type="button"
+          className="tree-name tree-cursor-pointer"
+          onClick={() => onEntityClick(entityId, "entity")}
+          title={`Simulate permissions for ${entityId}`}
+        >
+          <span className="tree-friendly">{friendlyName ?? entityId}</span>
+          <span className="tree-entity-id">{entityId}</span>
+        </button>
+      ) : (
+        <div className="tree-name">
+          <div className="tree-friendly">{friendlyName ?? entityId}</div>
+          <div className="tree-entity-id">{entityId}</div>
+        </div>
+      )}
       {isGhost && (
         <span className="tree-badge tree-badge-ghost" title="This entity no longer exists in Home Assistant.">ghost</span>
       )}
@@ -269,7 +279,7 @@ function EntityRow({
           onGlobalHintsChange={onGlobalHintsChange}
         />
       )}
-      <PermissionSelector value={state} onChange={setEntityState} />
+      <PermissionSelector value={state} onChange={setEntityState} label={`Permission for ${friendlyName ?? entityId}`} />
       {permError && <span className="tree-perm-error" role="alert" title={permError}>Save failed</span>}
     </div>
   );
@@ -367,23 +377,23 @@ function DeviceGroup({
   if (filterText && !hasVisibleChild && !deviceName.toLowerCase().includes(filterText.toLowerCase())) return null;
 
   return (
-    <div role="treeitem" aria-expanded={expanded} aria-label={deviceName}>
+    <div>
       <div ref={headerRef} className={`tree-node${isRevealed ? " tree-node-revealed" : ""}`}>
-        <button className="tree-expand" onClick={() => setExpanded((x) => !x)} aria-label={expanded ? `Collapse ${deviceName}` : `Expand ${deviceName}`}>
+        <button type="button" className="tree-expand" onClick={() => setExpanded((x) => !x)} aria-label={expanded ? `Collapse ${deviceName}` : `Expand ${deviceName}`}>
           <span className={`collapsible-chevron${expanded ? " open" : ""}`} aria-hidden="true" />
         </button>
-        <div className="tree-name tree-cursor-pointer" onClick={() => setExpanded((x) => !x)}>
+        <button type="button" className="tree-name tree-cursor-pointer" onClick={() => setExpanded((x) => !x)}>
           <span className="tree-friendly">{deviceName}</span>
-        </div>
+        </button>
         {isDynamic && (
           <span className="tree-badge tree-badge-dynamic" title="New entities added to this device will automatically inherit this permission.">Dynamic</span>
         )}
         <span className="tree-effective" title={`Effective: ${effective}`}>({effective})</span>
-        <PermissionSelector value={state} onChange={setDeviceState} />
+        <PermissionSelector value={state} onChange={setDeviceState} label={`Permission for device ${deviceName}`} />
         {permError && <span className="tree-perm-error" role="alert" title={permError}>Save failed</span>}
       </div>
       {expanded && (
-        <div className="tree-children-flat" role="group">
+        <div className="tree-children-flat">
           {sortedEntityIds.map((eid) => {
             const detail = domainData.entity_details[eid];
             return (
@@ -499,14 +509,14 @@ function DomainGroup({
   if (filterText && !hasVisible) return null;
 
   return (
-    <div className="tree-domain-group" role="treeitem" aria-expanded={expanded} aria-label={domainKey}>
+    <div className="tree-domain-group">
       <div ref={headerRef} className={`tree-node${isRevealed ? " tree-node-revealed" : ""}`}>
-        <button className="tree-expand" onClick={() => setExpanded((x) => !x)} aria-label={expanded ? `Collapse ${domainKey}` : `Expand ${domainKey}`}>
+        <button type="button" className="tree-expand" onClick={() => setExpanded((x) => !x)} aria-label={expanded ? `Collapse ${domainKey}` : `Expand ${domainKey}`}>
           <span className={`collapsible-chevron${expanded ? " open" : ""}`} aria-hidden="true" />
         </button>
-        <div className="tree-name tree-cursor-pointer" onClick={() => setExpanded((x) => !x)}>
+        <button type="button" className="tree-name tree-cursor-pointer" onClick={() => setExpanded((x) => !x)}>
           <span className="tree-friendly tree-domain-label">{domainKey}</span>
-        </div>
+        </button>
         {isDynamic && (
           <span className="tree-badge tree-badge-dynamic" title="New entities added to this domain will automatically inherit this permission.">Dynamic</span>
         )}
@@ -517,11 +527,11 @@ function DomainGroup({
           <span className="tree-badge tree-badge-risk" title="WRITE access here can indirectly control entities outside this token's permission scope. Triggered automations, scripts, and scenes run under Home Assistant's full context.">!</span>
         )}
         <span className="tree-effective" title={`Effective: ${effective}`}>({effective})</span>
-        <PermissionSelector value={state} onChange={setDomainState} />
+        <PermissionSelector value={state} onChange={setDomainState} label={`Permission for domain ${domainKey}`} />
         {permError && <span className="tree-perm-error" role="alert" title={permError}>Save failed</span>}
       </div>
       {expanded && (
-        <div className="tree-children" role="group">
+        <div className="tree-children">
           {domainData.deviceless_entities.length > 0 && (
             <div>
               {Object.keys(domainData.devices).length > 0 && (
@@ -669,7 +679,7 @@ export function EntityTree({ tokenId, permissions, onPermissionsChange, onEntity
           Reload
         </button>
       </div>
-      <div role="tree" aria-label="Entity permissions">
+      <div aria-label="Entity permissions">
         {domainKeys.map((domain) => (
           <DomainGroup
             key={domain}

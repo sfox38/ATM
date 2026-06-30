@@ -155,7 +155,7 @@ export function ChangesView({ hass }: { hass: unknown }) {
             Versions captured when an agent creates, edits, or deletes automations, scripts, scenes, helpers, and dashboards.
           </p>
         </div>
-        <button className="btn btn-ghost btn-sm btn-icon" onClick={() => { loadFeed(); loadTokens(); }} title="Refresh">
+        <button className="btn btn-ghost btn-sm btn-icon" onClick={() => { loadFeed(); loadTokens(); }} title="Refresh" aria-label="Refresh changes">
           <RefreshIcon />
         </button>
       </div>
@@ -165,21 +165,21 @@ export function ChangesView({ hass }: { hass: unknown }) {
           No configuration changes recorded yet. Agent-made automations, scripts, scenes, helpers, and dashboards appear here.
         </div>
       ) : (
-        <div className="changes-table" role="table" aria-label="Configuration changes">
-          <div className="changes-row changes-row-head" role="row">
-            <span role="columnheader">Action</span>
-            <span role="columnheader" className="changes-col-type">Type</span>
-            <span role="columnheader">Name</span>
-            <span role="columnheader" className="changes-col-who">By</span>
-            <span role="columnheader" className="changes-col-when">When</span>
+        <div className="changes-table" aria-label="Configuration changes">
+          <div className="changes-row changes-row-head" aria-hidden="true">
+            <span>Action</span>
+            <span className="changes-col-type">Type</span>
+            <span>Name</span>
+            <span className="changes-col-who">By</span>
+            <span className="changes-col-when">When</span>
           </div>
           {feed.map((v) => (
-            <button key={v.id} type="button" className="changes-row" role="row" onClick={() => setSelected(v.id)}>
-              <span role="cell"><ActionBadge action={v.action} /></span>
-              <span role="cell" className="changes-col-type"><code>{v.resource_type}</code></span>
-              <span role="cell" className="changes-name">{label(v)}</span>
-              <span role="cell" className="changes-col-who">{whoNow(v, tokenNames)}</span>
-              <span role="cell" className="changes-col-when">{formatDateTime(v.timestamp)}</span>
+            <button key={v.id} type="button" className="changes-row" onClick={() => setSelected(v.id)}>
+              <span><ActionBadge action={v.action} /></span>
+              <span className="changes-col-type"><code>{v.resource_type}</code></span>
+              <span className="changes-name">{label(v)}</span>
+              <span className="changes-col-who">{whoNow(v, tokenNames)}</span>
+              <span className="changes-col-when">{formatDateTime(v.timestamp)}</span>
             </button>
           ))}
         </div>

@@ -28,6 +28,11 @@ export function ArchivedTokenTable({ tokens, onDeleted }: Props) {
     else { setSortKey(key); setSortDir("asc"); }
   }
 
+  function ariaSort(key: SortKey): "ascending" | "descending" | "none" {
+    if (sortKey !== key) return "none";
+    return sortDir === "asc" ? "ascending" : "descending";
+  }
+
   const sorted = [...tokens].sort((a, b) => {
     let va: string = "";
     let vb: string = "";
@@ -63,8 +68,10 @@ export function ArchivedTokenTable({ tokens, onDeleted }: Props) {
 
   function th(key: SortKey, label: string) {
     return (
-      <th onClick={() => handleSort(key)} style={{ cursor: "pointer" }}>
-        {label} <SortArrow col={key} sortKey={sortKey} sortDir={sortDir} />
+      <th className={`sortable${sortKey === key ? " sort-active" : ""}`} aria-sort={ariaSort(key)}>
+        <button type="button" className="table-sort-btn" onClick={() => handleSort(key)}>
+          {label} <SortArrow col={key} sortKey={sortKey} sortDir={sortDir} />
+        </button>
       </th>
     );
   }

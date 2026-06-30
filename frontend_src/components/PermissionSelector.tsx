@@ -5,6 +5,7 @@ interface Props {
   value: NodeState;
   onChange: (state: NodeState) => void;
   disabled?: boolean;
+  label?: string;
 }
 
 const BUTTONS: { state: NodeState; label: string; title: string }[] = [
@@ -21,11 +22,12 @@ if (typeof document !== "undefined") {
   document.addEventListener("pointercancel", () => { _dragState = null; });
 }
 
-export const PermissionSelector = React.memo(function PermissionSelector({ value, onChange, disabled }: Props) {
+export const PermissionSelector = React.memo(function PermissionSelector({ value, onChange, disabled, label = "Permission" }: Props) {
   return (
     <div
       className="perm-selector"
-      aria-label="Permission"
+      role="group"
+      aria-label={label}
       style={{ touchAction: "none" }}
       onPointerEnter={() => {
         if (_dragState !== null && !disabled) onChange(_dragState);
@@ -46,6 +48,7 @@ export const PermissionSelector = React.memo(function PermissionSelector({ value
           }}
           disabled={disabled}
           aria-pressed={value === state}
+          aria-label={`${title}${value === state ? ", selected" : ""}`}
         >
           {label}
         </button>

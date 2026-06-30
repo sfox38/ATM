@@ -175,12 +175,21 @@ function ATMApp({ hass, narrow, theme, onThemeChange }: { hass: unknown; narrow:
 
   function handleTabKeyDown(e: React.KeyboardEvent) {
     const idx = TABS.indexOf(tab);
-    if (e.key === "ArrowRight" || e.key === "ArrowLeft") {
+    if (e.key === "ArrowRight" || e.key === "ArrowLeft" || e.key === "Home" || e.key === "End") {
       e.preventDefault();
-      const next = e.key === "ArrowRight"
-        ? TABS[(idx + 1) % TABS.length]
-        : TABS[(idx - 1 + TABS.length) % TABS.length];
+      const tablist = e.currentTarget;
+      const next = e.key === "Home"
+        ? TABS[0]
+        : e.key === "End"
+          ? TABS[TABS.length - 1]
+          : e.key === "ArrowRight"
+            ? TABS[(idx + 1) % TABS.length]
+            : TABS[(idx - 1 + TABS.length) % TABS.length];
       onTabClick(next);
+      window.requestAnimationFrame(() => {
+        const target = tablist.querySelector<HTMLButtonElement>(`#atm-tab-${next}`);
+        target?.focus();
+      });
     }
   }
 
@@ -198,21 +207,6 @@ function ATMApp({ hass, narrow, theme, onThemeChange }: { hass: unknown; narrow:
         <div role="tablist" aria-label="ATM sections" onKeyDown={handleTabKeyDown} style={{ display: "contents" }}>
           {TABS.map((t) => (
             <React.Fragment key={t}>
-              {t === "settings" && (
-                <a
-                  className="atm-tab atm-tab-doclink"
-                  href="https://sfox38.github.io/ATM/"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                >
-                  Documentation
-                  <svg className="atm-tab-extlink" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                    <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
-                    <polyline points="15 3 21 3 21 9" />
-                    <line x1="10" y1="14" x2="21" y2="3" />
-                  </svg>
-                </a>
-              )}
               <button
                 role="tab"
                 id={`atm-tab-${t}`}
@@ -235,6 +229,19 @@ function ATMApp({ hass, narrow, theme, onThemeChange }: { hass: unknown; narrow:
         </div>
 
         <div className="atm-tab-spacer" />
+        <a
+          className="atm-tab atm-tab-doclink"
+          href="https://sfox38.github.io/ATM/"
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          Documentation
+          <svg className="atm-tab-extlink" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+            <polyline points="15 3 21 3 21 9" />
+            <line x1="10" y1="14" x2="21" y2="3" />
+          </svg>
+        </a>
 
         <div className="atm-header-actions">
           <button className="btn btn-primary btn-sm btn-header-create" onClick={() => { setTab("tokens"); setView({ name: "list" }); setShowCreate(true); }}>
@@ -305,7 +312,8 @@ class ATMPanelElement extends HTMLElement {
   connectedCallback() {
     this.style.touchAction = "pan-y";
 
-    const saved = localStorage.getItem("atm-theme");
+    let saved: string | null = null;
+    try { saved = localStorage.getItem("atm-theme"); } catch { /* storage blocked: use default */ }
     if (saved === "light" || saved === "dark" || saved === "auto") {
       this._theme = saved;
     }

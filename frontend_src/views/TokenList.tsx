@@ -68,6 +68,11 @@ export function TokenListView({ tokens, loading, error, onRefresh, onOpenDetail,
     else { setSortKey(key); setSortDir("asc"); }
   }
 
+  function ariaSort(key: SortKey): "ascending" | "descending" | "none" {
+    if (sortKey !== key) return "none";
+    return sortDir === "asc" ? "ascending" : "descending";
+  }
+
   const filtered = tokens.filter((t) => {
     const q = filter.toLowerCase();
     if (!q) return true;
@@ -105,9 +110,11 @@ export function TokenListView({ tokens, loading, error, onRefresh, onOpenDetail,
     return (
       <th
         className={`sortable${sortKey === key ? " sort-active" : ""}${className ? ` ${className}` : ""}`}
-        onClick={() => handleSort(key)}
+        aria-sort={ariaSort(key)}
       >
-        {label}<SortArrow col={key} sortKey={sortKey} sortDir={sortDir} />
+        <button type="button" className="table-sort-btn" onClick={() => handleSort(key)}>
+          {label}<SortArrow col={key} sortKey={sortKey} sortDir={sortDir} />
+        </button>
       </th>
     );
   }
@@ -150,6 +157,7 @@ export function TokenListView({ tokens, loading, error, onRefresh, onOpenDetail,
         <div className="filter-row">
           <input
             className="input"
+            aria-label="Filter tokens by name or status"
             placeholder="Filter by name or status..."
             value={filter}
             onChange={(e) => setFilter(e.target.value)}
@@ -171,6 +179,7 @@ export function TokenListView({ tokens, loading, error, onRefresh, onOpenDetail,
               className="btn btn-ghost btn-sm btn-icon"
               onClick={onRefresh}
               title="Refresh"
+              aria-label="Refresh tokens"
             >
               <RefreshIcon />
             </button>
@@ -209,8 +218,7 @@ export function TokenListView({ tokens, loading, error, onRefresh, onOpenDetail,
                 return (
                   <tr
                     key={t.id}
-                    className={`clickable${t.pass_through ? " pass-through-row" : ""}`}
-                    onClick={() => onOpenDetail(t.id)}
+                    className={t.pass_through ? "pass-through-row" : ""}
                   >
                     <td className="token-name">{t.name}</td>
                     <td>
@@ -223,7 +231,7 @@ export function TokenListView({ tokens, loading, error, onRefresh, onOpenDetail,
                     <td title={t.updated_at ? new Date(t.updated_at).toLocaleString() : undefined}>{relativeTime(t.updated_at)}</td>
                     <td>{formatDate(t.expires_at)}</td>
                     <td>{relativeTime(t.last_used_at)}</td>
-                    <td onClick={(e) => e.stopPropagation()}>
+                    <td>
                       <div className="row-actions">
                         <button className="btn btn-ghost btn-sm" onClick={() => onOpenDetail(t.id)}>Edit</button>
                       </div>

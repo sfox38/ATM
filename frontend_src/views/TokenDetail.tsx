@@ -61,6 +61,7 @@ function ConfirmModal({ title, body, checkLabel, confirmLabel, confirmClass, loa
         <label className="toggle-switch">
           <input
             type="checkbox"
+            aria-label={checkLabel}
             checked={checked}
             onChange={(e) => setChecked(e.target.checked)}
           />
@@ -140,6 +141,7 @@ function ToolAnnouncementToggle({ token, onUpdate }: { token: TokenRecord; onUpd
         <label className="toggle-switch">
           <input
             type="checkbox"
+            aria-label="Always announce all tools"
             checked={!!token.announce_all_tools}
             disabled={saving}
             onChange={(e) => patch({ announce_all_tools: e.target.checked })}
@@ -155,6 +157,7 @@ function ToolAnnouncementToggle({ token, onUpdate }: { token: TokenRecord; onUpd
         <label className="toggle-switch">
           <input
             type="checkbox"
+            aria-label="Limit to Assist-exposed entities"
             checked={!!token.use_assist_exposure}
             disabled={saving || !token.pass_through}
             onChange={(e) => patch({ use_assist_exposure: e.target.checked })}

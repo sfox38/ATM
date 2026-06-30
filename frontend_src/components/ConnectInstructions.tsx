@@ -51,6 +51,28 @@ export function ConnectInstructions({ token }: { token: string }) {
   const tabs = buildAgentTabs(mcpUrl, token);
   const current = tabs.find((t) => t.key === agentTab) ?? tabs[0];
   const skillUrl = skillUrlFromMcp(mcpUrl);
+
+  function switchAgentTab(next: string, tablist?: HTMLDivElement) {
+    setAgentTab(next);
+    window.requestAnimationFrame(() => {
+      tablist?.querySelector<HTMLButtonElement>(`#agent-tab-${next}`)?.focus();
+    });
+  }
+
+  function handleAgentTabKeyDown(e: React.KeyboardEvent<HTMLDivElement>) {
+    if (e.key !== "ArrowRight" && e.key !== "ArrowLeft" && e.key !== "Home" && e.key !== "End") return;
+    e.preventDefault();
+    const idx = tabs.findIndex((t) => t.key === current?.key);
+    const next = e.key === "Home"
+      ? tabs[0]
+      : e.key === "End"
+        ? tabs[tabs.length - 1]
+        : e.key === "ArrowRight"
+          ? tabs[(idx + 1) % tabs.length]
+          : tabs[(idx - 1 + tabs.length) % tabs.length];
+    if (next) switchAgentTab(next.key, e.currentTarget);
+  }
+
   return (
     <div className="connect-instructions">
       <p className="wizard-sub">
@@ -63,21 +85,29 @@ export function ConnectInstructions({ token }: { token: string }) {
       <CopyCodeBox label="Token" value={token} />
 
       <div className="wizard-tabs-label">Pick your agent</div>
-      <div className="wizard-tabs" role="tablist" aria-label="Agent">
+      <div className="wizard-tabs" role="tablist" aria-label="Agent" onKeyDown={handleAgentTabKeyDown}>
         {tabs.map((t) => (
           <button
             key={t.key}
+            id={`agent-tab-${t.key}`}
             role="tab"
             aria-selected={current?.key === t.key}
+            aria-controls="agent-tab-panel"
+            tabIndex={current?.key === t.key ? 0 : -1}
             className={`wizard-tab${current?.key === t.key ? " wizard-tab-active" : ""}`}
-            onClick={() => setAgentTab(t.key)}
+            onClick={() => switchAgentTab(t.key)}
           >
             {t.label}
           </button>
         ))}
       </div>
       {current && (
-        <div className="wizard-tab-panel">
+        <div
+          id="agent-tab-panel"
+          className="wizard-tab-panel"
+          role="tabpanel"
+          aria-labelledby={`agent-tab-${current.key}`}
+        >
           {current.intro && <p className="wizard-sub">{current.intro}</p>}
           {current.blocks.map((b, i) => (
             <CommandBlock key={i} title={b.title} hint={b.hint} code={b.code} fields={b.fields} />

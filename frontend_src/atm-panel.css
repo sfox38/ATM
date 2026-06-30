@@ -425,6 +425,17 @@
 .data-table th.sortable { cursor: pointer; }
 .data-table th.sortable:hover { color: var(--atm-accent); }
 .data-table th.sort-active { color: var(--atm-accent); }
+.table-sort-btn {
+  display: inline-flex; align-items: center; gap: 3px; border: none; background: none;
+  padding: 0; color: inherit; font: inherit; text-transform: inherit; letter-spacing: inherit;
+  cursor: pointer;
+}
+.row-link-btn {
+  display: inline-flex; align-items: center; gap: 6px; border: none; background: none;
+  padding: 0; color: inherit; font: inherit; text-align: left; cursor: pointer;
+}
+.row-link-btn:hover { color: var(--atm-accent); }
+.row-link-btn-stack { flex-direction: column; align-items: flex-start; max-width: 100%; }
 .sort-arrow { display: inline-block; margin-left: 3px; font-size: 9px; opacity: 0.35; }
 .sort-arrow.active { opacity: 1; }
 .data-table td {
@@ -755,7 +766,12 @@ select.input {
   border-radius: 4px; padding: 0;
 }
 .tree-expand:hover { background: var(--atm-hover); }
-.tree-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tree-name {
+  flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  border: none; background: none; padding: 0; color: inherit; font: inherit; text-align: left;
+}
+.tree-name.tree-cursor-pointer { cursor: pointer; }
+.tree-name.tree-cursor-pointer:hover { color: var(--atm-accent); }
 .tree-entity-id { font-size: 12px; color: var(--atm-text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tree-friendly { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tree-effective { font-size: 11px; color: var(--atm-text-2); white-space: nowrap; }
@@ -1502,7 +1518,13 @@ button.changes-row:hover { background: var(--atm-surface-2); }
 .mesa-link:hover { border-color: var(--atm-accent); color: var(--atm-accent); background: var(--atm-accent-lt); }
 .mesa-link-exists { border-color: var(--atm-accent); color: var(--atm-accent); }
 .perm-summary-name-wrap { display: flex; align-items: center; gap: 6px; min-width: 0; }
-.perm-summary-name-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.perm-summary-name-text,
+.perm-summary-td-id button {
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0;
+  border: none; background: none; padding: 0; color: inherit; font: inherit; text-align: left;
+}
+.perm-summary-name-text:disabled,
+.perm-summary-td-id button:disabled { color: inherit; opacity: 1; }
 .sim-mesa-row { display: flex; align-items: center; gap: 6px; margin-top: 8px; font-size: 12px; color: var(--atm-text-2); }
 .tag-reco-chip {
   display: inline-flex; align-items: center; gap: 5px; padding: 3px 9px;

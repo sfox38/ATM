@@ -26,6 +26,7 @@ export function KillSwitch({ settings, onToggle, saving }: Props) {
         <label className={`toggle-switch toggle-switch-danger${saving ? " disabled" : ""}`}>
           <input
             type="checkbox"
+            aria-label={active ? "Kill switch active. All ATM endpoints are disabled" : "Disable all ATM endpoints"}
             checked={active}
             disabled={saving}
             onChange={(e) => onToggle(e.target.checked)}
