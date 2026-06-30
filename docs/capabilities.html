@@ -114,7 +114,7 @@
         <ul>
           <li><strong>All or nothing.</strong> There is no per-entity scoping for these tools. The flag is on or off.</li>
           <li><strong>Triggered actions run outside ATM.</strong> An automation created through ATM is run by Home Assistant's own engine, under its own context. ATM's permission checks do not apply to what a triggered automation does.</li>
-          <li><strong>Net effect.</strong> A token with a narrow entity scope but this flag enabled could, through a crafted automation, indirectly control entities it cannot reach directly. Treat the flag as broad HA access.</li>
+          <li><strong>Net effect.</strong> A token with a narrow entity scope but this flag enabled could, through a crafted automation, indirectly control entities it cannot reach directly. Treat the flag as broad HA access. See <a href="permissions.html#indirect-control-risk">Indirect control risk</a> for the full explanation and an example.</li>
         </ul>
 
         <h2>Pass-through mode</h2>

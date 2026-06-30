@@ -69,7 +69,7 @@
 
           <article class="tool" data-cap="read" data-search="get_config configuration data">
             <div class="tool-head"><span class="tool-name">get_config</span><span class="badge badge-cap">Config read</span></div>
-            <p class="tool-desc">Read HA configuration data, including integrations, packages, and automation settings.</p>
+            <p class="tool-desc">Read a curated subset of Home Assistant's configuration: version, time zone, unit system, location name, and the list of loaded integrations. Precise home coordinates, internal/external URLs, and host filesystem paths are withheld.</p>
           </article>
 
           <article class="tool" data-cap="read" data-search="list_blueprints blueprint automation script">
@@ -80,7 +80,7 @@
 
           <article class="tool" data-cap="read" data-search="get_logs system log entries">
             <div class="tool-head"><span class="tool-name">get_logs</span><span class="badge badge-cap">Log read</span></div>
-            <p class="tool-desc">Recent HA system log entries. ATM's own entries are excluded and token values are scrubbed from messages and tracebacks.</p>
+            <p class="tool-desc">Recent HA system log entries. ATM's own entries are excluded and token values, JWTs, and URL credentials are scrubbed from messages and tracebacks. The scrubber is pattern-based and cannot guarantee removal of arbitrary third-party secrets or PII an integration writes into a log line, so treat Log read as an elevated-trust grant.</p>
             <dl><dt>params</dt><dd><code>limit</code> (default 50, max 100), <code>level</code> (<code>INFO</code> / <code>WARNING</code> / <code>ERROR</code>)</dd></dl>
           </article>
 
@@ -144,7 +144,7 @@
 
           <article class="tool" data-cap="discovery" data-search="get_system_health version integrations">
             <div class="tool-head"><span class="tool-name">get_system_health</span><span class="badge badge-cap">Diagnostics</span></div>
-            <p class="tool-desc">Home Assistant version and per-integration system health.</p>
+            <p class="tool-desc">Home Assistant version and per-integration system health. Secret-keyed values and URL-embedded credentials in the integration data are scrubbed before they are returned.</p>
           </article>
 
           <article class="tool" data-cap="discovery" data-search="list_areas list_floors list_zones list_devices get_device registry enumeration">
@@ -180,7 +180,7 @@
 
           <article class="tool" data-cap="system" data-search="get_yaml_config set_yaml_config configuration.yaml">
             <div class="tool-head"><span class="tool-name">get_yaml_config</span><span class="tool-name">set_yaml_config</span><span class="badge badge-cap">Raw YAML edit</span></div>
-            <p class="tool-desc">Read and edit <code>configuration.yaml</code> directly. Confirm-eligible.</p>
+            <p class="tool-desc">Read and edit <code>configuration.yaml</code> directly. Confirm-eligible. <code>get_yaml_config</code> returns the file verbatim, so any inline secrets enter the agent's context; grant this only to fully-trusted clients, and prefer <code>!secret</code> references (which ATM preserves) over inline values.</p>
           </article>
 
           <article class="tool" data-cap="system" data-search="list_backups create_backup no restore">
@@ -372,7 +372,7 @@
 
           <article class="tool" data-cap="write" data-search="list_dashboards create_dashboard edit_dashboard delete_dashboard get_dashboard_config set_dashboard_config lovelace">
             <div class="tool-head"><span class="tool-name">list_dashboards</span><span class="tool-name">create_dashboard</span><span class="tool-name">edit_dashboard</span><span class="tool-name">delete_dashboard</span><span class="tool-name">get_dashboard_config</span><span class="tool-name">set_dashboard_config</span><span class="badge badge-cap">Dashboard write</span></div>
-            <p class="tool-desc">List and manage Lovelace dashboards, and read or replace a dashboard's view/card layout. <code>get_dashboard_config</code> redacts out-of-scope entities; <code>set_dashboard_config</code> writes storage-mode dashboards and is versioned. Confirm-eligible.</p>
+            <p class="tool-desc">List and manage Lovelace dashboards, and read or replace a dashboard's view/card layout. <code>get_dashboard_config</code> redacts out-of-scope entities; <code>set_dashboard_config</code> writes storage-mode dashboards and is versioned. Confirm-eligible. Note that a saved layout is display config, not automatic execution: a card action (for example a <code>call-service</code> tap action) runs under the viewing user's session when they click it, the same <a href="permissions.html#indirect-control-risk">indirect control risk</a> as authored automations, so a layout can reference entities outside the token's scope.</p>
           </article>
         </section>
 
