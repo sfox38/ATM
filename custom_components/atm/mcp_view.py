@@ -86,6 +86,7 @@ from .mesa_tools import (
 from .helpers import (
     build_error_response as _error,
     build_permitted_states as _build_permitted_states,
+    build_safe_config,
     collect_log_entries as _collect_log_entries,
     effective_cap,
     effective_caps,
@@ -567,8 +568,9 @@ _SYSTEM_TOOL_DEFS: list[dict] = [
     {
         "name": "get_config",
         "description": (
-            "Get Home Assistant core configuration: version, location, unit system, time zone, and "
-            "loaded components. For an entity-level summary of the home use get_overview."
+            "Get a curated subset of Home Assistant core configuration: version, location name, unit "
+            "system, time zone, and loaded components. Precise coordinates, URLs, and filesystem paths "
+            "are withheld. For an entity-level summary of the home use get_overview."
         ),
         "cap": "cap_config_read",
         "inputSchema": {"type": "object", "properties": {}},
@@ -2421,12 +2423,7 @@ async def _tool_get_config(
     """MCP tool: return HA config (requires cap_config_read)."""
     if effective_cap(token, "cap_config_read") == CAP_DENY:
         return _tool_error("Forbidden."), "denied", "get_config"
-    config_dict = hass.config.as_dict()
-    config_dict["components"] = [
-        c for c in config_dict.get("components", [])
-        if c != DOMAIN and not c.startswith(DOMAIN + ".")
-    ]
-    return _tool_success(json.dumps(config_dict, default=str)), "allowed", "get_config"
+    return _tool_success(json.dumps(build_safe_config(hass), default=str)), "allowed", "get_config"
 
 
 

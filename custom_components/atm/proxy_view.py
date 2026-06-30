@@ -32,6 +32,7 @@ from .mesa import apply_mesa_to_call, fire_mesa_blocked_event
 from .helpers import (
     build_error_response as _error,
     build_permitted_entity_ids as _build_permitted_entity_ids,
+    build_safe_config,
     collect_log_entries as _collect_log_entries,
     effective_cap,
     get_authenticated_token as _get_authenticated_token,
@@ -613,13 +614,7 @@ class ATMConfigView(HomeAssistantView):
 
         _log(data, token, request_id=request_id, method="GET", resource=resource,
              outcome="allowed", client_ip=client_ip)
-        config_dict = hass.config.as_dict()
-        # Strip ATM's own component entries so the token cannot enumerate our routes.
-        config_dict["components"] = [
-            c for c in config_dict.get("components", [])
-            if c != DOMAIN and not c.startswith(DOMAIN + ".")
-        ]
-        return _json_response(config_dict, 200, request_id, rl_result)
+        return _json_response(build_safe_config(hass), 200, request_id, rl_result)
 
 
 class ATMTemplateView(HomeAssistantView):

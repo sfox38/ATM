@@ -701,6 +701,35 @@ def redact_structure(obj: Any, _depth: int = 0) -> Any:
     return obj
 
 
+# Config keys safe to disclose to a cap_config_read token. Allowlist, not denylist,
+# so a new HA config key defaults to excluded. Deliberately omits precise location
+# (latitude/longitude/elevation/radius), internal_url/external_url, and filesystem
+# paths (config_dir, allowlist_external_dirs/urls, media_dirs) which reveal home
+# coordinates, network topology, and host layout beyond what an agent needs.
+_SAFE_CONFIG_KEYS = frozenset({
+    "location_name", "time_zone", "unit_system", "currency", "country",
+    "language", "version", "config_source", "state", "safe_mode",
+    "recovery_mode", "components",
+})
+
+
+def build_safe_config(hass: Any) -> dict:
+    """Return the cap_config_read-safe subset of hass.config.as_dict().
+
+    Agent-useful context (HA version, time zone, units, location name, loaded
+    components for capability detection) with the sensitive fields removed; ATM's
+    own components are stripped so a token cannot enumerate our routes.
+    """
+    raw = hass.config.as_dict()
+    safe = {k: raw[k] for k in _SAFE_CONFIG_KEYS if k in raw}
+    if "components" in safe:
+        safe["components"] = sorted(
+            c for c in safe["components"]
+            if c != DOMAIN and not c.startswith(DOMAIN + ".")
+        )
+    return safe
+
+
 def collect_log_entries(hass: Any, level: str, integration: str | None, limit: int) -> list[dict]:
     """Read system_log records, filter, scrub, and return newest-first.
 
