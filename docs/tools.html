@@ -144,7 +144,7 @@
 
           <article class="tool" data-cap="discovery" data-search="get_system_health version integrations">
             <div class="tool-head"><span class="tool-name">get_system_health</span><span class="badge badge-cap">Diagnostics</span></div>
-            <p class="tool-desc">Home Assistant version and per-integration system health. Secret-keyed values and URL-embedded credentials in the integration data are scrubbed before they are returned.</p>
+            <p class="tool-desc">Home Assistant version and per-integration system health. Secret-keyed values and URL-embedded credentials in the integration data are scrubbed before they are returned, as are network-topology details (LAN IP addresses, hostnames inside URLs, and filesystem paths) that ATM withholds elsewhere. This is an elevated read; treat <code>cap_diagnostics</code> accordingly.</p>
           </article>
 
           <article class="tool" data-cap="discovery" data-search="list_areas list_floors list_zones list_devices get_device registry enumeration">
