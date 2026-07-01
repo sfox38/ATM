@@ -97,12 +97,12 @@ export function SelectByPicker({ tokenId, entityTree, onDone, onClose }: Props) 
     <Modal titleId="area-picker-title" onClose={applying ? undefined : onClose}>
       <h3 className="modal-title" id="area-picker-title">Select by Area or Label</h3>
 
-      <div className="wizard-tabs" role="tablist" aria-label="Group by">
+      <div className="wizard-tabs" role="group" aria-label="Group by">
         {(["area", "label"] as Mode[]).map((m) => (
           <button
             key={m}
-            role="tab"
-            aria-selected={mode === m}
+            type="button"
+            aria-pressed={mode === m}
             className={`wizard-tab${mode === m ? " wizard-tab-active" : ""}`}
             onClick={() => switchMode(m)}
             disabled={applying}
@@ -117,8 +117,9 @@ export function SelectByPicker({ tokenId, entityTree, onDone, onClose }: Props) 
         </div>
 
         <div className="field">
-          <label>{mode === "area" ? "Area" : "Label"}</label>
+          <label htmlFor="select-by-key">{mode === "area" ? "Area" : "Label"}</label>
           <select
+            id="select-by-key"
             className="input"
             value={selectedKey}
             onChange={(e) => setSelectedKey(e.target.value)}
@@ -136,8 +137,9 @@ export function SelectByPicker({ tokenId, entityTree, onDone, onClose }: Props) 
         </div>
 
         <div className="field">
-          <label>Permission to apply</label>
+          <label htmlFor="select-by-permission">Permission to apply</label>
           <select
+            id="select-by-permission"
             className="input"
             value={selectedState}
             onChange={(e) => setSelectedState(e.target.value as NodeState)}

@@ -20,6 +20,7 @@ export function NotificationSettings({ settings, onToggle, saving }: Props) {
         <label className={`toggle-switch${saving ? " disabled" : ""}`}>
           <input
             type="checkbox"
+            aria-label="Notify on approval request"
             checked={settings.notify_on_approval}
             disabled={saving}
             onChange={(e) => onToggle("notify_on_approval", e.target.checked)}
@@ -37,6 +38,7 @@ export function NotificationSettings({ settings, onToggle, saving }: Props) {
         <label className={`toggle-switch${saving ? " disabled" : ""}`}>
           <input
             type="checkbox"
+            aria-label="Notify on rate limit breach"
             checked={settings.notify_on_rate_limit}
             disabled={saving}
             onChange={(e) => onToggle("notify_on_rate_limit", e.target.checked)}

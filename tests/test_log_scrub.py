@@ -7,7 +7,11 @@ holding cap_log_read never receives another integration's secret verbatim.
 
 from __future__ import annotations
 
-from custom_components.atm.helpers import _scrub_log_text, redact_secrets_in_text
+from custom_components.atm.helpers import (
+    _scrub_log_text,
+    redact_diagnostics,
+    redact_secrets_in_text,
+)
 
 
 def test_scrubs_atm_token():
@@ -54,3 +58,50 @@ def test_redact_secrets_in_text_yaml_keys():
 def test_redact_secrets_in_text_none_passthrough():
     assert redact_secrets_in_text(None) is None
     assert redact_secrets_in_text("") == ""
+
+
+def test_redact_diagnostics_scrubs_topology_conservatively():
+    obj = {
+        "a": "10.0.0.5",                 # private IPv4
+        "b": "192.168.1.1",              # private IPv4
+        "c": "172.20.3.4",               # private IPv4 (172.16/12)
+        "d": "fe80::1ff:fe23:4567:890a", # link-local IPv6
+        "e": "http://nas.local:8080/x",  # bare URL host
+        "f": "/config/.storage/db",      # absolute unix path
+        "g": r"C:\HA\config\secrets",    # windows path
+        "ok": "reachable",               # benign
+        "ver": "4.8.0.1",                # public-IP-shaped version: NOT private, keep
+        "pub": "8.8.8.8",                # public IP: not a private range, keep
+        "frac": "ratio 1/2 done",        # lone slash: not a path, keep
+    }
+    out = redact_diagnostics(obj)
+    assert out["a"] == "<redacted-ip>"
+    assert out["b"] == "<redacted-ip>"
+    assert out["c"] == "<redacted-ip>"
+    assert out["d"] == "<redacted-ip>"
+    assert out["e"] == "<redacted-url>"
+    assert out["f"] == "<redacted-path>"
+    assert out["g"] == "<redacted-path>"
+    assert out["ok"] == "reachable"
+    assert out["ver"] == "4.8.0.1"
+    assert out["pub"] == "8.8.8.8"
+    assert out["frac"] == "ratio 1/2 done"
+
+
+def test_redact_diagnostics_scrubs_topology_in_dict_keys():
+    # An integration may key its free-form health data by a URL, LAN IP, or path;
+    # keys get the same scrub as values so topology cannot leak through the key.
+    out = redact_diagnostics({
+        "http://nas.local:8080/status": "ok",
+        "/config/.storage/core": "ok",
+        "192.168.1.50": "reachable",
+        "benign_label": "ok",
+    })
+    assert out == {
+        "<redacted-url>": "ok",
+        "<redacted-path>": "ok",
+        "<redacted-ip>": "reachable",
+        "benign_label": "ok",
+    }
+    # A sensitive-named key still redacts its value (key name is a harmless label).
+    assert redact_diagnostics({"password": "hunter2"}) == {"password": "<redacted>"}

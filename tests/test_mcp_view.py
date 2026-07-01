@@ -40,6 +40,7 @@ def _make_token(
     cap_template_render: str = "deny",
     cap_automation_write: str = "deny",
     cap_script_write: str = "deny",
+    cap_log_read: str = "deny",
     rate_limit_requests: int = 60,
     rate_limit_burst: int = 10,
     revoked: bool = False,
@@ -61,6 +62,7 @@ def _make_token(
         cap_template_render=cap_template_render,
         cap_automation_write=cap_automation_write,
         cap_script_write=cap_script_write,
+        cap_log_read=cap_log_read,
         rate_limit_requests=rate_limit_requests,
         rate_limit_burst=rate_limit_burst,
         revoked=revoked,
@@ -150,6 +152,42 @@ def _make_context_view(data: ATMData, hass: MagicMock | None = None) -> ATMMcpCo
     view = ATMMcpContextView()
     view.hass = hass if hass is not None else _make_hass(data)
     return view
+
+
+@pytest.mark.asyncio
+async def test_streamable_batch_dispatches_sequentially_and_isolates_failures():
+    from custom_components.atm.mcp_view import _handle_streamable_batch
+
+    token, _ = _make_token()
+    data = _make_data(token)
+    hass = _make_hass(data)
+    rl = RateLimitResult(allowed=True, rate_limiting_enabled=True, limit=60, remaining=59, reset=9999999999)
+
+    call_order: list = []
+
+    async def fake_dispatch(method, msg_id, params, *a, **k):
+        call_order.append(msg_id)
+        if method == "boom":
+            raise RuntimeError("explode")
+        return ({"jsonrpc": "2.0", "id": msg_id, "result": {"m": method}}, None, None, None)
+
+    items = [
+        {"jsonrpc": "2.0", "id": 1, "method": "a"},
+        {"jsonrpc": "2.0", "id": 2, "method": "boom"},
+        {"jsonrpc": "2.0", "id": 3, "method": "c"},
+    ]
+    with patch("custom_components.atm.mcp_view._dispatch_mcp", side_effect=fake_dispatch):
+        resp = await _handle_streamable_batch(items, token, rl, hass, data, "rid", "127.0.0.1", "http://h")
+
+    assert resp.status == 200
+    body = json.loads(resp.text)
+    # Sequential, in-order dispatch (no asyncio.gather concurrency).
+    assert call_order == [1, 2, 3]
+    assert [r["id"] for r in body] == [1, 2, 3]
+    # One item's failure is isolated as a per-item internal error, not a batch failure.
+    assert body[1]["error"]["code"] == -32603
+    assert body[0]["result"]["m"] == "a"
+    assert body[2]["result"]["m"] == "c"
 
 
 # --- token validation on POST /api/atm/mcp (Streamable HTTP) ---
@@ -640,6 +678,265 @@ async def test_tools_call_get_state_not_found_entity_same_response_as_denied():
     nf_text = result_nf["result"]["content"][0]["text"]
     denied_text = result_denied["result"]["content"][0]["text"]
     assert nf_text == denied_text
+
+
+# --- get_state / get_states field projection (v2.1) ---
+
+from custom_components.atm.mcp_view import (  # noqa: E402
+    _normalize_fields,
+    _select_state_fields,
+    _lean_state,
+    _project_state,
+)
+
+
+def _full_light_dict():
+    return {
+        "entity_id": "light.kitchen",
+        "state": "on",
+        "attributes": {
+            "friendly_name": "Kitchen",
+            "brightness": 200,
+            "color_temp_kelvin": 3000,
+            "supported_features": 44,   # not domain-important -> dropped in lean
+            "icon": "mdi:lamp",         # not domain-important -> dropped in lean
+        },
+        "last_changed": "2026-06-29T00:00:00+00:00",
+        "last_updated": "2026-06-29T00:00:00+00:00",
+        "context": {"id": "abc", "user_id": None, "parent_id": None},
+    }
+
+
+def test_normalize_fields_accepts_list_csv_and_rejects_garbage():
+    assert _normalize_fields(["state", " attr.brightness "]) == ["state", "attr.brightness"]
+    assert _normalize_fields("state, attr.brightness") == ["state", "attr.brightness"]
+    assert _normalize_fields(None) == []
+    assert _normalize_fields(123) == []
+    assert _normalize_fields([]) == []
+
+
+def test_lean_state_keeps_base_plus_domain_attrs_only():
+    lean = _lean_state(_full_light_dict())
+    assert lean["entity_id"] == "light.kitchen"
+    assert lean["state"] == "on"
+    assert lean["attributes"]["friendly_name"] == "Kitchen"
+    assert lean["attributes"]["brightness"] == 200
+    assert lean["attributes"]["color_temp_kelvin"] == 3000
+    assert "supported_features" not in lean["attributes"]
+    assert "icon" not in lean["attributes"]
+    # heavy top-level fields dropped in lean
+    assert "context" not in lean
+    assert "last_updated" not in lean
+
+
+def test_lean_state_unknown_domain_base_only():
+    d = {"entity_id": "weird.thing", "state": "x", "attributes": {"friendly_name": "W", "foo": 1}}
+    lean = _lean_state(d)
+    assert lean["attributes"] == {"friendly_name": "W"}
+    assert "foo" not in lean["attributes"]
+
+
+def test_select_state_fields_topmost_attr_and_all():
+    d = _full_light_dict()
+    sel = _select_state_fields(d, ["state", "attr.brightness", "last_changed"])
+    assert sel == {
+        "entity_id": "light.kitchen",
+        "state": "on",
+        "last_changed": "2026-06-29T00:00:00+00:00",
+        "attributes": {"brightness": 200},
+    }
+    sel_all = _select_state_fields(d, ["attributes"])
+    assert sel_all["attributes"] == d["attributes"]
+    sel_unknown = _select_state_fields(d, ["nope", "attr.nope"])
+    assert sel_unknown == {"entity_id": "light.kitchen"}
+
+
+def test_select_state_fields_cannot_resurrect_scrubbed_attr():
+    # access_token is already scrubbed out before projection; requesting it returns nothing.
+    d = {"entity_id": "camera.front", "state": "idle", "attributes": {"friendly_name": "Front"}}
+    sel = _select_state_fields(d, ["attr.access_token"])
+    assert sel == {"entity_id": "camera.front"}
+    assert "attributes" not in sel
+
+
+def test_project_state_modes():
+    d = _full_light_dict()
+    assert _project_state(d, None, True) is d  # detailed -> full as-is
+    assert _project_state(d, ["state"], False) == {"entity_id": "light.kitchen", "state": "on"}
+    lean = _project_state(d, None, False)
+    assert "supported_features" not in lean["attributes"]
+
+
+@pytest.mark.asyncio
+async def test_tools_call_get_state_lean_default_and_detailed():
+    token, _ = _make_token()
+    data = _make_data(token)
+    hass = _make_hass(data)
+    hass.states.get.return_value = MagicMock()
+    full = {
+        "entity_id": "light.kitchen",
+        "state": "on",
+        "attributes": {"friendly_name": "K", "brightness": 5, "icon": "mdi:x"},
+        "last_updated": "t",
+        "context": {"id": "c"},
+    }
+    with patch("custom_components.atm.mcp_view.resolve") as mock_resolve:
+        from custom_components.atm.policy_engine import Permission
+        mock_resolve.return_value = Permission.WRITE
+        with patch("custom_components.atm.mcp_view.scrub_sensitive_attributes", return_value=full):
+            res_lean, _m, _r, out_lean = await _dispatch_mcp(
+                "tools/call", 3,
+                {"name": "get_state", "arguments": {"entity_id": "light.kitchen"}},
+                token, hass, data, "127.0.0.1", base_url="http://h",
+            )
+            res_full, _m2, _r2, out_full = await _dispatch_mcp(
+                "tools/call", 4,
+                {"name": "get_state", "arguments": {"entity_id": "light.kitchen", "detailed": True}},
+                token, hass, data, "127.0.0.1", base_url="http://h",
+            )
+    assert out_lean == "allowed" and out_full == "allowed"
+    lean = json.loads(res_lean["result"]["content"][0]["text"])
+    assert lean["attributes"]["brightness"] == 5
+    assert "icon" not in lean["attributes"]
+    assert "context" not in lean
+    full_out = json.loads(res_full["result"]["content"][0]["text"])
+    assert full_out["attributes"]["icon"] == "mdi:x"
+    assert "context" in full_out
+
+
+# --- get_logbook / get_calendar_events (v2.1) ---
+
+@pytest.mark.asyncio
+async def test_get_logbook_forbidden_without_cap():
+    token, _ = _make_token(cap_log_read="deny")
+    data = _make_data(token)
+    hass = _make_hass(data)
+    res, _m, _r, outcome = await _dispatch_mcp(
+        "tools/call", 3, {"name": "get_logbook", "arguments": {}},
+        token, hass, data, "127.0.0.1", base_url="http://h",
+    )
+    assert outcome == "denied"
+    assert res["result"].get("isError") is True
+
+
+@pytest.mark.asyncio
+async def test_get_logbook_scopes_to_accessible_entities():
+    token, _ = _make_token(cap_log_read="allow")
+    data = _make_data(token)
+    hass = _make_hass(data)
+    from custom_components.atm.policy_engine import Permission
+
+    def _res(eid, tok, h):
+        return Permission.READ if eid == "light.ok" else Permission.NO_ACCESS
+
+    entries = [
+        {"entity_id": "light.ok", "message": "turned on"},
+        {"entity_id": "light.secret", "message": "turned off"},
+        {"name": "Some event", "message": "no entity id"},
+    ]
+    # _logbook_entry_visible (mcp_view.resolve) does the scoping under test; the
+    # extra filter_service_response redaction pass has its own coverage, so stub it
+    # to identity here (it would otherwise hit a real entity registry on the mock).
+    with patch("custom_components.atm.mcp_view.resolve", side_effect=_res), \
+         patch("custom_components.atm.mcp_view.filter_service_response", side_effect=lambda d, t, h: d), \
+         patch("custom_components.atm.mcp_view.async_ws_command", new=AsyncMock(return_value=entries)):
+        res, _m, _r, outcome = await _dispatch_mcp(
+            "tools/call", 3, {"name": "get_logbook", "arguments": {}},
+            token, hass, data, "127.0.0.1", base_url="http://h",
+        )
+    assert outcome == "allowed"
+    payload = json.loads(res["result"]["content"][0]["text"])
+    assert payload["count"] == 1
+    assert payload["entries"][0]["entity_id"] == "light.ok"
+
+
+@pytest.mark.asyncio
+async def test_get_calendar_events_returns_events_for_accessible_calendar():
+    token, _ = _make_token()
+    data = _make_data(token)
+    hass = _make_hass(data)
+    hass.services.async_call = AsyncMock(return_value={"calendar.fam": {"events": [{"summary": "Dentist"}]}})
+    from custom_components.atm.policy_engine import Permission
+    with patch("custom_components.atm.mcp_view.resolve", return_value=Permission.READ):
+        res, _m, _r, outcome = await _dispatch_mcp(
+            "tools/call", 3,
+            {"name": "get_calendar_events", "arguments": {"calendar_id": "calendar.fam"}},
+            token, hass, data, "127.0.0.1", base_url="http://h",
+        )
+    assert outcome == "allowed"
+    payload = json.loads(res["result"]["content"][0]["text"])
+    assert payload["calendar_id"] == "calendar.fam"
+    assert payload["events"][0]["summary"] == "Dentist"
+
+
+@pytest.mark.asyncio
+async def test_get_calendar_events_rejects_non_calendar_entity():
+    token, _ = _make_token()
+    data = _make_data(token)
+    hass = _make_hass(data)
+    from custom_components.atm.policy_engine import Permission
+    with patch("custom_components.atm.mcp_view.resolve", return_value=Permission.READ):
+        res, _m, _r, outcome = await _dispatch_mcp(
+            "tools/call", 3,
+            {"name": "get_calendar_events", "arguments": {"calendar_id": "light.kitchen"}},
+            token, hass, data, "127.0.0.1", base_url="http://h",
+        )
+    assert outcome == "invalid_request"
+
+
+@pytest.mark.asyncio
+async def test_get_calendar_events_not_found_when_inaccessible():
+    token, _ = _make_token()
+    data = _make_data(token)
+    hass = _make_hass(data)
+    from custom_components.atm.policy_engine import Permission
+    with patch("custom_components.atm.mcp_view.resolve", return_value=Permission.NO_ACCESS):
+        res, _m, _r, outcome = await _dispatch_mcp(
+            "tools/call", 3,
+            {"name": "get_calendar_events", "arguments": {"calendar_id": "calendar.fam"}},
+            token, hass, data, "127.0.0.1", base_url="http://h",
+        )
+    assert outcome == "denied"
+
+
+# --- list_blueprints (v2.1) ---
+
+@pytest.mark.asyncio
+async def test_list_blueprints_forbidden_without_cap():
+    token, _ = _make_token(cap_config_read="deny")
+    data = _make_data(token)
+    hass = _make_hass(data)
+    res, _m, _r, outcome = await _dispatch_mcp(
+        "tools/call", 3, {"name": "list_blueprints", "arguments": {}},
+        token, hass, data, "127.0.0.1", base_url="http://h",
+    )
+    assert outcome == "denied"
+    assert res["result"].get("isError") is True
+
+
+@pytest.mark.asyncio
+async def test_list_blueprints_lists_with_inputs():
+    token, _ = _make_token(cap_config_read="allow")
+    data = _make_data(token)
+    hass = _make_hass(data)
+    bp = MagicMock()
+    bp.metadata = {"name": "Motion Light", "description": "d", "input": {"motion": {}}, "source_url": "u"}
+    dom_bp = MagicMock()
+    dom_bp.async_get_blueprints = AsyncMock(return_value={"author/motion.yaml": bp})
+    with patch("homeassistant.components.automation.async_get_blueprints", return_value=dom_bp), \
+         patch("homeassistant.components.script.async_get_blueprints", return_value=dom_bp):
+        res, _m, _r, outcome = await _dispatch_mcp(
+            "tools/call", 3, {"name": "list_blueprints", "arguments": {"domain": "automation"}},
+            token, hass, data, "127.0.0.1", base_url="http://h",
+        )
+    assert outcome == "allowed"
+    payload = json.loads(res["result"]["content"][0]["text"])
+    assert payload["count"] == 1
+    row = payload["blueprints"][0]
+    assert row["name"] == "Motion Light"
+    assert row["domain"] == "automation"
+    assert row["path"] == "author/motion.yaml"
+    assert row["input"] == {"motion": {}}
 
 
 # --- tools/call: restart_ha dual-gate ---
@@ -1195,3 +1492,63 @@ async def test_turn_on_off_registered_as_executors():
 
     assert "HassTurnOn" in _EXECUTOR_REGISTRY
     assert "HassTurnOff" in _EXECUTOR_REGISTRY
+
+
+@pytest.mark.asyncio
+async def test_turn_on_confirm_creates_real_approval_then_executor_actuates(hass):
+    """End-to-end native confirm path with the REAL _gate (not mocked).
+
+    The sibling confirm tests above mock _gate to a canned pending tuple; this one
+    drives the real capability gate so we verify the parts those cannot: that a real
+    PendingApproval is created carrying the saved args and the right cap, that the
+    lock is held (not actuated) while pending, and that execute_approved_tool re-runs
+    from those saved args and actuates lock.lock through the real _tool_intent_action.
+    Intent resolution itself is stubbed (covered in test_policy_engine).
+    """
+    import asyncio as _asyncio
+    from custom_components.atm.mcp_view import _tool_hass_turn_on, execute_approved_tool
+    from custom_components.atm.data import ATMData
+
+    class _ApprStore:
+        def __init__(self) -> None:
+            self._p: list = []
+            self.async_lock = _asyncio.Lock()
+            self.async_save = AsyncMock()
+
+        def get_pending_approvals(self) -> list:
+            return self._p
+
+        def set_pending_approvals(self, v: list) -> None:
+            self._p = v
+
+    token = _make_physical_token("confirm")
+    store = _ApprStore()
+    # mesa=None and no hass.data[DOMAIN] entry -> the MESA gate degrades to allow-all.
+    data = ATMData(store=store, rate_limiter=MagicMock(), audit=MagicMock(), mesa=None)
+
+    hass.states.async_set("lock.front_door", "unlocked", {})
+    lock_calls: list = []
+
+    async def _lock_handler(call):
+        eid = call.data.get("entity_id")
+        lock_calls.append(eid if isinstance(eid, list) else [eid])
+
+    hass.services.async_register("lock", "lock", _lock_handler)
+
+    with patch("custom_components.atm.mcp_view.resolve_intent_entities", return_value=["lock.front_door"]):
+        result = await _tool_hass_turn_on({"area": "Hall"}, token, hass, data, "rid-1", "1.2.3.4")
+        # A real approval exists; the lock is held, not actuated.
+        assert result[1] == "pending_approval"
+        assert lock_calls == []
+        assert len(store._p) == 1
+        appr = store._p[0]
+        assert appr["tool_name"] == "HassTurnOn"
+        assert appr["cap_name"] == "cap_physical_control"
+        assert appr["args"] == {"area": "Hall"}
+
+        # Approving re-runs from the SAVED args and actuates lock.lock for real.
+        out = await execute_approved_tool("HassTurnOn", appr["args"], token, hass, data)
+        await hass.async_block_till_done()
+
+    assert out[1] == "allowed"
+    assert lock_calls and "lock.front_door" in lock_calls[0]

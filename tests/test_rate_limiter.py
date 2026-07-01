@@ -4,10 +4,7 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
-import pytest
-
 from custom_components.atm.rate_limiter import (
-    BURST_WINDOW_SECONDS,
     WINDOW_SECONDS,
     RateLimitResult,
     RateLimiter,

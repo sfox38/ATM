@@ -68,6 +68,7 @@ export function LoggingSettings({ settings, onToggle, saving }: Props) {
             <label className={`toggle-switch${(saving || greyed) ? " disabled" : ""}`}>
               <input
                 type="checkbox"
+                aria-label={label}
                 checked={settings[key] as boolean}
                 disabled={saving || greyed}
                 onChange={(e) => onToggle(key, e.target.checked)}

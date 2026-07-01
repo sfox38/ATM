@@ -11,7 +11,6 @@ import json
 import uuid
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import pytest
 from homeassistant.util.dt import utcnow
 
 from custom_components.atm import mcp_view

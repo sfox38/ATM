@@ -44,9 +44,12 @@ from .const import (
     CAP_CONFIRM,
     CAP_DENY,
     DOMAIN,
+    DOMAIN_IMPORTANT_ATTRIBUTES,
     DUAL_GATE_SERVICES,
+    LEAN_ALWAYS_ATTRS,
     FILESYSTEM_ALLOWED_DIRS,
     HIGH_RISK_DOMAINS,
+    MAX_DIFF_INLINE_BYTES,
     MAX_FILE_BYTES,
     MAX_BATCH_ITEMS,
     MAX_HISTORY_RANGE_DAYS,
@@ -83,6 +86,7 @@ from .mesa_tools import (
 from .helpers import (
     build_error_response as _error,
     build_permitted_states as _build_permitted_states,
+    build_safe_config,
     collect_log_entries as _collect_log_entries,
     effective_cap,
     effective_caps,
@@ -91,6 +95,7 @@ from .helpers import (
     get_client_ip as _get_client_ip,
     log_request as _log,
     parse_time_param as _parse_time_param,
+    redact_diagnostics as _redact_diagnostics,
     redact_secrets_in_text as _redact_secrets_in_text,
     render_template_for_token as _render_template_for_token,
     token_has_write_scope,
@@ -319,19 +324,65 @@ _SCRIPT_ID_RE = re.compile(r"^[a-z0-9_]+$")
 _ENTITY_TOOL_DEFS: list[dict] = [
     {
         "name": "get_state",
-        "description": "Get the current state of a Home Assistant entity.",
+        "description": (
+            "Get the current state of a Home Assistant entity. Returns a compact, domain-aware view by "
+            "default (state plus that domain's key attributes); pass detailed=true for the full state, or "
+            "fields=[...] to select exact fields (e.g. \"state\", \"attr.brightness\"). For everything "
+            "about one entity, use describe_entity."
+        ),
         "inputSchema": {
             "type": "object",
             "properties": {
                 "entity_id": {"type": "string", "description": "Entity ID, e.g. light.living_room."},
+                "fields": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": (
+                        "Optional: return only these fields. Use top-level keys (state, last_changed, "
+                        "last_updated) and 'attr.<name>' for a single attribute, or 'attributes' for all. "
+                        "Overrides the default lean view."
+                    ),
+                },
+                "detailed": {
+                    "type": "boolean",
+                    "description": (
+                        "Return the full state with all attributes. Default false returns a compact, "
+                        "domain-aware view (key attributes only)."
+                    ),
+                },
             },
             "required": ["entity_id"],
         },
     },
     {
         "name": "get_states",
-        "description": "Get the current state of all accessible Home Assistant entities.",
-        "inputSchema": {"type": "object", "properties": {}},
+        "description": (
+            "Get the current state of every entity this token can access (may be a large response). "
+            "To find specific entities or filter by domain, area, or state use search_entities; "
+            "for a counts-only orientation use get_overview. Returns a compact, domain-aware view per "
+            "entity by default; pass detailed=true for full states, or fields=[...] to select exact fields."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "fields": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": (
+                        "Optional: return only these fields per entity. Use top-level keys (state, "
+                        "last_changed) and 'attr.<name>' for a single attribute, or 'attributes' for all. "
+                        "Overrides the default lean view."
+                    ),
+                },
+                "detailed": {
+                    "type": "boolean",
+                    "description": (
+                        "Return full states with all attributes. Default false returns a compact, "
+                        "domain-aware view per entity."
+                    ),
+                },
+            },
+        },
     },
     {
         "name": "get_history",
@@ -364,7 +415,11 @@ _ENTITY_TOOL_DEFS: list[dict] = [
     },
     {
         "name": "get_statistics",
-        "description": "Get long-term statistics for a Home Assistant entity.",
+        "description": (
+            "Get long-term statistics (hourly and daily aggregates such as mean, min, max, sum) for a "
+            "Home Assistant entity, for trends over days or months. For recent individual state changes "
+            "use get_history instead."
+        ),
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -383,6 +438,28 @@ _ENTITY_TOOL_DEFS: list[dict] = [
                 },
             },
             "required": ["entity_id", "start_time"],
+        },
+    },
+    {
+        "name": "get_calendar_events",
+        "description": (
+            "List events from an accessible calendar entity within a time window (defaults to the next 7 "
+            "days). Requires READ access to the calendar entity, scoped like get_state."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "calendar_id": {"type": "string", "description": "A calendar.* entity id."},
+                "start_time": {
+                    "type": "string",
+                    "description": "ISO timestamp or relative string (24h, 7d). Defaults to now.",
+                },
+                "end_time": {
+                    "type": "string",
+                    "description": "ISO timestamp or relative string. Defaults to 7 days after start.",
+                },
+            },
+            "required": ["calendar_id"],
         },
     },
     {
@@ -491,13 +568,21 @@ _ENTITY_TOOL_DEFS: list[dict] = [
 _SYSTEM_TOOL_DEFS: list[dict] = [
     {
         "name": "get_config",
-        "description": "Get the Home Assistant configuration.",
+        "description": (
+            "Get a curated subset of Home Assistant core configuration: version, location name, unit "
+            "system, time zone, and loaded components. Precise coordinates, URLs, and filesystem paths "
+            "are withheld. For an entity-level summary of the home use get_overview."
+        ),
         "cap": "cap_config_read",
         "inputSchema": {"type": "object", "properties": {}},
     },
     {
         "name": "render_template",
-        "description": "Render a Jinja2 template in Home Assistant.",
+        "description": (
+            "Render a Jinja2 template in Home Assistant. Templates are scoped to this token: states() of "
+            "an out-of-scope entity returns 'unknown', and enumeration helpers like area_entities() return "
+            "empty. Discover entities with search_entities, not template enumeration."
+        ),
         "cap": "cap_template_render",
         "inputSchema": {
             "type": "object",
@@ -510,15 +595,10 @@ _SYSTEM_TOOL_DEFS: list[dict] = [
     {
         "name": "create_automation",
         "description": (
-            "Create a new Home Assistant automation stored in automations.yaml. "
-            "Do not include an 'id' field - ATM assigns the ID automatically. "
-            "Returns the saved configuration including the generated automation_id. "
-            "The config is validated by HA before saving - invalid configs are rejected with an error. "
-            "config structure: 'alias' (string, required), "
-            "'trigger' (list of trigger objects, each with a 'platform' field, required), "
-            "'action' (list of action objects - service calls, delays, conditions, etc., required), "
-            "'condition' (list of condition objects, optional), "
-            "'mode' ('single'|'restart'|'queued'|'parallel', default 'single', optional)."
+            "Create a new Home Assistant automation in automations.yaml. Do not include an 'id' (ATM "
+            "assigns and returns it). HA validates before saving; invalid configs are rejected with an "
+            "error. To build from a blueprint instead, pass 'use_blueprint' ({'path': ..., 'input': "
+            "{...}}) with no trigger/action; see list_blueprints."
         ),
         "cap": "cap_automation_write",
         "inputSchema": {
@@ -569,15 +649,10 @@ _SYSTEM_TOOL_DEFS: list[dict] = [
     {
         "name": "create_script",
         "description": (
-            "Create a new Home Assistant script stored in scripts.yaml. "
-            "Provide a unique script_id (slug, e.g. 'morning_routine') - this becomes the entity_id: script.<script_id>. "
-            "Returns the saved configuration. "
-            "The config is validated by HA before saving - invalid configs are rejected with an error. "
-            "config structure: 'alias' (string, required), "
-            "'sequence' (list of action objects - service calls, delays, conditions, etc., required), "
-            "'mode' ('single'|'restart'|'queued'|'parallel', default 'single', optional), "
-            "'variables' (dict of script-level variables, optional), "
-            "'fields' (dict of input field definitions for callable scripts, optional)."
+            "Create a new Home Assistant script in scripts.yaml. Provide a unique script_id slug (e.g. "
+            "'morning_routine'); it becomes script.<script_id>. HA validates before saving; invalid "
+            "configs are rejected with an error. To build from a blueprint instead, pass 'use_blueprint' "
+            "({'path': ..., 'input': {...}}) in place of 'sequence'; see list_blueprints."
         ),
         "cap": "cap_script_write",
         "inputSchema": {
@@ -656,6 +731,97 @@ _SYSTEM_TOOL_DEFS: list[dict] = [
         },
     },
     {
+        "name": "get_logbook",
+        "description": (
+            "Read the human-readable Home Assistant logbook (state changes, automations and scripts "
+            "triggered, and other events), most recent within the window. Omit entity_id for a "
+            "home-wide view scoped to entities you can access, or pass one to focus on a single entity. "
+            "This is the narrative event history; get_logs is the system error log, and get_history is "
+            "raw state samples."
+        ),
+        "cap": "cap_log_read",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "start_time": {
+                    "type": "string",
+                    "description": "ISO timestamp or relative string (24h, 7d, 2w). Defaults to 24h.",
+                },
+                "end_time": {
+                    "type": "string",
+                    "description": "ISO timestamp or relative string. Defaults to now.",
+                },
+                "entity_id": {
+                    "type": "string",
+                    "description": "Optional: limit to one accessible entity.",
+                },
+                "limit": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 1000,
+                    "default": 100,
+                    "description": "Maximum entries to return (most recent kept).",
+                },
+            },
+        },
+    },
+    {
+        "name": "list_blueprints",
+        "description": (
+            "List the installed automation and script blueprints with their inputs, so you can author "
+            "from a blueprint. To instantiate one, create the automation or script with a use_blueprint "
+            "config, {\"use_blueprint\": {\"path\": \"<path>\", \"input\": {<name>: <value>}}}, and no "
+            "top-level trigger/action; the path and input names come from this list. Optional domain "
+            "filter ('automation' or 'script')."
+        ),
+        "cap": "cap_config_read",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "domain": {
+                    "type": "string",
+                    "enum": ["automation", "script"],
+                    "description": "Optional: limit to one domain. Defaults to both.",
+                },
+            },
+        },
+    },
+    {
+        "name": "set_entity",
+        "description": (
+            "Update an entity's registry metadata: its friendly name, icon, and/or area. Requires WRITE "
+            "access to the entity and cap_registry_write (often admin-confirmed). Provide entity_id plus at "
+            "least one of name, icon, area_id. Does not rename the entity_id. Captured in version history."
+        ),
+        "cap": "cap_registry_write",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "entity_id": {"type": "string"},
+                "name": {"type": "string", "description": "New friendly-name override (registry name)."},
+                "icon": {"type": "string", "description": "New icon, e.g. mdi:lightbulb."},
+                "area_id": {"type": "string", "description": "Assign to this area_id (must already exist)."},
+            },
+            "required": ["entity_id"],
+        },
+    },
+    {
+        "name": "delete_entity",
+        "description": (
+            "Delete an entity's registry entry, the common use is removing a stale or duplicate entry left "
+            "after a device re-pair. Requires WRITE access to the entity and cap_registry_write (often "
+            "admin-confirmed). A live entity whose integration still provides it will be re-created by that "
+            "integration; an orphaned entry stays gone. Captured in version history, but a deleted entry "
+            "cannot be re-created through ATM."
+        ),
+        "cap": "cap_registry_write",
+        "inputSchema": {
+            "type": "object",
+            "properties": {"entity_id": {"type": "string"}},
+            "required": ["entity_id"],
+        },
+    },
+    {
         "name": "restart_ha",
         "description": "Restart Home Assistant.",
         "cap": "cap_restart",
@@ -728,7 +894,9 @@ _SYSTEM_TOOL_DEFS: list[dict] = [
         "description": (
             "Search the entities this token can access by name, domain, area, device_class, or state. "
             "For semantic/profile-based discovery (tags, classification, control mode) use mesa_query_profiles instead. "
-            "Filters combine with AND. Returns a compact list (entity_id, state, friendly_name, domain, area); each "
+            "A multi-word query matches entities containing all the words (in entity_id or friendly_name), and "
+            "results are ranked by relevance so the best matches lead. Filters combine with AND. Returns a compact "
+            "list (entity_id, state, friendly_name, domain, area); each "
             "result also carries control_mode when its MESA nature is non-default (read_only, confirm, prohibited), "
             "so you can spot restricted entities without a follow-up describe_entity call."
         ),
@@ -815,7 +983,7 @@ _SYSTEM_TOOL_DEFS: list[dict] = [
     },
     {
         "name": "get_system_health",
-        "description": "Get Home Assistant system health: version and per-integration health info.",
+        "description": "Get Home Assistant system health: version and per-integration health info (secret-keyed values and embedded credentials are redacted).",
         "cap": "cap_diagnostics",
         "inputSchema": {"type": "object", "properties": {}},
     },
@@ -936,7 +1104,8 @@ _SYSTEM_TOOL_DEFS: list[dict] = [
         "name": "validate_config",
         "description": (
             "Validate an automation or script config without saving it. Returns structural validity plus, "
-            "for each referenced entity, whether it exists and is accessible to this token. Decouples the "
+            "for each referenced entity, whether it is accessible to this token (entities outside the "
+            "token's scope are reported as inaccessible and not visible). Decouples the "
             "schema check from committing the write."
         ),
         "cap": "cap_diagnostics",
@@ -1107,7 +1276,10 @@ _SYSTEM_TOOL_DEFS: list[dict] = [
         "name": "write_file",
         "description": (
             "Write a UTF-8 text file under www/, themes/, or custom_templates/ (creates parent dirs). "
-            "May require admin approval. Paths outside the allowed directories are refused."
+            "These directories hold static assets (dashboard resources, themes, Jinja template files), "
+            "not Home Assistant config; to author automations, scripts, scenes, helpers, or dashboards "
+            "use their dedicated tools. May require admin approval. Paths outside the allowed directories "
+            "are refused."
         ),
         "cap": "cap_filesystem",
         "inputSchema": {
@@ -1132,9 +1304,12 @@ _SYSTEM_TOOL_DEFS: list[dict] = [
     {
         "name": "set_yaml_config",
         "description": (
-            "Replace the entire contents of configuration.yaml. May require admin approval. "
-            "High blast radius: a broken file prevents Home Assistant from starting. Run check_config and "
-            "restart HA afterwards to apply."
+            "Replace the entire contents of configuration.yaml (a full-file replace). Use this only for "
+            "raw configuration.yaml settings; to author automations, scripts, scenes, helpers, or "
+            "dashboards use their dedicated tools instead. Preserve any existing content you are not "
+            "changing, including !include and !secret lines. May require admin approval. High blast "
+            "radius: a broken file prevents Home Assistant from starting. Run check_config and restart "
+            "HA afterwards to apply."
         ),
         "cap": "cap_yaml_edit",
         "inputSchema": {
@@ -1684,6 +1859,16 @@ def _approval_resource(approval: Any) -> str:
 _mesa_advisory_ctx: ContextVar[bool] = ContextVar("atm_mesa_advisory", default=False)
 
 
+# Uniform message for a capability-denied tool call. A denied call must look the
+# same regardless of any entity it names, so it can never be used as a scope or
+# existence oracle. Shared by _gate and any pre-gate deny short-circuit.
+_CAP_FORBIDDEN_MESSAGE = (
+    "Forbidden: this capability is not enabled for this token. It may have changed "
+    "since you connected; call get_capability_summary for the current state, or ask "
+    "the operator to grant it."
+)
+
+
 async def _gate(
     cap_name: str,
     token: TokenRecord,
@@ -1708,14 +1893,75 @@ async def _gate(
         client_ip=client_ip, diff=diff,
     )
     if result.is_deny:
-        return _tool_error(
-            "Forbidden: this capability is not enabled for this token. It may have changed "
-            "since you connected; call get_capability_summary for the current state, or ask "
-            "the operator to grant it."
-        ), "denied", tool_name
+        return _tool_error(_CAP_FORBIDDEN_MESSAGE), "denied", tool_name
     if result.is_pending:
         return _tool_pending(result.approval), "pending_approval", _approval_resource(result.approval)
     return None
+
+
+def _normalize_fields(fields: Any) -> list[str]:
+    """Coerce the get_state/get_states `fields` arg to a list of field names.
+
+    Accepts a list of strings or a single comma-separated string (a common agent
+    mistake); anything else yields an empty list, which selects the lean default.
+    """
+    if isinstance(fields, str):
+        return [f for f in (p.strip() for p in fields.split(",")) if f]
+    if isinstance(fields, list):
+        return [str(f).strip() for f in fields if str(f).strip()]
+    return []
+
+
+def _select_state_fields(scrubbed: dict, fields: list[str]) -> dict:
+    """Return only the requested fields from an already-scrubbed state dict.
+
+    Top-level keys (state, last_changed, last_updated, ...) are taken as-is;
+    'attr.<name>' selects one attribute; 'attributes' selects all (scrubbed)
+    attributes. entity_id is always included. Unknown fields are ignored. Runs
+    AFTER scrubbing, so a scrubbed attribute can never be selected back in.
+    """
+    attrs = scrubbed.get("attributes", {})
+    out: dict = {"entity_id": scrubbed.get("entity_id")}
+    picked_attrs: dict = {}
+    for f in fields:
+        if f == "attributes":
+            picked_attrs.update(attrs)
+        elif f.startswith("attr."):
+            name = f[len("attr."):]
+            if name in attrs:
+                picked_attrs[name] = attrs[name]
+        elif f in scrubbed and f != "attributes":
+            out[f] = scrubbed[f]
+    if picked_attrs:
+        out["attributes"] = picked_attrs
+    return out
+
+
+def _lean_state(scrubbed: dict) -> dict:
+    """Return the domain-aware lean view of an already-scrubbed state dict."""
+    eid = scrubbed.get("entity_id", "") or ""
+    domain = eid.split(".")[0] if "." in eid else ""
+    attrs = scrubbed.get("attributes", {})
+    keep = set(LEAN_ALWAYS_ATTRS) | set(DOMAIN_IMPORTANT_ATTRIBUTES.get(domain, ()))
+    lean_attrs = {k: v for k, v in attrs.items() if k in keep}
+    out: dict = {"entity_id": eid, "state": scrubbed.get("state")}
+    if lean_attrs:
+        out["attributes"] = lean_attrs
+    return out
+
+
+def _project_state(scrubbed: dict, fields: Any, detailed: bool) -> dict:
+    """Apply presentation-only field projection to a scrubbed state dict.
+
+    detailed -> full dict; explicit fields -> requested subset; otherwise the
+    domain-aware lean view. Never bypasses scrubbing (the input is already scrubbed).
+    """
+    if detailed:
+        return scrubbed
+    norm = _normalize_fields(fields)
+    if norm:
+        return _select_state_fields(scrubbed, norm)
+    return _lean_state(scrubbed)
 
 
 async def _tool_get_state(
@@ -1736,7 +1982,9 @@ async def _tool_get_state(
     if state is None:
         return _tool_error("Entity not found."), "not_found", entity_id
 
-    return _tool_success(json.dumps(scrub_sensitive_attributes(state), default=str)), "allowed", entity_id
+    scrubbed = scrub_sensitive_attributes(state)
+    result = _project_state(scrubbed, args.get("fields"), bool(args.get("detailed")))
+    return _tool_success(json.dumps(result, default=str)), "allowed", entity_id
 
 
 async def _tool_get_states(
@@ -1745,7 +1993,10 @@ async def _tool_get_states(
     """MCP tool: return all entities accessible to the token."""
     states = hass.states.async_all()
     filtered = filter_entities_for_token(states, token, hass)
-    return _tool_success(json.dumps(filtered, default=str)), "allowed", "get_states"
+    fields = args.get("fields")
+    detailed = bool(args.get("detailed"))
+    projected = [_project_state(d, fields, detailed) for d in filtered]
+    return _tool_success(json.dumps(projected, default=str)), "allowed", "get_states"
 
 
 async def _tool_get_history(
@@ -1897,6 +2148,57 @@ async def _tool_get_statistics(
         return _tool_error("Statistics call failed."), "denied", entity_id
 
     return _tool_success(json.dumps(result, default=str)), "allowed", entity_id
+
+
+async def _tool_get_calendar_events(
+    args: dict, token: TokenRecord, hass: Any
+) -> tuple[dict, str, str]:
+    """MCP tool: list events from one accessible calendar entity (entity-scoped)."""
+    calendar_id = str(args.get("calendar_id") or args.get("entity_id") or "").strip()
+    if not calendar_id:
+        return _tool_error("Missing required argument: calendar_id"), "invalid_request", "get_calendar_events"
+
+    perm = resolve(calendar_id, token, hass)
+    if perm == Permission.NOT_FOUND:
+        return _tool_error("Calendar not found."), "not_found", calendar_id
+    if perm in (Permission.NO_ACCESS, Permission.DENY):
+        return _tool_error("Calendar not found."), "denied", calendar_id
+    if not calendar_id.startswith("calendar."):
+        return _tool_error("Not a calendar entity."), "invalid_request", calendar_id
+
+    start_time = utcnow()
+    if args.get("start_time"):
+        try:
+            start_time = _parse_time_param(args["start_time"])
+        except ValueError:
+            return _tool_error("Invalid start_time format."), "invalid_request", calendar_id
+    if args.get("end_time"):
+        try:
+            end_time = _parse_time_param(args["end_time"])
+        except ValueError:
+            return _tool_error("Invalid end_time format."), "invalid_request", calendar_id
+    else:
+        end_time = start_time + timedelta(days=7)
+    if end_time <= start_time:
+        return _tool_error("end_time must be after start_time."), "invalid_request", calendar_id
+
+    try:
+        # calendar.get_events is SupportsResponse.ONLY, so return_response=True is
+        # required here (the usual ATM rule against it is for response-less services).
+        resp = await hass.services.async_call(
+            "calendar", "get_events",
+            {"entity_id": calendar_id,
+             "start_date_time": start_time.isoformat(),
+             "end_date_time": end_time.isoformat()},
+            blocking=True, return_response=True,
+        )
+    except Exception:
+        _LOGGER.debug("calendar get_events failed for %s", calendar_id, exc_info=True)
+        return _tool_error("Failed to read calendar events."), "invalid_request", calendar_id
+
+    entry = resp.get(calendar_id, {}) if isinstance(resp, dict) else {}
+    events = entry.get("events", []) if isinstance(entry, dict) else []
+    return _tool_success(json.dumps({"calendar_id": calendar_id, "events": events}, default=str)), "allowed", calendar_id
 
 
 async def _tool_call_service(
@@ -2108,12 +2410,7 @@ async def _tool_get_config(
     """MCP tool: return HA config (requires cap_config_read)."""
     if effective_cap(token, "cap_config_read") == CAP_DENY:
         return _tool_error("Forbidden."), "denied", "get_config"
-    config_dict = hass.config.as_dict()
-    config_dict["components"] = [
-        c for c in config_dict.get("components", [])
-        if c != DOMAIN and not c.startswith(DOMAIN + ".")
-    ]
-    return _tool_success(json.dumps(config_dict, default=str)), "allowed", "get_config"
+    return _tool_success(json.dumps(build_safe_config(hass), default=str)), "allowed", "get_config"
 
 
 
@@ -2146,6 +2443,275 @@ async def _tool_get_logs(
     entries = _collect_log_entries(hass, raw_level, integration, limit)
     return _tool_success(json.dumps({"count": len(entries), "entries": entries}, default=str)), "allowed", "get_logs"
 
+
+def _logbook_entry_visible(entry: dict, token: TokenRecord, hass: Any) -> bool:
+    """A logbook entry is visible only if its entity is accessible to the token.
+
+    Entries without an entity_id cannot be scope-checked, so they are dropped
+    (conservative: never reveal activity the token has no entity-level access to).
+    """
+    eid = entry.get("entity_id")
+    if not isinstance(eid, str) or not eid:
+        return False
+    return resolve(eid, token, hass) in (Permission.READ, Permission.WRITE)
+
+
+async def _tool_get_logbook(
+    args: dict, token: TokenRecord, hass: Any
+) -> tuple[dict, str, str]:
+    """MCP tool: read the human-readable logbook (requires cap_log_read)."""
+    if effective_cap(token, "cap_log_read") == CAP_DENY:
+        return _tool_error("Forbidden."), "denied", "get_logbook"
+
+    try:
+        start_time = _parse_time_param(str(args.get("start_time") or "24h"))
+    except ValueError:
+        return _tool_error("Invalid start_time format."), "invalid_request", "get_logbook"
+    payload: dict[str, Any] = {"start_time": start_time.isoformat()}
+    if args.get("end_time"):
+        try:
+            payload["end_time"] = _parse_time_param(args["end_time"]).isoformat()
+        except ValueError:
+            return _tool_error("Invalid end_time format."), "invalid_request", "get_logbook"
+
+    entity_id = str(args.get("entity_id") or "").strip()
+    if entity_id:
+        perm = resolve(entity_id, token, hass)
+        if perm == Permission.NOT_FOUND:
+            return _tool_error("Entity not found."), "not_found", entity_id
+        if perm in (Permission.NO_ACCESS, Permission.DENY):
+            return _tool_error("Entity not found."), "denied", entity_id
+        payload["entity_ids"] = [entity_id]
+
+    try:
+        result = await async_ws_command(hass, "logbook/get_events", payload)
+    except WsDispatchError as exc:
+        return _tool_error(f"Failed to read logbook: {exc}"), "invalid_request", "get_logbook"
+
+    entries = result if isinstance(result, list) else []
+    # Scope: keep only entries for entities this token can read, then redact any
+    # remaining out-of-scope ids (e.g. a context_entity_id) defensively.
+    scoped = [e for e in entries if isinstance(e, dict) and _logbook_entry_visible(e, token, hass)]
+    scoped = filter_service_response(scoped, token, hass)
+
+    try:
+        limit = int(args.get("limit") or 100)
+    except (TypeError, ValueError):
+        limit = 100
+    limit = max(1, min(limit, 1000))
+    scoped = scoped[-limit:]  # logbook is chronological; keep the most recent
+    return _tool_success(json.dumps({"count": len(scoped), "entries": scoped}, default=str)), "allowed", "get_logbook"
+
+
+async def _tool_list_blueprints(
+    args: dict, token: TokenRecord, hass: Any
+) -> tuple[dict, str, str]:
+    """MCP tool: list automation/script blueprints and their inputs (cap_config_read)."""
+    if effective_cap(token, "cap_config_read") == CAP_DENY:
+        return _tool_error("Forbidden."), "denied", "list_blueprints"
+    domain_arg = str(args.get("domain") or "").strip().lower()
+    domains = [domain_arg] if domain_arg in ("automation", "script") else ["automation", "script"]
+    out: list[dict] = []
+    for dom in domains:
+        try:
+            if dom == "automation":
+                from homeassistant.components.automation import async_get_blueprints as _get_bp  # noqa: PLC0415
+            else:
+                from homeassistant.components.script import async_get_blueprints as _get_bp  # noqa: PLC0415
+            blueprints = await _get_bp(hass).async_get_blueprints()
+        except Exception:  # noqa: BLE001 - a missing/again-failing domain just yields no blueprints
+            _LOGGER.debug("list_blueprints failed for domain %s", dom, exc_info=True)
+            continue
+        for path, bp in sorted(blueprints.items()):
+            if isinstance(bp, Exception):
+                continue  # a blueprint that failed to load is stored as its exception
+            meta = bp.metadata or {}
+            out.append({
+                "domain": dom,
+                "path": path,
+                "name": meta.get("name") or path,
+                "description": meta.get("description"),
+                "input": meta.get("input"),
+                "source_url": meta.get("source_url"),
+            })
+    return _tool_success(json.dumps({"count": len(out), "blueprints": out}, default=str)), "allowed", "list_blueprints"
+
+
+def _entity_meta_snapshot(entry: Any) -> dict:
+    """The registry metadata fields set_entity can change (for version capture)."""
+    return {"name": entry.name, "icon": entry.icon, "area_id": entry.area_id}
+
+
+def _registry_write_perm_error(perm: Any, entity_id: str) -> tuple[dict, str, str] | None:
+    """Shared scope check for registry writes; None means WRITE-accessible.
+
+    READ-only access returns a specific forbidden (the token can already see the
+    entity, so no existence oracle); anything else returns the not_found body.
+    """
+    if perm == Permission.WRITE:
+        return None
+    if perm == Permission.READ:
+        return _tool_error("Read-only access to this entity; registry edits need write access."), "denied", entity_id
+    if perm == Permission.NOT_FOUND:
+        return _tool_error("Entity not found."), "not_found", entity_id
+    return _tool_error("Entity not found."), "denied", entity_id
+
+
+def _registry_write_precheck(
+    args: dict, token: TokenRecord, hass: Any, tool_name: str
+) -> tuple[dict, str, str] | None:
+    """Pre-gate validation for registry writes; None means OK to proceed.
+
+    Checks entity_id presence and write scope so a doomed request is rejected
+    before a pending approval is created. The executor re-validates at apply time.
+    """
+    entity_id = str(args.get("entity_id") or "").strip()
+    if not entity_id:
+        return _tool_error("entity_id is required."), "invalid_request", tool_name
+    return _registry_write_perm_error(resolve(entity_id, token, hass), entity_id)
+
+
+async def _build_diff_set_entity(args: dict, token: TokenRecord, hass: Any) -> dict:
+    entity_id = str(args.get("entity_id") or "")
+    entry = er.async_get(hass).async_get(entity_id)
+    before = _entity_meta_snapshot(entry) if entry else {}
+    fields = [f for f in ("name", "icon", "area_id") if f in args]
+    preview = {f: {"before": before.get(f), "after": args.get(f)} for f in fields}
+    return {
+        "kind": "system_action",
+        "summary": f"Update registry metadata ({', '.join(fields) or 'nothing'}) for {entity_id}",
+        "target": {"type": "entity", "id": entity_id, "label": before.get("name") or entity_id},
+        "preview": preview,
+    }
+
+
+async def _build_diff_delete_entity(args: dict, token: TokenRecord, hass: Any) -> dict:
+    entity_id = str(args.get("entity_id") or "")
+    entry = er.async_get(hass).async_get(entity_id)
+    snap = _entity_meta_snapshot(entry) if entry else {}
+    return {
+        "kind": "system_action",
+        "summary": f"Delete the registry entry for {entity_id}",
+        "target": {"type": "entity", "id": entity_id, "label": snap.get("name") or entity_id},
+        "preview": {
+            "name": snap.get("name"),
+            "area_id": snap.get("area_id"),
+            "warning": "Removes the entity's registry entry. A live entity's integration may re-create it; an orphan stays gone. Not re-creatable through ATM.",
+        },
+    }
+
+
+async def _tool_set_entity(
+    args: dict, token: TokenRecord, hass: Any, data: ATMData,
+    request_id: str = "", client_ip: str | None = None,
+) -> tuple[dict, str, str]:
+    """MCP tool: edit an entity's registry metadata (Confirm-eligible)."""
+    # Capability gate first: a denied token gets a uniform Forbidden with no entity
+    # work, so the tool can never be a scope/existence oracle when the cap is off.
+    if effective_cap(token, "cap_registry_write") == CAP_DENY:
+        return _tool_error(_CAP_FORBIDDEN_MESSAGE), "denied", "set_entity"
+    # Then validate entity scope before gating so an out-of-scope or typo'd target
+    # is rejected up front instead of creating a pending approval that can only
+    # fail after the admin approves it. The executor re-validates at approval time.
+    pre = _registry_write_precheck(args, token, hass, "set_entity")
+    if pre is not None:
+        return pre
+    blocked = await _gate(
+        "cap_registry_write", token, hass, data,
+        tool_name="set_entity", args=args, request_id=request_id,
+        client_ip=client_ip, diff=await _build_diff_set_entity(args, token, hass),
+    )
+    if blocked is not None:
+        return blocked
+    return await _execute_set_entity(args, token, hass, data)
+
+
+async def _execute_set_entity(
+    args: dict, token: TokenRecord, hass: Any, data: ATMData
+) -> tuple[dict, str, str]:
+    entity_id = str(args.get("entity_id") or "").strip()
+    if not entity_id:
+        return _tool_error("entity_id is required."), "invalid_request", "set_entity"
+    err = _registry_write_perm_error(resolve(entity_id, token, hass), entity_id)
+    if err is not None:
+        return err
+    reg = er.async_get(hass)
+    if reg.async_get(entity_id) is None:
+        return _tool_error("Entity has no registry entry to edit."), "invalid_request", entity_id
+
+    updates: dict = {}
+    if "name" in args:
+        updates["name"] = args["name"] or None
+    if "icon" in args:
+        updates["icon"] = args["icon"] or None
+    if "area_id" in args:
+        area_id = args["area_id"]
+        if area_id and ar.async_get(hass).async_get_area(area_id) is None:
+            return _tool_error("Unknown area_id."), "invalid_request", entity_id
+        updates["area_id"] = area_id or None
+    if not updates:
+        return _tool_error("Provide at least one of name, icon, area_id."), "invalid_request", entity_id
+
+    before = _entity_meta_snapshot(reg.async_get(entity_id))
+    try:
+        reg.async_update_entity(entity_id, **updates)
+    except Exception as exc:  # noqa: BLE001 - surface a clean tool error
+        _LOGGER.error("set_entity failed for %s: %s", entity_id, exc)
+        return _tool_error("Failed to update entity."), "denied", entity_id
+    after = _entity_meta_snapshot(reg.async_get(entity_id))
+    await _record_version(
+        data, token, resource_type="entity", resource_id=entity_id,
+        action="edit", before=before, after=after, alias=after.get("name") or entity_id,
+    )
+    return _tool_success(json.dumps({"entity_id": entity_id, "updated": after}, default=str)), "allowed", entity_id
+
+
+async def _tool_delete_entity(
+    args: dict, token: TokenRecord, hass: Any, data: ATMData,
+    request_id: str = "", client_ip: str | None = None,
+) -> tuple[dict, str, str]:
+    """MCP tool: delete an entity's registry entry (Confirm-eligible)."""
+    # Capability gate first: a denied token gets a uniform Forbidden with no entity
+    # work, so the tool can never be a scope/existence oracle when the cap is off.
+    if effective_cap(token, "cap_registry_write") == CAP_DENY:
+        return _tool_error(_CAP_FORBIDDEN_MESSAGE), "denied", "delete_entity"
+    pre = _registry_write_precheck(args, token, hass, "delete_entity")
+    if pre is not None:
+        return pre
+    blocked = await _gate(
+        "cap_registry_write", token, hass, data,
+        tool_name="delete_entity", args=args, request_id=request_id,
+        client_ip=client_ip, diff=await _build_diff_delete_entity(args, token, hass),
+    )
+    if blocked is not None:
+        return blocked
+    return await _execute_delete_entity(args, token, hass, data)
+
+
+async def _execute_delete_entity(
+    args: dict, token: TokenRecord, hass: Any, data: ATMData
+) -> tuple[dict, str, str]:
+    entity_id = str(args.get("entity_id") or "").strip()
+    if not entity_id:
+        return _tool_error("entity_id is required."), "invalid_request", "delete_entity"
+    err = _registry_write_perm_error(resolve(entity_id, token, hass), entity_id)
+    if err is not None:
+        return err
+    reg = er.async_get(hass)
+    entry = reg.async_get(entity_id)
+    if entry is None:
+        return _tool_error("Entity has no registry entry to delete."), "invalid_request", entity_id
+    before = _entity_meta_snapshot(entry)
+    try:
+        reg.async_remove(entity_id)
+    except Exception as exc:  # noqa: BLE001 - surface a clean tool error
+        _LOGGER.error("delete_entity failed for %s: %s", entity_id, exc)
+        return _tool_error("Failed to delete entity."), "denied", entity_id
+    await _record_version(
+        data, token, resource_type="entity", resource_id=entity_id,
+        action="delete", before=before, after=None, alias=before.get("name") or entity_id,
+    )
+    return _tool_success(json.dumps({"entity_id": entity_id, "deleted": True})), "allowed", entity_id
 
 
 async def _tool_render_template(
@@ -2242,6 +2808,27 @@ async def _record_version(
             "atm_config_changed",
             {"resource_type": resource_type, "resource_id": resource_id, "action": action},
         )
+
+
+def _version_content_payload(content: str | None, **extra: Any) -> dict | None:
+    """Build a before/after payload for raw file / configuration.yaml version capture.
+
+    Stores the content verbatim when it is within MAX_DIFF_INLINE_BYTES so an admin
+    can restore it later; larger content is recorded as a non-restorable marker
+    (metadata only) to bound .storage growth. Returns None when there was no prior
+    content (a fresh create). Content is stored raw, like other version records, so
+    the restore is byte-faithful; the version store is admin-only and lives in
+    .storage alongside the rest of ATM's at-rest data.
+    """
+    if content is None:
+        return None
+    payload: dict = {**extra}
+    size = len(content.encode("utf-8"))
+    if size > MAX_DIFF_INLINE_BYTES:
+        payload.update({"content": None, "truncated": True, "bytes": size})
+    else:
+        payload["content"] = content
+    return payload
 
 
 async def _execute_create_automation(
@@ -2839,6 +3426,22 @@ async def restore_version(
                 {"url_path": None if resource_id == "lovelace" else resource_id, "config": target},
                 token, hass, data,
             )
+        if resource_type in ("yaml_config", "file"):
+            restorable = target.get("content")
+            if not isinstance(restorable, str):
+                # Oversized snapshots are stored as a non-restorable marker.
+                return _tool_error("This version is too large to restore inline."), "invalid_request", "restore_version"
+            if resource_type == "yaml_config":
+                return await _execute_set_yaml_config({"content": restorable}, token, hass, data)
+            return await _execute_write_file({"path": resource_id, "content": restorable}, token, hass, data)
+        if resource_type == "entity":
+            # Re-apply the registry metadata (name/icon/area). Restoring a deleted
+            # entry's snapshot lands here too and fails cleanly in set_entity if the
+            # entity no longer exists (a deleted registry entry cannot be recreated).
+            fields = {k: target[k] for k in ("name", "icon", "area_id") if k in target}
+            if not fields:
+                return _tool_error("This version has no entity metadata to restore."), "invalid_request", "restore_version"
+            return await _execute_set_entity({"entity_id": resource_id, **fields}, token, hass, data)
         return _tool_error(f"Cannot restore resource type '{resource_type}'."), "invalid_request", "restore_version"
     finally:
         _restore_ctx.reset(ctx)
@@ -3896,6 +4499,42 @@ def _area_name_for_entity(eid: str, registry: Any, dev_reg: Any, area_reg: Any) 
     return area.name if area is not None else area_id
 
 
+def _rank_search_matches(matches: list[dict], query: str) -> list[dict]:
+    """Token-AND filter + relevance rank for a search_entities query.
+
+    Keeps only rows whose entity_id/friendly_name contains every query token (so
+    multi-word queries work, unlike a single substring test), and orders by an
+    IDF-weighted score so the most relevant rows lead and survive truncation.
+    Rarer query terms weigh more; exact and prefix/word-start matches get a bonus.
+    """
+    tokens = [t for t in query.split() if t]
+    if not tokens:
+        return matches
+    docs = [f"{m['entity_id']} {(m.get('friendly_name') or '')}".lower() for m in matches]
+    n = len(docs) or 1
+    df = {t: sum(1 for d in docs if t in d) for t in set(tokens)}
+    full = " ".join(tokens)
+    scored: list[tuple[float, str, dict]] = []
+    for m, doc in zip(matches, docs):
+        if any(t not in doc for t in tokens):
+            continue
+        eid = m["entity_id"].lower()
+        obj = eid.split(".")[-1]
+        fname = (m.get("friendly_name") or "").lower()
+        score = 0.0
+        for t in tokens:
+            score += math.log(1 + n / (1 + df.get(t, 0)))
+            if t == eid or t == fname:
+                score += 5.0
+            elif obj.startswith(t) or any(w.startswith(t) for w in fname.split()):
+                score += 2.0
+        if full in (eid, fname, obj):
+            score += 10.0
+        scored.append((score, m["entity_id"], m))
+    scored.sort(key=lambda s: (-s[0], s[1]))
+    return [m for _, _, m in scored]
+
+
 async def _tool_search_entities(
     args: dict, token: TokenRecord, hass: Any, data: ATMData
 ) -> tuple[dict, str, str]:
@@ -3938,8 +4577,6 @@ async def _tool_search_entities(
             continue
         attrs = e.get("attributes", {})
         fname = attrs.get("friendly_name") or ""
-        if query and query not in eid.lower() and query not in fname.lower():
-            continue
         if device_class is not None and attrs.get("device_class") != device_class:
             continue
         state_val = e.get("state")
@@ -3966,6 +4603,9 @@ async def _tool_search_entities(
             "area": area_name,
             "device_class": attrs.get("device_class"),
         })
+
+    if query:
+        matches = _rank_search_matches(matches, query)
 
     truncated = len(matches) > limit
     results = matches[:limit]
@@ -4229,7 +4869,17 @@ async def _tool_get_system_health(
     except Exception:  # noqa: BLE001 - system_health may be unavailable
         integrations = {}
 
-    body = {"home_assistant_version": ha_version, "integrations": integrations}
+    # Per-integration health values are arbitrary and can carry embedded tokens,
+    # credentials, URL-embedded secrets, AND network topology (LAN IPs, hostnames in
+    # URLs, filesystem paths). The keys are integration-defined, so a
+    # build_safe_config-style allowlist does not apply; redact_diagnostics scrubs
+    # secret-keyed and credential values (redact_structure) and additionally the
+    # topology that ATM already withholds from agents elsewhere (get_config), while
+    # preserving the diagnostic shape.
+    body = {
+        "home_assistant_version": ha_version,
+        "integrations": _redact_diagnostics(integrations),
+    }
     return _tool_success(json.dumps(body, default=str)), "allowed", "get_system_health"
 
 
@@ -4706,15 +5356,14 @@ async def _tool_validate_config(
         valid = False
         errors.append(str(exc))
 
-    registry = er.async_get(hass)
-    refs = [
-        {
-            "entity_id": eid,
-            "exists": hass.states.get(eid) is not None or registry.async_get(eid) is not None,
-            "accessible": resolve(eid, token, hass) in (Permission.READ, Permission.WRITE),
-        }
-        for eid in sorted(referenced)
-    ]
+    # Never reveal existence for entities the token cannot access: a hidden real
+    # entity must be indistinguishable from a typo (no existence oracle). Since
+    # resolve() ghost-checks, READ/WRITE already implies the entity exists, so
+    # exists is reported as the accessible flag and collapses for everything else.
+    refs = []
+    for eid in sorted(referenced):
+        accessible = resolve(eid, token, hass) in (Permission.READ, Permission.WRITE)
+        refs.append({"entity_id": eid, "exists": accessible, "accessible": accessible})
     body = {"type": cfg_type, "valid": valid, "errors": errors, "referenced_entities": refs}
     return _tool_success(json.dumps(body, default=str)), "allowed", "validate_config"
 
@@ -5269,11 +5918,26 @@ async def _execute_write_file(
         return _tool_error("content must be a string."), "invalid_request", "write_file"
     if len(content.encode("utf-8")) > MAX_FILE_BYTES:
         return _tool_error("Content exceeds the maximum file size."), "invalid_request", "write_file"
+    existed = await hass.async_add_executor_job(os.path.isfile, target)
+    before_content: str | None = None
+    if existed:
+        try:
+            before_content = await hass.async_add_executor_job(_read_text_capped, target)
+        except (OSError, ValueError):
+            before_content = None  # unreadable/too large: capture as no prior content
     try:
         await hass.async_add_executor_job(_write_text_atomic, target, content)
     except OSError as exc:
         _LOGGER.error("write_file failed: %s", exc)
         return _tool_error("Failed to write file."), "denied", "write_file"
+    rel = os.path.relpath(target, os.path.realpath(hass.config.config_dir))
+    await _record_version(
+        data, token, resource_type="file", resource_id=rel,
+        action="edit" if existed else "create",
+        before=_version_content_payload(before_content, path=rel),
+        after=_version_content_payload(content, path=rel),
+        alias=rel,
+    )
     return _tool_success(json.dumps({"path": path, "bytes_written": len(content.encode("utf-8"))})), "allowed", f"file:{path}"
 
 
@@ -5324,11 +5988,25 @@ async def _execute_set_yaml_config(
     if len(content.encode("utf-8")) > MAX_FILE_BYTES:
         return _tool_error("Content exceeds the maximum file size."), "invalid_request", "set_yaml_config"
     path = hass.config.path(_CONFIG_YAML)
+    existed = await hass.async_add_executor_job(os.path.isfile, path)
+    before_content: str | None = None
+    if existed:
+        try:
+            before_content = await hass.async_add_executor_job(_read_text_capped, path)
+        except (OSError, ValueError):
+            before_content = None  # unreadable/too large: capture as no prior content
     try:
         await hass.async_add_executor_job(_write_utf8_file_atomic, path, content)
     except OSError as exc:
         _LOGGER.error("set_yaml_config failed: %s", exc)
         return _tool_error("Failed to write configuration.yaml."), "denied", "set_yaml_config"
+    await _record_version(
+        data, token, resource_type="yaml_config", resource_id=_CONFIG_YAML,
+        action="edit" if existed else "create",
+        before=_version_content_payload(before_content),
+        after=_version_content_payload(content),
+        alias=_CONFIG_YAML,
+    )
     return (
         _tool_success(json.dumps({
             "path": _CONFIG_YAML,
@@ -5720,6 +6398,8 @@ async def _call_tool(
         return await _tool_get_history(arguments, token, hass)
     if tool_name == "get_statistics":
         return await _tool_get_statistics(arguments, token, hass)
+    if tool_name == "get_calendar_events":
+        return await _tool_get_calendar_events(arguments, token, hass)
     if tool_name == "call_service":
         return await _tool_call_service(arguments, token, hass, data, request_id, client_ip)
     if tool_name == "get_config":
@@ -5786,6 +6466,14 @@ async def _call_tool(
         return await _tool_hass_broadcast(arguments, token, hass)
     if tool_name == "get_logs":
         return await _tool_get_logs(arguments, token, hass)
+    if tool_name == "get_logbook":
+        return await _tool_get_logbook(arguments, token, hass)
+    if tool_name == "list_blueprints":
+        return await _tool_list_blueprints(arguments, token, hass)
+    if tool_name == "set_entity":
+        return await _tool_set_entity(arguments, token, hass, data, request_id, client_ip)
+    if tool_name == "delete_entity":
+        return await _tool_delete_entity(arguments, token, hass, data, request_id, client_ip)
     if tool_name == "create_script":
         return await _tool_create_script(arguments, token, hass, data, request_id, client_ip)
     if tool_name == "edit_script":
@@ -6319,6 +7007,9 @@ async def _handle_streamable_batch(
     # entire 60 req/min budget, making batching worse than sequential calls. The
     # MAX_BATCH_ITEMS cap bounds the multiplier to 50x, which is an acceptable
     # tradeoff for MCP batch usability. Reviewed and accepted in audit 2026-04-19.
+    # Items are dispatched sequentially (not via asyncio.gather) so a batch can never
+    # run up to MAX_BATCH_ITEMS side-effecting tools concurrently and interleave
+    # writes; order is preserved and one item's failure stays isolated.
     if len(items) > MAX_BATCH_ITEMS:
         return web.Response(
             status=400,
@@ -6341,16 +7032,15 @@ async def _handle_streamable_batch(
         )
         return response_msg
 
-    raw_results = await asyncio.gather(
-        *[_dispatch_one(item) for item in items],
-        return_exceptions=True,
-    )
-
     responses = []
-    for item, r in zip(items, raw_results):
-        if isinstance(r, Exception):
-            responses.append(_jsonrpc_error(_sanitize_jsonrpc_id(item.get("id")), -32603, "Internal error."))
-        elif r is not None:
+    for item in items:
+        try:
+            r = await _dispatch_one(item)
+        except Exception:  # noqa: BLE001 - isolate one item's failure from the batch
+            msg_id = _sanitize_jsonrpc_id(item.get("id")) if isinstance(item, dict) else None
+            responses.append(_jsonrpc_error(msg_id, -32603, "Internal error."))
+            continue
+        if r is not None:
             responses.append(r)
 
     if not responses:
@@ -6928,6 +7618,8 @@ _register_executor("create_dashboard", _execute_create_dashboard)
 _register_executor("edit_dashboard", _execute_edit_dashboard)
 _register_executor("delete_dashboard", _execute_delete_dashboard)
 _register_executor("set_dashboard_config", _execute_set_dashboard_config)
+_register_executor("set_entity", _execute_set_entity)
+_register_executor("delete_entity", _execute_delete_entity)
 _register_executor("HassSetPosition", _execute_hass_set_position)
 _register_executor("HassStopMoving", _execute_hass_stop_moving)
 _register_executor("HassTurnOn", _execute_hass_turn_on)

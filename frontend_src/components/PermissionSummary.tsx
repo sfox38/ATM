@@ -116,10 +116,12 @@ function SortHeader({
   const arrow = active ? (dir === "asc" ? " \u25B2" : " \u25BC") : " \u25B4\u25BE";
   return (
     <th
-      onClick={() => onSort(col)}
+      aria-sort={active ? (dir === "asc" ? "ascending" : "descending") : "none"}
       className={`perm-summary-th${active ? " active" : ""}`}
     >
-      {label}<span className={`perm-summary-arrow${active ? " active" : ""}`}>{arrow}</span>
+      <button type="button" className="table-sort-btn" onClick={() => onSort(col)}>
+        {label}<span className={`perm-summary-arrow${active ? " active" : ""}`}>{arrow}</span>
+      </button>
     </th>
   );
 }
@@ -239,21 +241,27 @@ export function PermissionSummary({ permissions, entityTree, onEntityClick, mesa
                       onOpen={onOpenMesa}
                     />
                   )}
-                  <span
+                  <button
+                    type="button"
                     className={`perm-summary-name-text${isClickable ? " clickable" : ""}`}
                     onClick={handleClick}
                     title={title}
+                    disabled={!isClickable}
                   >
                     {item.friendlyName !== item.id ? item.friendlyName : <span className="state-GREY">-</span>}
-                  </span>
+                  </button>
                 </div>
               </td>
-              <td
-                className={`perm-summary-td-id${isClickable ? " clickable" : ""}`}
-                onClick={handleClick}
-                title={title}
-              >
-                {item.id}
+              <td className="perm-summary-td-id">
+                <button
+                  type="button"
+                  className={isClickable ? "clickable" : ""}
+                  onClick={handleClick}
+                  title={title}
+                  disabled={!isClickable}
+                >
+                  {item.id}
+                </button>
               </td>
               <EffectiveCell permissions={permissions} item={item} entityToDevice={entityToDevice} deviceDomain={deviceDomain} />
             </tr>

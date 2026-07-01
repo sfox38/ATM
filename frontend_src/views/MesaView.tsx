@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import type {
   EntityTree as EntityTreeData,
   MesaProfileDetail,
@@ -239,6 +239,8 @@ function Combo({
 }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState(value);
+  const [active, setActive] = useState(0);
+  const listboxId = useId();
   useEffect(() => { setQuery(value); }, [value]);
 
   const matches = useMemo(() => {
@@ -255,7 +257,31 @@ function Combo({
   function pick(v: string) {
     onChange(v);
     setQuery(v);
+    setActive(0);
     setOpen(false);
+  }
+
+  function handleKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setOpen(true);
+      setActive((i) => Math.min(i + 1, Math.max(matches.length - 1, 0)));
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setOpen(true);
+      setActive((i) => Math.max(i - 1, 0));
+    } else if (e.key === "Home" && open) {
+      e.preventDefault();
+      setActive(0);
+    } else if (e.key === "End" && open) {
+      e.preventDefault();
+      setActive(Math.max(matches.length - 1, 0));
+    } else if (e.key === "Enter" && open && matches.length > 0) {
+      e.preventDefault();
+      pick(matches[Math.min(active, matches.length - 1)].value);
+    } else if (e.key === "Escape") {
+      setOpen(false);
+    }
   }
 
   return (
@@ -269,19 +295,24 @@ function Combo({
         role="combobox"
         aria-expanded={open}
         aria-autocomplete="list"
-        onChange={(e) => { setQuery(e.target.value); onChange(e.target.value); setOpen(true); }}
+        aria-controls={matches.length > 0 ? listboxId : undefined}
+        aria-activedescendant={open && matches.length > 0 ? `${listboxId}-option-${Math.min(active, matches.length - 1)}` : undefined}
+        onChange={(e) => { setQuery(e.target.value); onChange(e.target.value); setOpen(true); setActive(0); }}
         onFocus={() => setOpen(true)}
         onBlur={() => setTimeout(() => setOpen(false), 120)}
+        onKeyDown={handleKeyDown}
       />
       {open && matches.length > 0 && (
-        <ul className="combo-list" role="listbox">
-          {matches.map((o) => (
+        <ul className="combo-list" role="listbox" id={listboxId}>
+          {matches.map((o, i) => (
             <li
               key={o.value}
               className="combo-option"
+              id={`${listboxId}-option-${i}`}
               role="option"
-              aria-selected={o.value === value}
+              aria-selected={i === active}
               onMouseDown={(e) => { e.preventDefault(); pick(o.value); }}
+              onMouseEnter={() => setActive(i)}
             >
               <span className="combo-option-label">{o.label}</span>
               {o.label !== o.value && <code className="combo-option-sub">{o.value}</code>}
@@ -734,6 +765,8 @@ export function MesaView() {
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState("");  // "" = all; a control_mode value; or "enforced"
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  const [confirmClearOrphans, setConfirmClearOrphans] = useState(false);
+  const [clearingOrphans, setClearingOrphans] = useState(false);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -757,6 +790,20 @@ export function MesaView() {
       setLoading(false);
     }
   }, []);
+
+  const clearOrphans = useCallback(async () => {
+    setClearingOrphans(true);
+    setError(null);
+    try {
+      await api.clearMesaOrphans();
+      setConfirmClearOrphans(false);
+      await refresh();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to clear orphaned profiles.");
+    } finally {
+      setClearingOrphans(false);
+    }
+  }, [refresh]);
 
   useEffect(() => { refresh(); }, [refresh]);
   // Load the registry once for the editor's fuzzy key search + validation, and
@@ -907,18 +954,35 @@ export function MesaView() {
               <strong>{issues.orphan_integrations.length} orphaned integration profile(s)</strong> (integration not loaded): {issues.orphan_integrations.join(", ")}
             </div>
           )}
+          {(issues.orphans.length > 0 || issues.orphan_areas.length > 0 || issues.orphan_integrations.length > 0) && (
+            <div style={{ display: "flex", gap: "8px", alignItems: "center", marginTop: "10px" }}>
+              {confirmClearOrphans ? (
+                <>
+                  <span>Delete all {issues.orphans.length + issues.orphan_areas.length + issues.orphan_integrations.length} orphaned profile(s)?</span>
+                  <button className="btn btn-danger btn-sm" onClick={clearOrphans} disabled={clearingOrphans}>
+                    {clearingOrphans ? "Clearing..." : "Yes, delete"}
+                  </button>
+                  <button className="btn btn-ghost btn-sm" onClick={() => setConfirmClearOrphans(false)} disabled={clearingOrphans}>Cancel</button>
+                </>
+              ) : (
+                <button className="btn btn-sm" onClick={() => setConfirmClearOrphans(true)}>Clear all orphaned profiles</button>
+              )}
+            </div>
+          )}
         </div>
       )}
 
       {totalCount > 0 && (
         <div className="mesa-controls">
           <div className="mesa-summary" role="group" aria-label="Filter by control mode">
-            <button className={`mesa-chip${filter === "" ? " mesa-chip-active" : ""}`} onClick={() => setFilter("")}>
+            <button className={`mesa-chip${filter === "" ? " mesa-chip-active" : ""}`} aria-pressed={filter === ""} onClick={() => setFilter("")}>
+              <span className="sr-only">{filter === "" ? "Current filter: " : ""}</span>
               All <span className="mesa-chip-count">{totalCount}</span>
             </button>
             {chips.map((c) => (
               <button key={c.key}
                 className={`mesa-chip${filter === c.key ? " mesa-chip-active" : ""}`}
+                aria-pressed={filter === c.key}
                 onClick={() => setFilter(filter === c.key ? "" : c.key)}>
                 {c.label} <span className="mesa-chip-count">{c.n}</span>
               </button>
@@ -940,7 +1004,7 @@ export function MesaView() {
           {scopeFiltered.length > 0 && (
             <>
               <p className="mesa-scope-note">
-                Cascading rules: an area, integration, or domain profile applies to many entities at once unless a more specific profile overrides it. Click a row to edit. A <span className="badge badge-purple">Vendor</span> badge marks a profile an integration shipped; saving creates your own override.
+                Cascading rules: an area, integration, or domain profile applies to many entities at once unless a more specific profile overrides it. Use a profile name to edit. A <span className="badge badge-purple">Vendor</span> badge marks a profile an integration shipped; saving creates your own override.
               </p>
               <div className="mesa-groups">
                 {scopeFiltered.map((c) => {
@@ -956,9 +1020,16 @@ export function MesaView() {
                         <table className="data-table">
                           <tbody>
                             {c.rows.map((r) => (
-                              <tr key={r.key} className="clickable"
-                                onClick={() => setEditing({ scope: c.scope, key: r.key, isNew: false })}>
-                                <td><code>{r.key}</code></td>
+                              <tr key={r.key}>
+                                <td>
+                                  <button
+                                    type="button"
+                                    className="row-link-btn"
+                                    onClick={() => setEditing({ scope: c.scope, key: r.key, isNew: false })}
+                                  >
+                                    <code>{r.key}</code>
+                                  </button>
+                                </td>
                                 <td className="mesa-row-modes">
                                   {c.scope === "integration" && profileSource(r.document) === "developer" && (
                                     <span className="badge badge-purple" title="Supplied by the integration (mesa_profile.json). Saving creates your own override.">Vendor</span>
@@ -994,11 +1065,16 @@ export function MesaView() {
                       <table className="data-table">
                         <tbody>
                           {items.map((p) => (
-                            <tr key={p.entity_id} className="clickable"
-                              onClick={() => setEditing({ scope: "entity", key: p.entity_id, isNew: false })}>
+                            <tr key={p.entity_id}>
                               <td>
-                                <div className="mesa-row-name">{friendly(p.entity_id) || p.entity_id}</div>
-                                {friendly(p.entity_id) && <code className="mesa-row-id">{p.entity_id}</code>}
+                                <button
+                                  type="button"
+                                  className="row-link-btn row-link-btn-stack"
+                                  onClick={() => setEditing({ scope: "entity", key: p.entity_id, isNew: false })}
+                                >
+                                  <span className="mesa-row-name">{friendly(p.entity_id) || p.entity_id}</span>
+                                  {friendly(p.entity_id) && <code className="mesa-row-id">{p.entity_id}</code>}
+                                </button>
                               </td>
                               <td className="mesa-row-modes">
                                 <ControlBadge mode={rawControlMode(p.document)} />

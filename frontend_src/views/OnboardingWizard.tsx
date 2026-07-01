@@ -162,9 +162,9 @@ export function OnboardingWizard({ onCancel, onFinish }: Props) {
                 maxLength={32} onChange={(e) => setName(e.target.value)} placeholder="test_token" />
             </div>
             <div className="field">
-              <label>Expiry</label>
+              <label htmlFor="wiz-expiry-unit">Expiry</label>
               <div className="token-create-expiry-row">
-                <select className="input input-auto" value={ttlUnit} disabled={!!tokenId}
+                <select id="wiz-expiry-unit" className="input input-auto" value={ttlUnit} disabled={!!tokenId}
                   onChange={(e) => setTtlUnit(e.target.value as TtlUnit)}>
                   <option value="none">No expiry</option>
                   <option value="minutes">Minutes</option>
@@ -174,6 +174,7 @@ export function OnboardingWizard({ onCancel, onFinish }: Props) {
                 </select>
                 {ttlUnit !== "none" && (
                   <input className="input token-create-expiry-value" type="number" min={1}
+                    aria-label="Expiry amount"
                     value={ttlValue} disabled={!!tokenId} onChange={(e) => setTtlValue(e.target.value)} />
                 )}
               </div>

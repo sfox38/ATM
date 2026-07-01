@@ -21,6 +21,7 @@ all, the same way create_automation performs a privileged file write under a cap
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from typing import Any
 
@@ -50,6 +51,7 @@ ALLOWED_WS_COMMANDS: frozenset[str] = frozenset(
         "backup/agents/info", "backup/info", "backup/generate",
         "lovelace/dashboards/list", "lovelace/dashboards/create",
         "lovelace/dashboards/update", "lovelace/dashboards/delete",
+        "logbook/get_events",
     ]
 )
 
@@ -77,7 +79,7 @@ class _CapturingConnection(ActiveConnection):
         available: dict[str, Any] = {
             "logger": _LOGGER,
             "hass": hass,
-            "send_message": self._noop_send,
+            "send_message": self._capture_send,
             "user": user,
             "refresh_token": None,
             "remote": None,
@@ -87,9 +89,32 @@ class _CapturingConnection(ActiveConnection):
         super().__init__(**{k: v for k, v in available.items() if k in accepted})
         self.result_future: asyncio.Future = hass.loop.create_future()
 
-    @staticmethod
-    def _noop_send(_message: Any) -> None:
-        return None
+    @callback
+    def _capture_send(self, message: Any) -> None:
+        """Capture a result delivered via send_message.
+
+        Some handlers bypass send_result and send a pre-built result message
+        directly (the logbook get_events handler sends already-serialized JSON
+        bytes this way). Parse it, and on a success result message resolve the
+        future; non-result messages (events, pings) are ignored.
+        """
+        if self.result_future.done():
+            return
+        data: Any = message
+        if isinstance(data, (bytes, bytearray, str)):
+            try:
+                data = json.loads(data)
+            except (ValueError, TypeError):
+                return
+        if not isinstance(data, dict) or data.get("type") != "result":
+            return
+        if data.get("success"):
+            self.result_future.set_result(data.get("result"))
+        else:
+            err = data.get("error") or {}
+            self.result_future.set_exception(
+                WsDispatchError(f"{err.get('code')}: {err.get('message')}")
+            )
 
     @callback
     def send_result(self, msg_id: int, result: Any | None = None) -> None:

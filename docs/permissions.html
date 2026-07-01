@@ -177,6 +177,8 @@
 
         <p>Granting <span class="state yellow"><span class="swatch"></span>YELLOW</span> to these domains is safe: it allows reading whether an automation is enabled or a scene exists, without the ability to trigger anything.</p>
 
+        <p>The same reach applies to <strong>authoring</strong> caps and to MESA. A token with <code>cap_automation_write</code> or <code>cap_script_write</code> can persist an automation or script whose embedded service actions are <em>not</em> re-gated by ATM's capability checks or MESA when the automation later fires, because a stored automation runs under Home Assistant natively, outside ATM's request path. So an entity that MESA marks <code>read_only</code> or <code>prohibited</code> can still be actuated by an authored automation that references it. Authoring caps are therefore broad HA write access by nature, and ATM cannot soundly static-analyze an automation's runtime targets (they may be templated or computed). The mitigation is to set authoring caps to <strong>Confirm</strong> where this matters, so an admin reviews the authored configuration, including its actions, before it persists.</p>
+
         <h2>What ATM always blocks</h2>
         <p>These apply to every token, including pass-through tokens, and are not configurable.</p>
         <dl class="kv">

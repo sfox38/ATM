@@ -416,3 +416,27 @@ class TestFindAvailableActions:
         _, outcome, _ = await _call_tool(
             "find_available_actions", {}, _token(), hass, _data_no_mesa())
         assert outcome == "invalid_request"
+
+
+def test_rank_search_matches_multiword_and_relevance():
+    from custom_components.atm.mcp_view import _rank_search_matches
+
+    rows = [
+        {"entity_id": "light.kitchen", "friendly_name": "Kitchen Light"},
+        {"entity_id": "light.kitchen_counter", "friendly_name": "Kitchen Counter"},
+        {"entity_id": "sensor.outdoor_temp", "friendly_name": "Outdoor Temperature"},
+    ]
+    out = _rank_search_matches(rows, "kitchen light")
+    ids = [r["entity_id"] for r in out]
+    # token-AND: every word must be present, so the outdoor sensor is dropped.
+    assert "sensor.outdoor_temp" not in ids
+    assert set(ids) == {"light.kitchen", "light.kitchen_counter"}
+    # the exact friendly-name match leads.
+    assert ids[0] == "light.kitchen"
+
+
+def test_rank_search_matches_empty_query_is_passthrough():
+    from custom_components.atm.mcp_view import _rank_search_matches
+
+    rows = [{"entity_id": "light.a", "friendly_name": "A"}]
+    assert _rank_search_matches(rows, "") == rows

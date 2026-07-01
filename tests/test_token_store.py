@@ -7,7 +7,6 @@ import hashlib
 from datetime import timedelta
 from unittest.mock import AsyncMock, patch
 
-import pytest
 from homeassistant.util.dt import utcnow
 
 from custom_components.atm.const import (

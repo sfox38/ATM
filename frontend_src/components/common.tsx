@@ -14,7 +14,7 @@ export function Loading() {
 }
 
 export function ErrorMsg({ msg }: { msg: string }) {
-  return <div className="banner banner-error">{msg}</div>;
+  return <div className="banner banner-error" role="alert">{msg}</div>;
 }
 
 export function RefreshIcon() {

@@ -32,6 +32,7 @@ from .mesa import apply_mesa_to_call, fire_mesa_blocked_event
 from .helpers import (
     build_error_response as _error,
     build_permitted_entity_ids as _build_permitted_entity_ids,
+    build_safe_config,
     collect_log_entries as _collect_log_entries,
     effective_cap,
     get_authenticated_token as _get_authenticated_token,
@@ -44,6 +45,7 @@ from .helpers import (
 from .policy_engine import (
     EntityCreationNotPermitted,
     Permission,
+    canonical_entity_id,
     filter_entities_for_token,
     filter_service_response,
     resolve,
@@ -122,7 +124,7 @@ class ATMStatesView(HomeAssistantView):
         token, rl_result = result
 
         try:
-            limit = min(int(request.query.get("limit", 500)), 500)
+            limit = max(1, min(int(request.query.get("limit", 500)), 500))
             offset = max(int(request.query.get("offset", 0)), 0)
         except ValueError:
             return _error("invalid_request", "Invalid pagination parameters.", 400, request_id)
@@ -155,6 +157,10 @@ class ATMStateView(HomeAssistantView):
             return result
         token, rl_result = result
 
+        # Canonicalize first so the permission check and the state fetch below use
+        # the same id (a registry id or alias would otherwise pass resolve() but
+        # 404 on hass.states.get of the original value).
+        entity_id = canonical_entity_id(entity_id, hass)
         perm = resolve(entity_id, token, hass)
 
         if perm == Permission.NOT_FOUND:
@@ -608,13 +614,7 @@ class ATMConfigView(HomeAssistantView):
 
         _log(data, token, request_id=request_id, method="GET", resource=resource,
              outcome="allowed", client_ip=client_ip)
-        config_dict = hass.config.as_dict()
-        # Strip ATM's own component entries so the token cannot enumerate our routes.
-        config_dict["components"] = [
-            c for c in config_dict.get("components", [])
-            if c != DOMAIN and not c.startswith(DOMAIN + ".")
-        ]
-        return _json_response(config_dict, 200, request_id, rl_result)
+        return _json_response(build_safe_config(hass), 200, request_id, rl_result)
 
 
 class ATMTemplateView(HomeAssistantView):

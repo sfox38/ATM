@@ -109,6 +109,24 @@ export function ApprovalsView({ onCountChange, openApprovalId, onConsumedDeepLin
     onCountChange?.();
   }
 
+  function switchTopTab(next: "pending" | "history", tablist?: EventTarget & HTMLDivElement) {
+    setTab(next);
+    window.requestAnimationFrame(() => {
+      tablist?.querySelector<HTMLButtonElement>(`#approval-tab-${next}`)?.focus();
+    });
+  }
+
+  function handleTopTabKeyDown(e: React.KeyboardEvent<HTMLDivElement>) {
+    if (e.key !== "ArrowRight" && e.key !== "ArrowLeft" && e.key !== "Home" && e.key !== "End") return;
+    e.preventDefault();
+    const next = e.key === "Home"
+      ? "pending"
+      : e.key === "End"
+        ? "history"
+        : tab === "pending" ? "history" : "pending";
+    switchTopTab(next, e.currentTarget);
+  }
+
   const shown = useMemo(() => {
     const q = search.trim().toLowerCase();
     if (!q || tab === "pending") return records;
@@ -121,31 +139,43 @@ export function ApprovalsView({ onCountChange, openApprovalId, onConsumedDeepLin
 
   return (
     <div className="approvals-view">
-      <div className="approvals-tabs" role="tablist">
+      <div className="approvals-tabs" role="tablist" aria-label="Approval views" onKeyDown={handleTopTabKeyDown}>
         <button
+          id="approval-tab-pending"
           role="tab"
           aria-selected={tab === "pending"}
+          aria-controls="approval-panel-pending"
+          tabIndex={tab === "pending" ? 0 : -1}
           className={`approvals-tab${tab === "pending" ? " active" : ""}`}
-          onClick={() => setTab("pending")}
+          onClick={() => switchTopTab("pending")}
         >
           Pending {tab === "pending" && records.length > 0 ? `(${records.length})` : ""}
         </button>
         <button
+          id="approval-tab-history"
           role="tab"
           aria-selected={tab === "history"}
+          aria-controls="approval-panel-history"
+          tabIndex={tab === "history" ? 0 : -1}
           className={`approvals-tab${tab === "history" ? " active" : ""}`}
-          onClick={() => setTab("history")}
+          onClick={() => switchTopTab("history")}
         >
           History
         </button>
       </div>
 
+      <div
+        id={`approval-panel-${tab}`}
+        role="tabpanel"
+        aria-labelledby={`approval-tab-${tab}`}
+      >
       {tab === "history" && (
         <div className="mesa-controls">
           <div className="mesa-summary" role="group" aria-label="Filter by status">
             {HISTORY_FILTERS.map((f) => (
               <button key={f}
                 className={`mesa-chip${histFilter === f ? " mesa-chip-active" : ""}`}
+                aria-pressed={histFilter === f}
                 onClick={() => setHistFilter(f)}>
                 {FILTER_LABEL[f]}
               </button>
@@ -198,6 +228,7 @@ export function ApprovalsView({ onCountChange, openApprovalId, onConsumedDeepLin
           onResolved={handleResolved}
         />
       )}
+      </div>
     </div>
   );
 }
@@ -291,6 +322,28 @@ function ApprovalDetailModal({ record, onClose, onResolved }: DetailProps) {
   const [reason, setReason] = useState("");
 
   const isPending = record.status === "pending";
+  const detailTabs: Array<"diff" | "args" | "result"> = isPending ? ["diff", "args"] : ["diff", "args", "result"];
+
+  function switchDetailTab(next: "diff" | "args" | "result", tablist?: EventTarget & HTMLDivElement) {
+    setActiveTab(next);
+    window.requestAnimationFrame(() => {
+      tablist?.querySelector<HTMLButtonElement>(`#approval-detail-tab-${next}`)?.focus();
+    });
+  }
+
+  function handleDetailTabKeyDown(e: React.KeyboardEvent<HTMLDivElement>) {
+    if (e.key !== "ArrowRight" && e.key !== "ArrowLeft" && e.key !== "Home" && e.key !== "End") return;
+    e.preventDefault();
+    const i = detailTabs.indexOf(activeTab);
+    const next = e.key === "Home"
+      ? detailTabs[0]
+      : e.key === "End"
+        ? detailTabs[detailTabs.length - 1]
+        : e.key === "ArrowRight"
+          ? detailTabs[(i + 1) % detailTabs.length]
+          : detailTabs[(i - 1 + detailTabs.length) % detailTabs.length];
+    switchDetailTab(next, e.currentTarget);
+  }
 
   async function approve() {
     setBusy("approve");
@@ -347,36 +400,50 @@ function ApprovalDetailModal({ record, onClose, onResolved }: DetailProps) {
         </div>
       )}
 
-      <div className="approval-detail-tabs" role="tablist">
+      <div className="approval-detail-tabs" role="tablist" aria-label="Approval detail" onKeyDown={handleDetailTabKeyDown}>
         <button
+          id="approval-detail-tab-diff"
           role="tab"
           aria-selected={activeTab === "diff"}
+          aria-controls="approval-detail-panel"
+          tabIndex={activeTab === "diff" ? 0 : -1}
           className={`approval-detail-tab${activeTab === "diff" ? " active" : ""}`}
-          onClick={() => setActiveTab("diff")}
+          onClick={() => switchDetailTab("diff")}
         >
           Diff
         </button>
         <button
+          id="approval-detail-tab-args"
           role="tab"
           aria-selected={activeTab === "args"}
+          aria-controls="approval-detail-panel"
+          tabIndex={activeTab === "args" ? 0 : -1}
           className={`approval-detail-tab${activeTab === "args" ? " active" : ""}`}
-          onClick={() => setActiveTab("args")}
+          onClick={() => switchDetailTab("args")}
         >
           Raw args
         </button>
         {!isPending && (
           <button
+            id="approval-detail-tab-result"
             role="tab"
             aria-selected={activeTab === "result"}
+            aria-controls="approval-detail-panel"
+            tabIndex={activeTab === "result" ? 0 : -1}
             className={`approval-detail-tab${activeTab === "result" ? " active" : ""}`}
-            onClick={() => setActiveTab("result")}
+            onClick={() => switchDetailTab("result")}
           >
             Result
           </button>
         )}
       </div>
 
-      <div className="approval-detail-body">
+      <div
+        id="approval-detail-panel"
+        className="approval-detail-body"
+        role="tabpanel"
+        aria-labelledby={`approval-detail-tab-${activeTab}`}
+      >
         {activeTab === "diff" && <DiffView record={record} />}
         {activeTab === "args" && (
           <pre className="approval-pre">{JSON.stringify(record.args, null, 2)}</pre>

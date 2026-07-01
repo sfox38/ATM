@@ -124,6 +124,11 @@ export function AuditTable({ entries, loading, page, pageSize, onPageChange, tok
     else { setSortKey(key); setSortDir("asc"); }
   }
 
+  function ariaSort(key: SortKey): "ascending" | "descending" | "none" {
+    if (sortKey !== key) return "none";
+    return sortDir === "asc" ? "ascending" : "descending";
+  }
+
   const sorted = [...entries].sort((a, b) => {
     const va = sortKey === "token_name" ? displayName(a) : (a[sortKey] ?? "");
     const vb = sortKey === "token_name" ? displayName(b) : (b[sortKey] ?? "");
@@ -139,9 +144,11 @@ export function AuditTable({ entries, loading, page, pageSize, onPageChange, tok
     return (
       <th
         className={`sortable${sortKey === key ? " sort-active" : ""}`}
-        onClick={() => handleSort(key)}
+        aria-sort={ariaSort(key)}
       >
-        {label}<SortArrow col={key} sortKey={sortKey} sortDir={sortDir} />
+        <button type="button" className="table-sort-btn" onClick={() => handleSort(key)}>
+          {label}<SortArrow col={key} sortKey={sortKey} sortDir={sortDir} />
+        </button>
       </th>
     );
   }
@@ -164,16 +171,22 @@ export function AuditTable({ entries, loading, page, pageSize, onPageChange, tok
           {slice.map((entry) => (
             <tr
               key={entry.request_id}
-              className={`clickable${entry.pass_through ? " pass-through-row" : ""}`}
-              onClick={() => setSelected(entry)}
+              className={entry.pass_through ? "pass-through-row" : ""}
             >
               <td>
-                <span className={`outcome-badge ${OUTCOME_CLASS[entry.outcome]}`}>
-                  {OUTCOME_LABEL[entry.outcome] ?? entry.outcome}
-                </span>
-                {entry.mesa_advisory && (
-                  <span className="outcome-badge mesa-advisory-badge" title="MESA advisory: proceeded with a warning">MESA</span>
-                )}
+                <button
+                  type="button"
+                  className="row-link-btn"
+                  onClick={() => setSelected(entry)}
+                  aria-label={`Open audit entry ${OUTCOME_LABEL[entry.outcome] ?? entry.outcome} for ${displayName(entry)}`}
+                >
+                  <span className={`outcome-badge ${OUTCOME_CLASS[entry.outcome]}`}>
+                    {OUTCOME_LABEL[entry.outcome] ?? entry.outcome}
+                  </span>
+                  {entry.mesa_advisory && (
+                    <span className="outcome-badge mesa-advisory-badge" title="MESA advisory: proceeded with a warning">MESA</span>
+                  )}
+                </button>
               </td>
               <td title={formatTokenName(displayName(entry))}>{formatTokenNameShort(displayName(entry))}</td>
               <td>

@@ -6,8 +6,6 @@ entity state, including state helpers called as Jinja2 filters.
 
 from __future__ import annotations
 
-from datetime import datetime
-
 import pytest
 from homeassistant.util.dt import utcnow
 
@@ -82,9 +80,16 @@ def test_enumeration_helpers_blocked(two_states, template):
     """Enumeration helpers either return empty (blocklist stubs) or raise; in no
     case do they reveal sensor.secret."""
     token = _scoped_token()
+    # Control render first: prove the sandbox renderer is actually functional in
+    # this code path, so a regression that breaks rendering wholesale fails loudly
+    # here instead of being silently swallowed as "did not leak".
+    assert render_template_for_token("{{ states('sensor.allowed') }}", token, two_states) == "42"
     try:
         out = render_template_for_token(template, token, two_states)
-    except Exception:
+    except Exception as exc:
+        # A controlled block (raise) is acceptable, but the leak guard still applies
+        # to the exception text; we never blindly treat "raised" as a pass.
+        assert "sensor.secret" not in str(exc) and "topsecret" not in str(exc)
         return
     assert "sensor.secret" not in out
     assert "topsecret" not in out

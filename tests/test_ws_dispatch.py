@@ -69,6 +69,32 @@ async def test_handler_side_error_wrapped(hass, hass_admin_user):
         await async_ws_command(hass, "input_boolean/delete", {"input_boolean_id": "missing"})
 
 
+async def test_result_via_send_message_bytes_is_captured(hass, hass_admin_user, monkeypatch):
+    # Some handlers (notably logbook/get_events) deliver their result through
+    # connection.send_message with a pre-serialized JSON result message, not via
+    # send_result. _CapturingConnection must capture that too, or the dispatch
+    # times out. Regression for the get_logbook timeout.
+    import json
+
+    import custom_components.atm.ws_dispatch as wd
+    from homeassistant.components import websocket_api
+    from homeassistant.components.websocket_api import messages
+
+    @websocket_api.websocket_command({"type": "atm_test/send_message_result"})
+    @websocket_api.async_response
+    async def _handler(hass, connection, msg):
+        payload = json.dumps(messages.result_message(msg["id"], {"ok": True})).encode()
+        connection.send_message(payload)
+
+    websocket_api.async_register_command(hass, _handler)
+    monkeypatch.setattr(
+        wd, "ALLOWED_WS_COMMANDS", wd.ALLOWED_WS_COMMANDS | {"atm_test/send_message_result"}
+    )
+
+    result = await wd.async_ws_command(hass, "atm_test/send_message_result", {})
+    assert result == {"ok": True}
+
+
 async def test_compat_probe_passes_on_current_ha(hass):
     from custom_components.atm.ws_dispatch import check_ws_dispatch_compat
 

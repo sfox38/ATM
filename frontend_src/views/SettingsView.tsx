@@ -74,6 +74,7 @@ export function SettingsView({ settings, onSettingsChange, theme, onThemeChange 
                 <small>How often to snapshot the audit log to disk. "Never" keeps the log in-memory only.</small>
               </div>
               <select
+                aria-label="Audit log flush interval"
                 className="input input-auto"
                 value={settings.audit_flush_interval}
                 disabled={saving || settings.disable_all_logging}
@@ -93,6 +94,7 @@ export function SettingsView({ settings, onSettingsChange, theme, onThemeChange 
                 <small>Capacity of the in-memory buffer and the on-disk snapshot. Reducing this trims the oldest entries immediately.</small>
               </div>
               <select
+                aria-label="Maximum log entries"
                 className="input input-auto"
                 value={settings.audit_log_maxlen}
                 disabled={saving || settings.disable_all_logging}
@@ -139,6 +141,7 @@ export function SettingsView({ settings, onSettingsChange, theme, onThemeChange 
                 </small>
               </div>
               <select
+                aria-label="MESA enforcement mode"
                 className="input input-auto"
                 value={settings.mesa_mode}
                 disabled={saving}
@@ -176,6 +179,7 @@ export function SettingsView({ settings, onSettingsChange, theme, onThemeChange 
               <label className={`toggle-switch${saving ? " disabled" : ""}`}>
                 <input
                   type="checkbox"
+                  aria-label="In-context profile buttons"
                   checked={settings.mesa_inject_enabled}
                   disabled={saving}
                   onChange={(e) => patchSetting("mesa_inject_enabled", e.target.checked)}
@@ -209,7 +213,9 @@ export function SettingsView({ settings, onSettingsChange, theme, onThemeChange 
                   {(["light", "auto", "dark"] as Theme[]).map((t) => (
                     <button
                       key={t}
+                      type="button"
                       className={`theme-toggle-btn${theme === t ? " active" : ""}`}
+                      aria-pressed={theme === t}
                       onClick={() => onThemeChange(t)}
                     >
                       {t.charAt(0).toUpperCase() + t.slice(1)}

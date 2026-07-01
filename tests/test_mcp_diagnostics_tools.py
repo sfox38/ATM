@@ -157,6 +157,43 @@ class TestDiagnostics:
         assert outcome == "allowed"
         assert _json(content)["home_assistant_version"]
 
+    async def test_system_health_redacts_integration_secrets(self, hass):
+        # Per-integration health values are arbitrary; secret-keyed values and
+        # URL-embedded credentials must be scrubbed before reaching the model.
+        info = {
+            "cloud": {"api_key": "supersecret", "can_reach_server": "ok"},
+            "broker": {"url": "https://admin:hunter2@mqtt.local/x"},
+        }
+        with patch("homeassistant.components.system_health.get_info", AsyncMock(return_value=info)):
+            content, outcome, _ = await _call("get_system_health", {}, _token(cap_diagnostics="allow"), hass)
+        assert outcome == "allowed"
+        body = _json(content)
+        text = json.dumps(body)
+        assert "supersecret" not in text          # sensitive-keyed value redacted
+        assert "hunter2" not in text              # URL credentials scrubbed
+        # Benign diagnostic values are preserved.
+        assert body["integrations"]["cloud"]["can_reach_server"] == "ok"
+
+    async def test_system_health_scrubs_network_topology(self, hass):
+        # Integration diagnostics can disclose LAN IPs, hostnames-in-URLs, and
+        # filesystem paths that ATM withholds from agents elsewhere (get_config).
+        info = {
+            "router": {"host": "192.168.1.50", "gateway": "10.0.0.1"},
+            "service": {"endpoint": "http://homeassistant.local:8123/api"},
+            "store": {"path": "/config/.storage/secret_store", "status": "ok"},
+            "version": {"installed": "4.8.0.1"},  # public-IP-shaped; must NOT scrub
+        }
+        with patch("homeassistant.components.system_health.get_info", AsyncMock(return_value=info)):
+            content, outcome, _ = await _call("get_system_health", {}, _token(cap_diagnostics="allow"), hass)
+        assert outcome == "allowed"
+        text = json.dumps(_json(content))
+        assert "192.168.1.50" not in text         # private IP scrubbed
+        assert "10.0.0.1" not in text              # private IP scrubbed
+        assert "homeassistant.local" not in text   # URL host scrubbed
+        assert "/config/.storage" not in text      # filesystem path scrubbed
+        assert "ok" in text                         # benign value preserved
+        assert "4.8.0.1" in text                    # version string NOT a private IP, preserved
+
     async def test_check_config_deny(self, hass):
         _, outcome, _ = await _call("check_config", {}, _token(cap_diagnostics="deny"), hass)
         assert outcome == "denied"

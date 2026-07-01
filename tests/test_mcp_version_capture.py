@@ -15,10 +15,12 @@ from unittest.mock import MagicMock
 
 import pytest
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import area_registry as ar
 from homeassistant.helpers import entity_registry as er
 from homeassistant.util.dt import utcnow
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
+from custom_components.atm.const import MAX_DIFF_INLINE_BYTES
 from custom_components.atm.data import ATMData
 from custom_components.atm.mcp_view import _call_tool, _read_automations_yaml, restore_version
 from custom_components.atm.token_store import PermissionNode, PermissionTree, TokenRecord
@@ -288,3 +290,170 @@ class TestRestoreEndpoint:
         items = _read_automations_yaml(os.path.join(hass.config.config_dir, "automations.yaml"))
         assert next(a for a in items if a.get("id") == aid)["alias"] == "A"
         assert versions.list_for("automation", aid)[0].approved_by_user_id == "admin-7"
+
+
+class TestRawWriteCapture:
+    async def test_yaml_config_records_create_then_edit(self, hass):
+        data, versions = _data()
+        token = _token(cap_yaml_edit="allow")
+        await _call_tool("set_yaml_config", {"content": "default_config:\n"}, token, hass, data)
+        await _call_tool("set_yaml_config", {"content": "default_config:\nfoo: bar\n"}, token, hass, data)
+
+        # The test env may or may not ship a configuration.yaml, so assert on the
+        # before/after content chain rather than on create-vs-edit of the first write.
+        history = versions.list_for("yaml_config", "configuration.yaml")
+        assert len(history) == 2
+        second, first = history  # newest first
+        assert first.after["content"] == "default_config:\n"
+        assert second.before["content"] == "default_config:\n"
+        assert second.after["content"] == "default_config:\nfoo: bar\n"
+
+    async def test_write_file_records_create_then_edit(self, hass):
+        data, versions = _data()
+        token = _token(cap_filesystem="allow")
+        rel = "www/atm_cap_test.js"
+        target = os.path.join(hass.config.config_dir, "www", "atm_cap_test.js")
+        if os.path.exists(target):  # the test config dir can persist across runs
+            os.remove(target)
+        await _call_tool("write_file", {"path": rel, "content": "v1"}, token, hass, data)
+        await _call_tool("write_file", {"path": rel, "content": "v2"}, token, hass, data)
+
+        history = versions.list_for("file", rel)
+        assert [v.action for v in history] == ["edit", "create"]
+        edit_rec, create_rec = history
+        assert create_rec.before is None and create_rec.after["content"] == "v1"
+        assert edit_rec.before["content"] == "v1" and edit_rec.after["content"] == "v2"
+
+    async def test_oversized_content_stored_as_truncated_marker(self, hass):
+        data, versions = _data()
+        token = _token(cap_yaml_edit="allow")
+        big = "x" * (MAX_DIFF_INLINE_BYTES + 50)
+        await _call_tool("set_yaml_config", {"content": big}, token, hass, data)
+        rec = versions.list_for("yaml_config", "configuration.yaml")[0]
+        assert rec.after["content"] is None
+        assert rec.after["truncated"] is True
+        assert rec.after["bytes"] == len(big.encode("utf-8"))
+
+
+class TestRawWriteRestore:
+    async def test_restore_yaml_reapplies_and_records_rollback(self, hass):
+        data, versions = _data()
+        token = _token(cap_yaml_edit="allow")
+        await _call_tool("set_yaml_config", {"content": "A\n"}, token, hass, data)
+        await _call_tool("set_yaml_config", {"content": "B\n"}, token, hass, data)
+        create_ver = versions.list_for("yaml_config", "configuration.yaml")[-1]  # after == "A\n"
+
+        result, _outcome, _res = await restore_version(create_ver, "admin-1", hass, data)
+        assert result.get("isError") is not True
+
+        with open(hass.config.path("configuration.yaml"), encoding="utf-8") as f:
+            assert f.read() == "A\n"
+        newest = versions.list_for("yaml_config", "configuration.yaml")[0]
+        assert newest.action == "rollback"
+        assert newest.approved_by_user_id == "admin-1"
+
+    async def test_restore_file_reapplies(self, hass):
+        data, versions = _data()
+        token = _token(cap_filesystem="allow")
+        rel = "www/atm_restore_test.js"
+        await _call_tool("write_file", {"path": rel, "content": "first"}, token, hass, data)
+        await _call_tool("write_file", {"path": rel, "content": "second"}, token, hass, data)
+        create_ver = versions.list_for("file", rel)[-1]  # after == "first"
+
+        await restore_version(create_ver, "admin-2", hass, data)
+        with open(os.path.join(hass.config.config_dir, "www", "atm_restore_test.js"), encoding="utf-8") as f:
+            assert f.read() == "first"
+        assert versions.list_for("file", rel)[0].action == "rollback"
+
+    async def test_restore_truncated_version_refused(self, hass):
+        data, versions = _data()
+        token = _token(cap_yaml_edit="allow")
+        big = "y" * (MAX_DIFF_INLINE_BYTES + 50)
+        await _call_tool("set_yaml_config", {"content": big}, token, hass, data)
+        rec = versions.list_for("yaml_config", "configuration.yaml")[0]
+        result, outcome, _res = await restore_version(rec, "admin-3", hass, data)
+        assert outcome == "invalid_request"
+        assert "too large" in result["content"][0]["text"].lower()
+
+
+class TestEntityRegistryWrite:
+    @pytest.fixture
+    def env(self, hass: HomeAssistant):
+        entry = MockConfigEntry(domain="test_integration", entry_id="e_reg")
+        entry.add_to_hass(hass)
+        e = er.async_get(hass).async_get_or_create(
+            "light", "test_integration", "uid_lamp", config_entry=entry, suggested_object_id="lamp")
+        hass.states.async_set(e.entity_id, "on", {})
+        area = ar.async_get(hass).async_create("Office")
+        return e.entity_id, area.id
+
+    @staticmethod
+    def _token_rw():
+        tree = PermissionTree(domains={"light": PermissionNode(state="GREEN")})
+        return _token(tree=tree, cap_registry_write="allow", cap_registry_read="allow")
+
+    async def test_set_entity_updates_and_versions(self, hass, env):
+        eid, area_id = env
+        data, versions = _data()
+        res = _text((await _call_tool(
+            "set_entity", {"entity_id": eid, "name": "Desk Lamp", "area_id": area_id},
+            self._token_rw(), hass, data))[0])
+        assert res["updated"]["name"] == "Desk Lamp"
+        assert res["updated"]["area_id"] == area_id
+
+        entry = er.async_get(hass).async_get(eid)
+        assert entry.name == "Desk Lamp" and entry.area_id == area_id
+        hist = versions.list_for("entity", eid)
+        assert hist[0].action == "edit"
+        assert hist[0].after["name"] == "Desk Lamp"
+        assert hist[0].before["name"] != "Desk Lamp"
+
+    async def test_set_entity_forbidden_without_cap(self, hass, env):
+        eid, _area = env
+        data, _ = _data()
+        tree = PermissionTree(domains={"light": PermissionNode(state="GREEN")})
+        token = _token(tree=tree, cap_registry_write="deny")
+        _, outcome, _ = await _call_tool("set_entity", {"entity_id": eid, "name": "X"}, token, hass, data)
+        assert outcome == "denied"
+
+    async def test_deny_token_is_not_a_scope_oracle(self, hass, env):
+        # A cap-denied token must get the byte-identical Forbidden body regardless
+        # of whether the named entity is writable, out of scope, or nonexistent.
+        eid, _area = env  # WRITE-accessible light entity
+        hass.states.async_set("lock.front_door", "locked", {})  # exists, out of scope
+        data, _ = _data()
+        tree = PermissionTree(domains={"light": PermissionNode(state="GREEN")})
+        token = _token(tree=tree, cap_registry_write="deny")
+        bodies = []
+        for target in (eid, "lock.front_door", "light.ghost_nonexistent"):
+            content, outcome, _ = await _call_tool(
+                "set_entity", {"entity_id": target, "name": "X"}, token, hass, data)
+            assert outcome == "denied"
+            bodies.append(content["content"][0]["text"])
+        assert len(set(bodies)) == 1
+
+    async def test_set_entity_read_only_denied(self, hass, env):
+        eid, _area = env
+        data, _ = _data()
+        # YELLOW => READ only; registry edits require WRITE.
+        tree = PermissionTree(domains={"light": PermissionNode(state="YELLOW")})
+        token = _token(tree=tree, cap_registry_write="allow")
+        _, outcome, _ = await _call_tool("set_entity", {"entity_id": eid, "name": "X"}, token, hass, data)
+        assert outcome == "denied"
+
+    async def test_set_entity_unknown_area_rejected(self, hass, env):
+        eid, _area = env
+        data, _ = _data()
+        _, outcome, _ = await _call_tool(
+            "set_entity", {"entity_id": eid, "area_id": "no_such_area"}, self._token_rw(), hass, data)
+        assert outcome == "invalid_request"
+
+    async def test_delete_entity_removes_and_versions(self, hass, env):
+        eid, _area = env
+        data, versions = _data()
+        res = _text((await _call_tool("delete_entity", {"entity_id": eid}, self._token_rw(), hass, data))[0])
+        assert res["deleted"] is True
+        assert er.async_get(hass).async_get(eid) is None
+        hist = versions.list_for("entity", eid)
+        assert hist[0].action == "delete"
+        assert hist[0].after is None and hist[0].before is not None

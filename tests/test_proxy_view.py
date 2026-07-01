@@ -557,6 +557,13 @@ async def test_state_view_404_same_body_for_inaccessible_and_nonexistent(hass, t
         req.rel_url.path = f"/api/atm/states/{entity_id}"
         return req
 
+    # resolve() is mocked ON PURPOSE: this test isolates the response-formatting
+    # contract (rule #12, identical 404 body for NOT_FOUND vs DENY), not whether
+    # those verdicts are reached correctly. That verdict logic (ghost detection,
+    # RED two-pass, alias-to-canonical) is exercised against the real implementation
+    # in test_policy_engine.py (test_ghost_entity_returns_not_found,
+    # test_red_entity_under_green_domain_is_deny, test_resolves_to_canonical_entity_id,
+    # and ~90 others). Mocking here keeps the two concerns in separate unit layers.
     with patch("custom_components.atm.proxy_view.resolve") as mock_resolve:
         mock_resolve.return_value = Permission.NOT_FOUND
         resp_nonexistent = await view.get(make_req("light.does_not_exist"), "light.does_not_exist")
@@ -685,6 +692,66 @@ async def test_states_view_returns_filtered_states(hass, token_store):
 
 
 @pytest.mark.asyncio
+async def test_states_view_negative_limit_clamped(hass, token_store):
+    from custom_components.atm.proxy_view import ATMStatesView
+
+    token, raw = _make_token()
+    data = _make_data(token)
+    hass.data[DOMAIN] = data
+    hass.states = MagicMock()
+    hass.states.async_all.return_value = []
+
+    view = ATMStatesView()
+    view.hass = hass
+
+    request = MagicMock()
+    request.method = "GET"
+    request.remote = "127.0.0.1"
+    request.headers = MagicMock()
+    request.headers.get = MagicMock(side_effect=lambda k, d="": {"Authorization": f"Bearer {raw}"}.get(k, d))
+    request.query = {"limit": "-1"}
+
+    three = [{"entity_id": f"light.l{i}"} for i in range(3)]
+    with patch("custom_components.atm.proxy_view.filter_entities_for_token", return_value=three):
+        resp = await view.get(request)
+
+    assert resp.status == 200
+    # Clamped to a minimum page of 1, not the old filtered[0:-1] (which returned 2).
+    assert len(json.loads(resp.text)) == 1
+
+
+@pytest.mark.asyncio
+async def test_state_view_uses_canonical_id_for_fetch(hass, token_store):
+    from custom_components.atm.proxy_view import ATMStateView
+
+    token, raw = _make_token()
+    data = _make_data(token)
+    hass.data[DOMAIN] = data
+    hass.states.async_set("light.real", "on", {})
+
+    view = ATMStateView()
+    view.hass = hass
+
+    request = MagicMock()
+    request.method = "GET"
+    request.remote = "127.0.0.1"
+    request.headers = MagicMock()
+    request.headers.get = MagicMock(side_effect=lambda k, d="": {"Authorization": f"Bearer {raw}"}.get(k, d))
+    request.query = {}
+    request.rel_url = MagicMock()
+    request.rel_url.path = "/api/atm/states/some_registry_id"
+
+    # A registry id / alias canonicalizes to light.real; the state fetch must use
+    # the canonical id, not the original arg (which would 404).
+    with patch("custom_components.atm.proxy_view.canonical_entity_id", return_value="light.real"), \
+         patch("custom_components.atm.proxy_view.resolve", return_value=Permission.WRITE):
+        resp = await view.get(request, "some_registry_id")
+
+    assert resp.status == 200
+    assert json.loads(resp.text)["entity_id"] == "light.real"
+
+
+@pytest.mark.asyncio
 async def test_service_view_empty_permitted_returns_403(hass, token_store):
     from custom_components.atm.proxy_view import ATMServiceView
 
@@ -699,6 +766,11 @@ async def test_service_view_empty_permitted_returns_403(hass, token_store):
 
     request = _make_service_request(raw, b'{"entity_id": "light.kitchen"}')
 
+    # resolve_service_targets is mocked ON PURPOSE: this isolates the view's
+    # handling of an empty resolution (-> 403). The real flattening it stands in
+    # for (device/area/"all" expansion, RED-skip, ghost handling) is tested against
+    # the real implementation in test_policy_engine.py (test_all_expands_to_domain_entities,
+    # test_device_id_expands_to_service_domain_entities_only, test_area_id_red_entity_silently_skipped, etc.).
     with patch("custom_components.atm.proxy_view.resolve_service_targets", return_value=([], 1)):
         resp = await view.post(request, "light", "turn_on")
 
@@ -723,6 +795,11 @@ async def test_service_view_entity_creation_blocked(hass, token_store):
 
     request = _make_service_request(raw, b'{"entity_id": "light.new_entity"}')
 
+    # Mocked ON PURPOSE: isolates the view's translation of the creation-guard
+    # exception into a 403. The guard itself (a service-named entity absent from
+    # the registry raises EntityCreationNotPermitted) is tested against the real
+    # implementation in test_policy_engine.py (test_nonexistent_entity_raises_entity_creation_not_permitted,
+    # test_pass_through_entity_creation_still_blocked).
     with patch("custom_components.atm.proxy_view.resolve_service_targets", side_effect=EntityCreationNotPermitted("light.new_entity")):
         resp = await view.post(request, "light", "turn_on")
 

@@ -15,20 +15,18 @@ from custom_components.atm.admin_view import (
     ATMAdminAuditView,
     ATMAdminEntityTreeView,
     ATMAdminPermissionDomainView,
-    ATMAdminPermissionsView,
     ATMAdminSettingsView,
     ATMAdminTokenAuditView,
     ATMAdminTokenStatsView,
     ATMAdminTokensView,
     ATMAdminTokenView,
-    ATMAdminArchivedTokensView,
     ALL_ADMIN_VIEWS,
 )
 from custom_components.atm.audit import AuditLog
 from custom_components.atm.const import DOMAIN, TOKEN_PREFIX
 from custom_components.atm.data import ATMData
 from custom_components.atm.rate_limiter import RateLimiter
-from custom_components.atm.token_store import ArchivedTokenRecord, GlobalSettings, TokenRecord, TokenStore
+from custom_components.atm.token_store import GlobalSettings, TokenRecord, TokenStore
 
 
 def _make_active_token(name: str = "test-token", pass_through: bool = False) -> TokenRecord:
@@ -356,6 +354,12 @@ async def test_patch_token_pass_through_already_enabled_no_confirm_needed():
     resp = await view.patch(request, token_id=token.id)
 
     assert resp.status == 200
+    # Assert the actual patch payload, not just the status: re-affirming pass_through
+    # on an already-enabled token must patch exactly {"pass_through": True} and must
+    # NOT smuggle in a confirm_pass_through escape hatch or any other field.
+    data.store.async_patch_token.assert_awaited_once()
+    assert data.store.async_patch_token.await_args.args[0] == token.id
+    assert data.store.async_patch_token.await_args.kwargs == {"pass_through": True}
 
 
 @pytest.mark.asyncio
@@ -918,7 +922,7 @@ async def test_entity_tree_force_reload_bypasses_cache():
 
 
 def test_all_admin_views_exported():
-    assert len(ALL_ADMIN_VIEWS) == 40
+    assert len(ALL_ADMIN_VIEWS) == 41
 
 
 def test_archived_views_before_token_view():

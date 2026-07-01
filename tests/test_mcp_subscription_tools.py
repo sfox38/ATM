@@ -9,9 +9,8 @@ from __future__ import annotations
 import asyncio
 import json
 import uuid
+from unittest.mock import patch
 
-import pytest
-from homeassistant.core import HomeAssistant
 from homeassistant.util.dt import utcnow
 
 from custom_components.atm.mcp_view import _call_tool
@@ -47,12 +46,30 @@ class TestWatchEntity:
         assert outcome == "not_found"
 
     async def test_returns_change(self, hass):
+        import custom_components.atm.mcp_view as mcp_view
+
         hass.states.async_set("light.kitchen", "on", {})
         token = _token()
-        task = asyncio.create_task(_call("watch_entity", {"entity_id": "light.kitchen", "timeout": 5}, token, hass))
-        await asyncio.sleep(0.1)  # let the listener register and the call start waiting
-        hass.states.async_set("light.kitchen", "off", {})
-        content, outcome, _ = await task
+
+        # Deterministic readiness instead of a fixed sleep: wrap the real
+        # async_track_state_change_event so we fire the change only once the tool
+        # has actually registered its listener (registration is synchronous, so the
+        # listener is live the moment the wrapper sets the event).
+        ready = asyncio.Event()
+        real_track = mcp_view.async_track_state_change_event
+
+        def _tracked(h, eids, cb):
+            unsub = real_track(h, eids, cb)
+            ready.set()
+            return unsub
+
+        with patch.object(mcp_view, "async_track_state_change_event", side_effect=_tracked):
+            task = asyncio.create_task(
+                _call("watch_entity", {"entity_id": "light.kitchen", "timeout": 5}, token, hass))
+            await asyncio.wait_for(ready.wait(), timeout=2)
+            hass.states.async_set("light.kitchen", "off", {})
+            content, outcome, _ = await task
+
         assert outcome == "allowed"
         body = _json(content)
         assert body["changed"] is True

@@ -69,13 +69,25 @@
 
           <article class="tool" data-cap="read" data-search="get_config configuration data">
             <div class="tool-head"><span class="tool-name">get_config</span><span class="badge badge-cap">Config read</span></div>
-            <p class="tool-desc">Read HA configuration data, including integrations, packages, and automation settings.</p>
+            <p class="tool-desc">Read a curated subset of Home Assistant's configuration: version, time zone, unit system, location name, and the list of loaded integrations. Precise home coordinates, internal/external URLs, and host filesystem paths are withheld.</p>
+          </article>
+
+          <article class="tool" data-cap="read" data-search="list_blueprints blueprint automation script">
+            <div class="tool-head"><span class="tool-name">list_blueprints</span><span class="badge badge-cap">Config read</span></div>
+            <p class="tool-desc">List installed automation and script blueprints with their inputs. To instantiate one, create an automation or script with a <code>use_blueprint</code> config (the existing authoring tools accept it); there is no separate create-from-blueprint tool.</p>
+            <dl><dt>params</dt><dd><code>domain</code> (optional, <code>automation</code> or <code>script</code>)</dd></dl>
           </article>
 
           <article class="tool" data-cap="read" data-search="get_logs system log entries">
             <div class="tool-head"><span class="tool-name">get_logs</span><span class="badge badge-cap">Log read</span></div>
-            <p class="tool-desc">Recent HA system log entries. ATM's own entries are excluded and token values are scrubbed from messages and tracebacks.</p>
+            <p class="tool-desc">Recent HA system log entries. ATM's own entries are excluded and token values, JWTs, and URL credentials are scrubbed from messages and tracebacks. The scrubber is pattern-based and cannot guarantee removal of arbitrary third-party secrets or PII an integration writes into a log line, so treat Log read as an elevated-trust grant.</p>
             <dl><dt>params</dt><dd><code>limit</code> (default 50, max 100), <code>level</code> (<code>INFO</code> / <code>WARNING</code> / <code>ERROR</code>)</dd></dl>
+          </article>
+
+          <article class="tool" data-cap="read" data-search="get_logbook human readable event history logbook">
+            <div class="tool-head"><span class="tool-name">get_logbook</span><span class="badge badge-cap">Log read</span></div>
+            <p class="tool-desc">The human-readable logbook (state changes, automations and scripts triggered). Scoped to entities the token can access; entries for out-of-scope entities are dropped. This is the narrative event history, distinct from <code>get_logs</code> (error log) and <code>get_history</code> (raw samples).</p>
+            <dl><dt>params</dt><dd><code>start_time</code> (default 24h), <code>end_time</code>, <code>entity_id</code> (optional, focus on one entity), <code>limit</code> (default 100, max 1000)</dd></dl>
           </article>
 
           <article class="tool" data-cap="read" data-search="render_template jinja2">
@@ -92,7 +104,7 @@
 
           <article class="tool" data-cap="discovery" data-search="check_config validate_config validate configuration">
             <div class="tool-head"><span class="tool-name">check_config</span><span class="tool-name">validate_config</span><span class="badge badge-cap">Diagnostics</span></div>
-            <p class="tool-desc"><code>check_config</code> validates the HA configuration files. <code>validate_config</code> validates an automation or script config without saving and reports, per referenced entity, whether it exists and is accessible.</p>
+            <p class="tool-desc"><code>check_config</code> validates the HA configuration files. <code>validate_config</code> validates an automation or script config without saving and reports, per referenced entity, whether it is accessible to the token (entities outside the token's scope are reported as inaccessible and not visible).</p>
           </article>
 
           <article class="tool" data-cap="discovery" data-search="compare_state two times recorder">
@@ -132,7 +144,7 @@
 
           <article class="tool" data-cap="discovery" data-search="get_system_health version integrations">
             <div class="tool-head"><span class="tool-name">get_system_health</span><span class="badge badge-cap">Diagnostics</span></div>
-            <p class="tool-desc">Home Assistant version and per-integration system health.</p>
+            <p class="tool-desc">Home Assistant version and per-integration system health. Secret-keyed values and URL-embedded credentials in the integration data are scrubbed before they are returned, as are network-topology details (LAN IP addresses, hostnames inside URLs, and filesystem paths) that ATM withholds elsewhere. This is an elevated read; treat <code>cap_diagnostics</code> accordingly.</p>
           </article>
 
           <article class="tool" data-cap="discovery" data-search="list_areas list_floors list_zones list_devices get_device registry enumeration">
@@ -152,7 +164,7 @@
 
           <article class="tool" data-cap="discovery" data-search="search_entities filter find">
             <div class="tool-head"><span class="tool-name">search_entities</span><span class="badge badge-cap">Search &amp; discovery</span></div>
-            <p class="tool-desc">Filter accessible entities by query, domain, area, device class, state, and staleness. Each row carries <code>control_mode</code> when its MESA nature is non-default, so restricted entities are visible without a follow-up call.</p>
+            <p class="tool-desc">Filter accessible entities by query, domain, area, device class, state, and staleness. A multi-word <code>query</code> matches entities containing all the words and results are ranked by relevance, so the best matches lead. Each row carries <code>control_mode</code> when its MESA nature is non-default, so restricted entities are visible without a follow-up call.</p>
             <dl><dt>params</dt><dd><code>query</code>, <code>domain</code>, <code>area</code>, <code>device_class</code>, <code>state</code>, <code>unavailable</code>, <code>stale_hours</code>, <code>limit</code> (all optional)</dd></dl>
           </article>
 
@@ -168,7 +180,7 @@
 
           <article class="tool" data-cap="system" data-search="get_yaml_config set_yaml_config configuration.yaml">
             <div class="tool-head"><span class="tool-name">get_yaml_config</span><span class="tool-name">set_yaml_config</span><span class="badge badge-cap">Raw YAML edit</span></div>
-            <p class="tool-desc">Read and edit <code>configuration.yaml</code> directly. Confirm-eligible.</p>
+            <p class="tool-desc">Read and edit <code>configuration.yaml</code> directly. Confirm-eligible. <code>get_yaml_config</code> returns the file verbatim, so any inline secrets enter the agent's context; grant this only to fully-trusted clients, and prefer <code>!secret</code> references (which ATM preserves) over inline values.</p>
           </article>
 
           <article class="tool" data-cap="system" data-search="list_backups create_backup no restore">
@@ -184,6 +196,12 @@
           <article class="tool" data-cap="system" data-search="list_integrations set_integration_enabled enable disable">
             <div class="tool-head"><span class="tool-name">list_integrations</span><span class="tool-name">set_integration_enabled</span><span class="badge badge-cap">Integration management</span></div>
             <p class="tool-desc">List integrations and enable or disable them. Confirm-eligible.</p>
+          </article>
+
+          <article class="tool" data-cap="system" data-search="set_entity delete_entity registry rename area icon orphan">
+            <div class="tool-head"><span class="tool-name">set_entity</span><span class="tool-name">delete_entity</span><span class="badge badge-cap">Registry write</span></div>
+            <p class="tool-desc">Edit an entity's registry metadata (friendly name, icon, area) or delete a stale/duplicate registry entry. Requires write access to the entity and <code>cap_registry_write</code>; Confirm-eligible and version-captured. Renaming the entity_id is not exposed; a deleted entry cannot be re-created through ATM.</p>
+            <dl><dt>params</dt><dd><code>set_entity</code>: <code>entity_id</code> + one of <code>name</code> / <code>icon</code> / <code>area_id</code>; <code>delete_entity</code>: <code>entity_id</code></dd></dl>
           </article>
 
           <article class="tool" data-cap="system" data-search="restart_ha restart home assistant">
@@ -297,19 +315,25 @@
 
           <article class="tool" data-cap="read" data-search="get_state single entity">
             <div class="tool-head"><span class="tool-name">get_state</span><span class="badge badge-neutral">tree-scoped</span></div>
-            <p class="tool-desc">Current state of a single entity. Requires READ or WRITE on the entity. Sensitive attributes are always scrubbed.</p>
-            <dl><dt>params</dt><dd><code>entity_id</code> (string, required)</dd><dt>returns</dt><dd><code>state</code>, <code>attributes</code>, and <code>last_changed</code></dd></dl>
+            <p class="tool-desc">Current state of a single entity. Returns a compact, domain-aware view by default (key attributes only); pass <code>detailed=true</code> for the full state, or <code>fields=[...]</code> to select exact fields. Requires READ or WRITE on the entity. Sensitive attributes are always scrubbed.</p>
+            <dl><dt>params</dt><dd><code>entity_id</code> (string, required), <code>fields</code> (array, optional), <code>detailed</code> (boolean, optional)</dd><dt>returns</dt><dd>by default <code>entity_id</code>, <code>state</code>, and key <code>attributes</code>; the full state with <code>detailed=true</code></dd></dl>
           </article>
 
           <article class="tool" data-cap="read" data-search="get_states all entities">
             <div class="tool-head"><span class="tool-name">get_states</span><span class="badge badge-neutral">tree-scoped</span></div>
-            <p class="tool-desc">All entity states the token can read. Pass-through tokens receive every non-ATM entity.</p>
+            <p class="tool-desc">All entity states the token can read, as a compact domain-aware view per entity by default (<code>detailed=true</code> or <code>fields=[...]</code> to change). Pass-through tokens receive every non-ATM entity.</p>
           </article>
 
           <article class="tool" data-cap="read" data-search="get_statistics long term numeric">
             <div class="tool-head"><span class="tool-name">get_statistics</span><span class="badge badge-neutral">tree-scoped</span></div>
             <p class="tool-desc">Long-term statistics for numeric entities, aggregated by 5-minute, hour, day, week, or month.</p>
             <dl><dt>params</dt><dd><code>entity_id</code> (required), <code>start_time</code>, <code>end_time</code>, <code>period</code></dd><dt>returns</dt><dd><code>min</code>, <code>max</code>, <code>mean</code>, <code>sum</code>, <code>state</code> per period</dd></dl>
+          </article>
+
+          <article class="tool" data-cap="read" data-search="get_calendar_events calendar appointments">
+            <div class="tool-head"><span class="tool-name">get_calendar_events</span><span class="badge badge-neutral">tree-scoped</span></div>
+            <p class="tool-desc">Events from an accessible <code>calendar.*</code> entity within a time window (defaults to the next 7 days). Requires READ access to the calendar entity.</p>
+            <dl><dt>params</dt><dd><code>calendar_id</code> (required), <code>start_time</code> (default now), <code>end_time</code> (default start + 7 days)</dd></dl>
           </article>
 
           <article class="tool" data-cap="read" data-search="GetDateTime date time timezone">
@@ -348,7 +372,7 @@
 
           <article class="tool" data-cap="write" data-search="list_dashboards create_dashboard edit_dashboard delete_dashboard get_dashboard_config set_dashboard_config lovelace">
             <div class="tool-head"><span class="tool-name">list_dashboards</span><span class="tool-name">create_dashboard</span><span class="tool-name">edit_dashboard</span><span class="tool-name">delete_dashboard</span><span class="tool-name">get_dashboard_config</span><span class="tool-name">set_dashboard_config</span><span class="badge badge-cap">Dashboard write</span></div>
-            <p class="tool-desc">List and manage Lovelace dashboards, and read or replace a dashboard's view/card layout. <code>get_dashboard_config</code> redacts out-of-scope entities; <code>set_dashboard_config</code> writes storage-mode dashboards and is versioned. Confirm-eligible.</p>
+            <p class="tool-desc">List and manage Lovelace dashboards, and read or replace a dashboard's view/card layout. <code>get_dashboard_config</code> redacts out-of-scope entities; <code>set_dashboard_config</code> writes storage-mode dashboards and is versioned. Confirm-eligible. Note that a saved layout is display config, not automatic execution: a card action (for example a <code>call-service</code> tap action) runs under the viewing user's session when they click it, the same <a href="permissions.html#indirect-control-risk">indirect control risk</a> as authored automations, so a layout can reference entities outside the token's scope.</p>
           </article>
         </section>
 

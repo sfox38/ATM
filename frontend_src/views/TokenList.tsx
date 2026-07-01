@@ -68,6 +68,11 @@ export function TokenListView({ tokens, loading, error, onRefresh, onOpenDetail,
     else { setSortKey(key); setSortDir("asc"); }
   }
 
+  function ariaSort(key: SortKey): "ascending" | "descending" | "none" {
+    if (sortKey !== key) return "none";
+    return sortDir === "asc" ? "ascending" : "descending";
+  }
+
   const filtered = tokens.filter((t) => {
     const q = filter.toLowerCase();
     if (!q) return true;
@@ -105,9 +110,11 @@ export function TokenListView({ tokens, loading, error, onRefresh, onOpenDetail,
     return (
       <th
         className={`sortable${sortKey === key ? " sort-active" : ""}${className ? ` ${className}` : ""}`}
-        onClick={() => handleSort(key)}
+        aria-sort={ariaSort(key)}
       >
-        {label}<SortArrow col={key} sortKey={sortKey} sortDir={sortDir} />
+        <button type="button" className="table-sort-btn" onClick={() => handleSort(key)}>
+          {label}<SortArrow col={key} sortKey={sortKey} sortDir={sortDir} />
+        </button>
       </th>
     );
   }
@@ -150,6 +157,7 @@ export function TokenListView({ tokens, loading, error, onRefresh, onOpenDetail,
         <div className="filter-row">
           <input
             className="input"
+            aria-label="Filter tokens by name or status"
             placeholder="Filter by name or status..."
             value={filter}
             onChange={(e) => setFilter(e.target.value)}
@@ -171,6 +179,7 @@ export function TokenListView({ tokens, loading, error, onRefresh, onOpenDetail,
               className="btn btn-ghost btn-sm btn-icon"
               onClick={onRefresh}
               title="Refresh"
+              aria-label="Refresh tokens"
             >
               <RefreshIcon />
             </button>
@@ -192,13 +201,12 @@ export function TokenListView({ tokens, loading, error, onRefresh, onOpenDetail,
                 {th("Last Updated", "updated")}
                 {th("Expires", "expires")}
                 {th("Last Used", "last_used")}
-                <th>Actions</th>
               </tr>
             </thead>
             <tbody>
               {sorted.length === 0 && (
                 <tr>
-                  <td colSpan={8} className="token-table-empty">
+                  <td colSpan={7} className="token-table-empty">
                     {filter ? "No tokens match the filter." : "No tokens yet. Create one to get started."}
                   </td>
                 </tr>
@@ -210,9 +218,21 @@ export function TokenListView({ tokens, loading, error, onRefresh, onOpenDetail,
                   <tr
                     key={t.id}
                     className={`clickable${t.pass_through ? " pass-through-row" : ""}`}
-                    onClick={() => onOpenDetail(t.id)}
                   >
-                    <td className="token-name">{t.name}</td>
+                    <td className="token-name">
+                      {/* The whole row is clickable for the mouse via this button's
+                          stretched ::after overlay (see .row-open in CSS), while the
+                          button itself keeps the row keyboard- and screen-reader-
+                          accessible (tab to it, Enter/Space to open the token). */}
+                      <button
+                        type="button"
+                        className="row-open"
+                        onClick={() => onOpenDetail(t.id)}
+                        aria-label={`Edit token ${t.name}`}
+                      >
+                        {t.name}
+                      </button>
+                    </td>
                     <td>
                       {t.pass_through
                         ? <span className="badge badge-amber">Pass Through</span>
@@ -223,11 +243,6 @@ export function TokenListView({ tokens, loading, error, onRefresh, onOpenDetail,
                     <td title={t.updated_at ? new Date(t.updated_at).toLocaleString() : undefined}>{relativeTime(t.updated_at)}</td>
                     <td>{formatDate(t.expires_at)}</td>
                     <td>{relativeTime(t.last_used_at)}</td>
-                    <td onClick={(e) => e.stopPropagation()}>
-                      <div className="row-actions">
-                        <button className="btn btn-ghost btn-sm" onClick={() => onOpenDetail(t.id)}>Edit</button>
-                      </div>
-                    </td>
                   </tr>
                 );
               })}

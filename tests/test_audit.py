@@ -5,7 +5,6 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timezone
 
-import pytest
 from homeassistant.util.dt import utcnow
 
 from custom_components.atm.audit import (

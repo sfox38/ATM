@@ -425,6 +425,17 @@
 .data-table th.sortable { cursor: pointer; }
 .data-table th.sortable:hover { color: var(--atm-accent); }
 .data-table th.sort-active { color: var(--atm-accent); }
+.table-sort-btn {
+  display: inline-flex; align-items: center; gap: 3px; border: none; background: none;
+  padding: 0; color: inherit; font: inherit; text-transform: inherit; letter-spacing: inherit;
+  cursor: pointer;
+}
+.row-link-btn {
+  display: inline-flex; align-items: center; gap: 6px; border: none; background: none;
+  padding: 0; color: inherit; font: inherit; text-align: left; cursor: pointer;
+}
+.row-link-btn:hover { color: var(--atm-accent); }
+.row-link-btn-stack { flex-direction: column; align-items: flex-start; max-width: 100%; }
 .sort-arrow { display: inline-block; margin-left: 3px; font-size: 9px; opacity: 0.35; }
 .sort-arrow.active { opacity: 1; }
 .data-table td {
@@ -755,7 +766,12 @@ select.input {
   border-radius: 4px; padding: 0;
 }
 .tree-expand:hover { background: var(--atm-hover); }
-.tree-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tree-name {
+  flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  border: none; background: none; padding: 0; color: inherit; font: inherit; text-align: left;
+}
+.tree-name.tree-cursor-pointer { cursor: pointer; }
+.tree-name.tree-cursor-pointer:hover { color: var(--atm-accent); }
 .tree-entity-id { font-size: 12px; color: var(--atm-text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tree-friendly { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tree-effective { font-size: 11px; color: var(--atm-text-2); white-space: nowrap; }
@@ -767,7 +783,9 @@ select.input {
 .tree-badge-risk    { background: var(--atm-error-bg);   color: var(--atm-error); }
 .tree-badge-ghost   { background: var(--atm-warning-bg); color: var(--atm-warning); }
 .tree-hint-link { font-size: 11px; color: var(--atm-accent); cursor: pointer; background: none; border: none; padding: 0; text-decoration: underline; white-space: nowrap; }
+.tree-perm-error { font-size: 11px; font-weight: 700; color: var(--atm-error); white-space: nowrap; flex-shrink: 0; cursor: help; }
 .hint-modal-entity { font-family: var(--atm-mono, monospace); font-size: 12px; color: var(--atm-text-2); margin: 0 0 12px; }
+.hint-modal-error { color: var(--atm-error); font-size: 12px; margin: 8px 0 0; text-align: center; }
 .hint-scope { display: flex; align-items: center; justify-content: center; gap: 10px; margin: 14px 0 6px; font-size: 13px; color: var(--atm-text-2); }
 .hint-scope-active { color: var(--atm-text); font-weight: 600; }
 .hint-scope-note { font-size: 12px; color: var(--atm-text-2); margin: 0 0 4px; text-align: center; }
@@ -921,6 +939,31 @@ select.input {
 .token-table-empty { text-align: center; color: var(--atm-text-2); padding: 24px; }
 .token-name { font-weight: 600; }
 .row-actions { display: flex; gap: 4px; }
+
+/* Whole-row click for the token table, kept accessible. The Name cell holds a real
+   <button> (so the row is reachable by Tab and activated by Enter/Space, and a
+   screen reader announces "Edit token <name>, button"); its stretched ::after
+   overlay extends the click target across the entire row for mouse users. This
+   restores click-anywhere parity with the other tabs without a static <tr> onClick
+   and without an Actions column. */
+.token-table tbody tr { position: relative; }
+.row-open {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: 0;
+  padding: 0;
+  margin: 0;
+  text-align: left;
+  cursor: pointer;
+}
+.row-open::after { content: ""; position: absolute; inset: 0; }
+.row-open:focus-visible { outline: none; }
+.row-open:focus-visible::after {
+  outline: 2px solid var(--atm-accent);
+  outline-offset: -2px;
+  border-radius: 4px;
+}
 .archived-toggle-section { margin-top: 8px; }
 .archived-empty { color: var(--atm-text-2); font-size: 13px; }
 
@@ -1242,6 +1285,12 @@ select.input {
 }
 .approval-diff-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .approval-diff-col { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+
+/* Raw-text line diff (configuration.yaml / scoped file version snapshots). */
+.raw-diff { white-space: pre; }
+.raw-diff .diff-line { display: block; padding: 0 4px; min-height: 1.4em; }
+.raw-diff .diff-remove { background: rgba(229, 57, 53, 0.18); }
+.raw-diff .diff-add { background: rgba(67, 160, 71, 0.20); }
 .approval-diff-label { font-size: 12px; font-weight: 600; color: var(--atm-text-2); }
 
 /* Configuration changes (version history) tab */
@@ -1494,7 +1543,13 @@ button.changes-row:hover { background: var(--atm-surface-2); }
 .mesa-link:hover { border-color: var(--atm-accent); color: var(--atm-accent); background: var(--atm-accent-lt); }
 .mesa-link-exists { border-color: var(--atm-accent); color: var(--atm-accent); }
 .perm-summary-name-wrap { display: flex; align-items: center; gap: 6px; min-width: 0; }
-.perm-summary-name-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.perm-summary-name-text,
+.perm-summary-td-id button {
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0;
+  border: none; background: none; padding: 0; color: inherit; font: inherit; text-align: left;
+}
+.perm-summary-name-text:disabled,
+.perm-summary-td-id button:disabled { color: inherit; opacity: 1; }
 .sim-mesa-row { display: flex; align-items: center; gap: 6px; margin-top: 8px; font-size: 12px; color: var(--atm-text-2); }
 .tag-reco-chip {
   display: inline-flex; align-items: center; gap: 5px; padding: 3px 9px;

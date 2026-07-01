@@ -3,7 +3,7 @@
 import datetime
 import re
 
-ATM_VERSION = "2.0.0"
+ATM_VERSION = "2.1.0"
 MIN_HA_VERSION = "2024.5.0"
 GITHUB_URL = "https://github.com/sfox38/ATM"
 DOMAIN = "atm"
@@ -44,7 +44,9 @@ VERSION_STORAGE_VERSION = 1
 # resource_id) are kept; older ones are evicted on write.
 MAX_VERSIONS_PER_RESOURCE = 20
 # Resource types eligible for version history.
-VERSIONED_RESOURCE_TYPES = frozenset({"automation", "script", "scene", "helper", "dashboard"})
+VERSIONED_RESOURCE_TYPES = frozenset(
+    {"automation", "script", "scene", "helper", "dashboard", "yaml_config", "file", "entity"}
+)
 
 # MESA (semantic safety layer) integration. Profiles persist in a separate
 # Store from tokens so the two storage versions evolve independently.
@@ -91,6 +93,37 @@ SENSITIVE_KEY_SUBSTRINGS = frozenset({
     "auth_token", "authorization", "credential", "private_key",
     "token", "session",
 })
+
+# Domain-aware "lean" view for get_state / get_states. When a caller passes no
+# explicit `fields` and does not set `detailed`, the state is narrowed to the base
+# fields (entity_id, state) plus LEAN_ALWAYS_ATTRS plus the domain's important
+# attributes below, to cut token cost on the common read path. Field selection
+# always runs AFTER sensitive-attribute scrubbing, so it can never reveal a
+# scrubbed value. Domains with no entry fall back to base + LEAN_ALWAYS_ATTRS only;
+# describe_entity remains the full-detail single-entity tool.
+LEAN_ALWAYS_ATTRS = ("friendly_name",)
+
+DOMAIN_IMPORTANT_ATTRIBUTES: dict[str, tuple[str, ...]] = {
+    "light": ("brightness", "color_temp_kelvin", "rgb_color", "effect", "supported_color_modes"),
+    "climate": ("current_temperature", "temperature", "target_temp_high", "target_temp_low",
+                "min_temp", "max_temp", "hvac_action", "hvac_mode", "hvac_modes",
+                "preset_mode", "fan_mode"),
+    "media_player": ("media_title", "media_artist", "source", "volume_level", "media_content_type"),
+    "cover": ("current_position", "current_tilt_position"),
+    "fan": ("percentage", "preset_mode", "oscillating", "direction"),
+    "sensor": ("device_class", "unit_of_measurement", "state_class"),
+    "binary_sensor": ("device_class",),
+    "lock": ("changed_by",),
+    "alarm_control_panel": ("changed_by",),
+    "vacuum": ("battery_level", "fan_speed", "status"),
+    "humidifier": ("current_humidity", "humidity", "mode"),
+    "water_heater": ("current_temperature", "temperature", "operation_mode"),
+    "weather": ("temperature", "humidity", "wind_speed"),
+    "device_tracker": ("source_type",),
+    "number": ("min", "max", "step", "unit_of_measurement"),
+    "select": ("options",),
+    "switch": ("device_class",),
+}
 
 BLOCKED_DOMAINS = frozenset({"atm"})
 
@@ -156,6 +189,7 @@ CAPABILITY_NAMES = (
     "cap_restart",
     "cap_integration_write",
     "cap_lovelace_write",
+    "cap_registry_write",
     "cap_backup",
     "cap_filesystem",
     "cap_yaml_edit",
@@ -181,6 +215,7 @@ CAPABILITY_TIERS: dict[str, str] = {
     "cap_restart": "system",
     "cap_integration_write": "system",
     "cap_lovelace_write": "system",
+    "cap_registry_write": "system",
     "cap_backup": "irreversible",
     "cap_filesystem": "irreversible",
     "cap_yaml_edit": "irreversible",
@@ -199,6 +234,7 @@ CONFIRM_AVAILABLE_CAPS = frozenset({
     "cap_restart",
     "cap_integration_write",
     "cap_lovelace_write",
+    "cap_registry_write",
     "cap_backup",
     "cap_filesystem",
     "cap_yaml_edit",
@@ -218,6 +254,7 @@ PASS_THROUGH_EXEMPT_CAPS = frozenset({
     "cap_helper_write",
     "cap_integration_write",
     "cap_lovelace_write",
+    "cap_registry_write",
     "cap_backup",
     "cap_filesystem",
     "cap_yaml_edit",

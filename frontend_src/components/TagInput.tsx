@@ -1,7 +1,7 @@
 // GitHub-topics-style input for MESA semantic tags. Each chip is one atomic
 // canonical tag (namespace.qualifier) displayed dot-free. Entry is canonical-only:
 // only tags present in the registry can be committed.
-import React, { useMemo, useRef, useState } from "react";
+import React, { useId, useMemo, useRef, useState } from "react";
 
 const MAX_DEFAULT = 6;
 
@@ -26,6 +26,7 @@ export function TagInput({
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
+  const listboxId = useId();
 
   const atMax = value.length >= max;
 
@@ -114,15 +115,18 @@ export function TagInput({
             role="combobox"
             aria-expanded={open && matches.length > 0}
             aria-autocomplete="list"
+            aria-label="Semantic tags"
+            aria-controls={matches.length > 0 ? listboxId : undefined}
+            aria-activedescendant={open && matches.length > 0 ? `${listboxId}-option-${Math.min(active, matches.length - 1)}` : undefined}
           />
         )}
 
         {open && matches.length > 0 && (
-          <ul className="tag-suggest" role="listbox">
+          <ul className="tag-suggest" role="listbox" id={listboxId}>
             {matches.map((t, i) => {
               const { ns, qual } = splitTag(t);
               return (
-                <li key={t} role="option" aria-selected={i === active}
+                <li key={t} id={`${listboxId}-option-${i}`} role="option" aria-selected={i === active}
                   className={`tag-suggest-item${i === active ? " active" : ""}`}
                   onMouseDown={(e) => { e.preventDefault(); add(t); }}
                   onMouseEnter={() => setActive(i)}>
