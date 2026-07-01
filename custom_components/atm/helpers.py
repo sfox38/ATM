@@ -743,6 +743,11 @@ def _scrub_network_topology(text: str) -> str:
     return text
 
 
+def _scrub_diagnostic_str(text: str) -> str:
+    """Full diagnostic-string scrub: embedded credentials/JWTs then network topology."""
+    return _scrub_network_topology(redact_secrets_in_text(text) or "")
+
+
 def redact_diagnostics(obj: Any, _depth: int = 0) -> Any:
     """redact_structure plus a conservative network-topology scrub for diagnostics.
 
@@ -750,20 +755,24 @@ def redact_diagnostics(obj: Any, _depth: int = 0) -> Any:
     hostnames-in-URLs, and filesystem paths that ATM already withholds elsewhere
     (build_safe_config). Layered on redact_structure (secret-keyed values + embedded
     credentials), each string is also scrubbed for private/loopback/link-local IPs,
-    bare URLs, and absolute paths. cap_diagnostics is an elevated read, so a little
-    over-redaction is acceptable; the diagnostic shape is preserved.
+    bare URLs, and absolute paths. Because integration-defined payloads are free-form,
+    dict KEYS get the same string scrub as values (an integration may key its health
+    data by a URL, LAN IP, or path); a sensitive-named key still redacts its value.
+    cap_diagnostics is an elevated read, so a little over-redaction is acceptable; the
+    diagnostic shape is preserved.
     """
     if _depth > 25:
         return "<redacted>"
     if isinstance(obj, dict):
         return {
-            k: "<redacted>" if is_sensitive_key(k) else redact_diagnostics(v, _depth + 1)
+            (_scrub_diagnostic_str(k) if isinstance(k, str) else k):
+                "<redacted>" if is_sensitive_key(k) else redact_diagnostics(v, _depth + 1)
             for k, v in obj.items()
         }
     if isinstance(obj, list):
         return [redact_diagnostics(item, _depth + 1) for item in obj]
     if isinstance(obj, str):
-        return _scrub_network_topology(redact_secrets_in_text(obj) or "")
+        return _scrub_diagnostic_str(obj)
     return obj
 
 

@@ -86,3 +86,22 @@ def test_redact_diagnostics_scrubs_topology_conservatively():
     assert out["ver"] == "4.8.0.1"
     assert out["pub"] == "8.8.8.8"
     assert out["frac"] == "ratio 1/2 done"
+
+
+def test_redact_diagnostics_scrubs_topology_in_dict_keys():
+    # An integration may key its free-form health data by a URL, LAN IP, or path;
+    # keys get the same scrub as values so topology cannot leak through the key.
+    out = redact_diagnostics({
+        "http://nas.local:8080/status": "ok",
+        "/config/.storage/core": "ok",
+        "192.168.1.50": "reachable",
+        "benign_label": "ok",
+    })
+    assert out == {
+        "<redacted-url>": "ok",
+        "<redacted-path>": "ok",
+        "<redacted-ip>": "reachable",
+        "benign_label": "ok",
+    }
+    # A sensitive-named key still redacts its value (key name is a harmless label).
+    assert redact_diagnostics({"password": "hunter2"}) == {"password": "<redacted>"}
